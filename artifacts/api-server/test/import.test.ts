@@ -23,7 +23,7 @@ const csv = [
   '2026 GRAND TOTAL,,,0 units,,,0',
   HEADER,
   '▼  APRIL 2026',
-  row({ A: 'F10', B: 'F10', C: '4/6/2026', D: 'Harbor Street, LLC', E: 'MBC', F: 'MCA', G: '100000', H: '1.3', I: '120', K: 'Daily', L: '12', M: '2', P: 'MBC', T: 'Julian Ribak', U: '35', W: 'Zach Sanders', X: '40', Z: 'Raymond Amato', AA: '5', AM: 'YES - Paid In Full', AN: '4/20/2026', AO: '5/1/2026', AQ: 'Performing', AS: 'Imported note', AU: 'Referral' }),
+  row({ A: 'F10', B: 'F10', C: '4/6/2026', D: 'Harbor Street, LLC', E: 'MBC', F: 'MCA', G: '100000', H: '1.3', I: '120', K: 'Daily', L: '12', M: '2', N: '2000', P: 'MBC', T: 'Julian Ribak', U: '35', W: 'Zach Sanders', X: '40', Z: 'Raymond Amato', AA: '5', AM: 'YES - Paid In Full', AN: '4/20/2026', AO: '5/1/2026', AQ: 'Performing', AS: 'Imported note', AU: 'Referral' }),
   row({ A: 'F11', B: 'F11', C: '4/8/2026', D: 'Ridge Plumbing', E: 'Revenued', F: 'LOC - INITIAL', G: '50000', I: '90', K: 'Weekly', L: '8', M: '0', P: 'None', T: 'Julian Ribak', U: '35', AM: 'Partially Paid', AQ: 'Performing', AU: 'Direct' }),
   row({ A: 'F12', B: 'F11', C: '4/22/2026', D: 'Ridge Plumbing', E: 'Revenued', F: 'LOC DRAW', G: '20000', K: 'Weekly', L: '4', M: '0', P: 'None', T: 'Julian Ribak', U: '35', AM: 'Waiting for payment', AQ: 'Performing' }),
   row({ C: '5/2/2026', D: 'No Id Co', E: 'Forward', F: 'MCA', G: '30000', H: '1.35', I: '180', K: 'Monthly', L: '10', M: '0', P: 'None', T: 'Zach Sanders', U: '40', AE: '2500', AF: '5/20/2026', AM: 'Waiting for payment', AQ: 'Default' }),

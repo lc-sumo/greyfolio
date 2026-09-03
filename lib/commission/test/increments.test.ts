@@ -25,8 +25,8 @@ describe('a consolidation is funded in increments', () => {
     expect(totalGross(d)).toBe(25_000);
     expect(seg.referralFee).toBe(2_500);
     expect(totalNet(d)).toBe(22_500);
-    expect(repShare(d, 'rep-07')).toBeCloseTo(22_500 * 0.35, 2);
-    expect(repShare(plan(10), 'rep-07')).toBeCloseTo(45_000 * 0.35, 2);
+    expect(repShare(d, 'rep-07')).toBeCloseTo(25_000 * 0.35, 2); // reps are paid on gross
+    expect(repShare(plan(10), 'rep-07')).toBeCloseTo(50_000 * 0.35, 2);
     expect(disbursementOf(d.funded, d.commSchedule)).toMatchObject({ disbursed: 250_000, final: 250_000, count: 10, total: 10, stopped: true });
   });
   it('a stopped plan has only the increments that happened: fully collected, nothing still to come, no phantom units', () => {
@@ -38,9 +38,9 @@ describe('a consolidation is funded in increments', () => {
     expect(collectionLabel(seg)).toBe('10/10 wks · opted out');
     expect(dealLines(d)).toHaveLength(10);
     expect(payableLines([d], [], 'rep-07')).toHaveLength(10);
-    expect(repLedger(ctx([d]), 'rep-07')).toMatchObject({ earned: 7_875, accrued: 7_875, owed: 7_875, awaitingLender: 0 });
+    expect(repLedger(ctx([d]), 'rep-07')).toMatchObject({ earned: 8_750, accrued: 8_750, owed: 8_750, awaitingLender: 0 });
     // half-way through, before opting out, the other 10 increments still count as awaiting the lender
-    expect(repLedger(ctx([plan(10)]), 'rep-07')).toMatchObject({ earned: 15_750, accrued: 7_875, awaitingLender: 7_875 });
+    expect(repLedger(ctx([plan(10)]), 'rep-07')).toMatchObject({ earned: 17_500, accrued: 8_750, awaitingLender: 8_750 });
   });
   it('withStopped records the opt-out at the increments received and can reopen the plan', () => {
     const seg = segments(plan(7))[0]!;

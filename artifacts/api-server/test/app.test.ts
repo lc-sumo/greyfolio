@@ -153,6 +153,6 @@ describe('admin roster', () => {
     const admin = (await login('leor@greystoneus.com')).agent;
     const res = await admin.get('/api/admin/reps');
     const julian = res.body.reps.find((r: { id: string }) => r.id === 'rep-julian-ribak');
-    expect(julian).toMatchObject({ name: 'Julian Ribak', team: 'Team Amato', earned: 980, paid: 350, held: 250, owed: 0, dealCount: 2 });
+    expect(julian).toMatchObject({ name: 'Julian Ribak', team: 'Team Amato', earned: 1_050, paid: 350, held: 250, owed: 0, dealCount: 2 });
   });
 });

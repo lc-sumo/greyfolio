@@ -107,7 +107,7 @@ describe('per-rep payroll detail', () => {
     const { admin } = await harness();
     const res = await admin.get('/api/admin/payroll/runs/run-3/reps/rep-julian-ribak');
     expect(res.body.rep).toMatchObject({ id: 'rep-julian-ribak', name: 'Julian Ribak' });
-    expect(res.body.lines).toEqual([expect.objectContaining({ key: 'F2|Opener|base', segmentLabel: 'Initial', business: 'F2 Business', role: 'Opener', rate: 0.35, amount: 630, lenderPaidLabel: 'Not collected', collected: false, collectedKeys: [], uncollectedKeys: ['F2|Opener|base'], uncollectedAmount: 630, units: null })]);
+    expect(res.body.lines).toEqual([expect.objectContaining({ key: 'F2|Opener|base', segmentLabel: 'Initial', business: 'F2 Business', role: 'Opener', rate: 0.35, amount: 700, lenderPaidLabel: 'Not collected', collected: false, collectedKeys: [], uncollectedKeys: ['F2|Opener|base'], uncollectedAmount: 700, units: null })]);
     expect(res.body.clawbacks).toEqual([{ id: 'cb-1', dealId: 'F1', business: 'F1 Business', date: '2026-08-15', remaining: 250 }]);
     expect(res.body.outstandingClawback).toBe(250);
     expect(res.body.paidInRun.map((p: { role: string; amount: number }) => [p.role, p.amount])).toEqual([['Opener', 350], ['Clawback recovery', -100]]);
@@ -116,7 +116,7 @@ describe('per-rep payroll detail', () => {
   it('previews netting before commit', async () => {
     const { admin } = await harness();
     const res = await admin.post('/api/admin/payroll/preview').send({ repId: 'rep-julian-ribak', selectedKeys: ['F2|Opener|base'] });
-    expect(res.body).toEqual({ gross: 630, withheld: 250, net: 380, outstandingClawback: 250 });
+    expect(res.body).toEqual({ gross: 700, withheld: 250, net: 450, outstandingClawback: 250 });
   });
 });
 
@@ -125,13 +125,13 @@ describe('POST pay', () => {
     const { admin, repo } = await harness();
     const res = await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: ['F2|Opener|base'] });
     expect(res.status).toBe(201);
-    expect(res.body).toMatchObject({ repId: 'rep-julian-ribak', runId: 'run-4', gross: 630, withheld: 250, net: 380, lines: 1, recoveries: 1, dealsFullyPaid: [], uncollectedDealIds: ['F2'] });
-    expect(repo.data.lines.filter((l) => l.runId === 'run-4').map((l) => [l.role, l.amount, l.clawbackId])).toEqual([['Opener', 630, null], ['Clawback recovery', -250, 'cb-1']]);
+    expect(res.body).toMatchObject({ repId: 'rep-julian-ribak', runId: 'run-4', gross: 700, withheld: 250, net: 450, lines: 1, recoveries: 1, dealsFullyPaid: [], uncollectedDealIds: ['F2'] });
+    expect(repo.data.lines.filter((l) => l.runId === 'run-4').map((l) => [l.role, l.amount, l.clawbackId])).toEqual([['Opener', 700, null], ['Clawback recovery', -250, 'cb-1']]);
     expect(repo.data.clawbacks[0]).toMatchObject({ recovered: 350, status: 'open' }); // Zach and Raymond still owe theirs
     expect(repo.audit.at(-1)).toMatchObject({ action: 'payroll.pay', targetRepId: 'rep-julian-ribak' });
     // Wallet agrees with the ledger the run just wrote.
     const wallet = await admin.get('/api/me/wallet').set('X-View-As', 'rep-julian-ribak');
-    expect(wallet.body).toMatchObject({ earned: 980, paid: 980, cash: 630, held: 0, recovered: 350, owed: 0 });
+    expect(wallet.body).toMatchObject({ earned: 1_050, paid: 1_050, cash: 700, held: 0, recovered: 350, owed: 0 });
     // Paying the same line again is refused.
     expect((await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: ['F2|Opener|base'] })).body.error).toMatch(/already paid/);
   });

@@ -47,7 +47,8 @@ export interface RepLine {
 
 /**
  * Every earned line on a deal: one per assigned role per segment, priced as
- * `segment.net × rate`. Zero-amount lines are omitted — there is nothing to pay.
+ * `segment.gross × rate` — reps are paid on gross commission; the house absorbs the
+ * referral fee. Zero-amount lines are omitted — there is nothing to pay.
  */
 export function dealLines(deal: Deal, today = '9999-12-31'): RepLine[] {
   const out: RepLine[] = [];
@@ -56,10 +57,9 @@ export function dealLines(deal: Deal, today = '9999-12-31'): RepLine[] {
     const events = seg.schedule ? scheduleEvents(seg, today).filter((e) => e.amount > 0) : [];
     for (const r of roles) {
       if (events.length) {
-        // Incremental segment: one unit per lender receipt, priced on that receipt's share of NET.
-        const netRatio = seg.gross > 0 ? seg.net / seg.gross : 0;
+        // Incremental segment: one unit per lender receipt, priced on that receipt's GROSS.
         for (const e of events) {
-          const amount = cents(e.amount * netRatio * r.rate);
+          const amount = cents(e.amount * r.rate);
           if (amount <= 0) continue;
           out.push({
             key: unitKey(deal.id, r.role, seg.sk, e.n),
@@ -77,7 +77,7 @@ export function dealLines(deal: Deal, today = '9999-12-31'): RepLine[] {
         }
         continue;
       }
-      const amount = cents(seg.net * r.rate);
+      const amount = cents(seg.gross * r.rate);
       if (amount <= 0) continue;
       out.push({
         key: lineKey(deal.id, r.role, seg.sk),
@@ -106,7 +106,7 @@ export function repLines(deal: Deal, repId: string): RepLine[] {
   return dealLines(deal).filter((l) => l.repId === repId);
 }
 
-/** A rep's total share of a deal's net commission. */
+/** A rep's total share of a deal's gross commission. */
 export function repShare(deal: Deal, repId: string): number {
   return sum(repLines(deal, repId).map((l) => l.amount));
 }

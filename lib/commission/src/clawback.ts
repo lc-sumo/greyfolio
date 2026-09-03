@@ -1,5 +1,5 @@
 import { cents, sum } from './money.js';
-import { totalNet } from './segments.js';
+import { totalGross } from './segments.js';
 import { repShare, roleAssignments, totalRepPayout } from './splits.js';
 import type { Clawback, Deal, PayoutLine } from './types.js';
 
@@ -29,7 +29,7 @@ export function clawbackRecovered(lines: PayoutLine[], clawbackId: string): numb
  * SINGLE definition of one rep's slice of a clawback. Policy: the rep repays
  * their full share of that deal's commission, pro-rata to the amount clawed:
  *
- *   share     = repShare(deal) × clawback.amount / totalNet(deal)
+ *   share     = repShare(deal) × clawback.amount / totalGross(deal)
  *   recovered = Σ −(recovery rows for this rep and clawback), capped at share
  *   remaining = share − recovered
  *
@@ -39,9 +39,9 @@ export function clawbackRecovered(lines: PayoutLine[], clawbackId: string): numb
 export function repClawback(clawback: Clawback, deal: Deal | undefined, repId: string, lines: PayoutLine[]): RepClawback {
   if (!deal || deal.id !== clawback.dealId) return { share: 0, recovered: 0, remaining: 0 };
   const mine = repShare(deal, repId);
-  const net = totalNet(deal);
-  if (mine <= 0 || net <= 0) return { share: 0, recovered: 0, remaining: 0 };
-  const share = cents(mine * (Math.min(clawback.amount, net) / net));
+  const gross = totalGross(deal);
+  if (mine <= 0 || gross <= 0) return { share: 0, recovered: 0, remaining: 0 };
+  const share = cents(mine * (Math.min(clawback.amount, gross) / gross));
   const recovered = Math.min(share, cents(-sum(recoveryLines(lines, clawback.id, repId).map((l) => l.amount))));
   return { share, recovered, remaining: cents(Math.max(0, share - recovered)) };
 }
@@ -60,9 +60,9 @@ export function clawbackSlices(clawback: Clawback, deal: Deal, lines: PayoutLine
 
 /** Total the reps owe on a clawback (the house absorbs the rest). */
 export function clawbackRepTotal(clawback: Clawback, deal: Deal): number {
-  const net = totalNet(deal);
-  if (net <= 0) return 0;
-  return cents(totalRepPayout(deal) * (Math.min(clawback.amount, net) / net));
+  const gross = totalGross(deal);
+  if (gross <= 0) return 0;
+  return cents(totalRepPayout(deal) * (Math.min(clawback.amount, gross) / gross));
 }
 
 /** A clawback is recovered once every rep slice is withheld. Status is derived, never toggled. */

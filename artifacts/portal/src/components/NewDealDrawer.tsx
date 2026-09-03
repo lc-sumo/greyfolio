@@ -313,13 +313,13 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
             </>
           ) : null}
           <dt>Referral fee paid{m.referralCapped ? ' (capped)' : ''}</dt><dd style={{ color: 'var(--amber-bright)' }}>{money(-m.referralFee)}</dd>
-          <dt className="sum">Net commission</dt><dd className="sum">{money(m.net)}</dd>
+          <dt className="sum">Net to house before splits</dt><dd className="sum">{money(m.net)}</dd>
           <dt className="grp">Split</dt><dd />
           {(['opener', 'closer', 'override'] as const).map((role) => {
             const id = f[`${role}Id`];
             const who = assign.find((o) => o.id === id)?.label ?? '—';
             const amt = role === 'opener' ? m.openerPayout : role === 'closer' ? m.closerPayout : m.overridePayout;
-            return <React.Fragment key={role}><dt>{role === 'override' ? 'Override' : role[0]!.toUpperCase() + role.slice(1)} · {who}{id ? ` ${num(f[`${role}Rate`])}%` : ''}</dt><dd>{money(amt)}</dd></React.Fragment>;
+            return <React.Fragment key={role}><dt>{role === 'override' ? 'Override' : role[0]!.toUpperCase() + role.slice(1)} · {who}{id ? ` ${num(f[`${role}Rate`])}% of gross` : ''}</dt><dd>{money(amt)}</dd></React.Fragment>;
           })}
           <dt>Total rep payout</dt><dd style={{ color: 'var(--amber-bright)' }}>{money(m.totalRepPayout)}</dd>
           <dt className="sum">House net</dt><dd className="sum" style={{ color: 'var(--teal-bright)' }}>{money(m.houseNet)}</dd>

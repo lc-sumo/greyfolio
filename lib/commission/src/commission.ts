@@ -131,7 +131,7 @@ export interface CommissionResult {
  *   gross$        = commission$ + psf$ + originationFee
  *   referralFee$  = min(gross$ × referralRate, partner.monthlyCap)
  *   net$          = gross$ − referralFee$
- *   openerPayout  = net$ × openerRate     (likewise closer, override)
+ *   openerPayout  = gross$ × openerRate   (likewise closer, override) — reps are paid on gross
  *   totalRepPayout= opener + closer + override
  *   houseNet      = net$ − totalRepPayout
  */
@@ -153,9 +153,9 @@ export function commissionFor(input: CommissionInput): CommissionResult {
   });
   const net = cents(gross - ref.fee);
 
-  const openerPayout = cents(net * clamp(input.openerRate || 0, 0, 1));
-  const closerPayout = cents(net * clamp(input.closerRate || 0, 0, 1));
-  const overridePayout = cents(net * clamp(input.overrideRate || 0, 0, 1));
+  const openerPayout = cents(gross * clamp(input.openerRate || 0, 0, 1));
+  const closerPayout = cents(gross * clamp(input.closerRate || 0, 0, 1));
+  const overridePayout = cents(gross * clamp(input.overrideRate || 0, 0, 1));
   const totalRepPayout = cents(openerPayout + closerPayout + overridePayout);
 
   return {

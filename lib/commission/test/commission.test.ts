@@ -49,11 +49,11 @@ describe('commissionFor', () => {
     expect(r.referralFee).toBe(1_250);
     expect(r.referralCapped).toBe(false);
     expect(r.net).toBe(11_250);
-    expect(r.openerPayout).toBe(2_250);
-    expect(r.closerPayout).toBe(2_250);
-    expect(r.overridePayout).toBe(562.5);
-    expect(r.totalRepPayout).toBe(5_062.5);
-    expect(r.houseNet).toBe(6_187.5);
+    expect(r.openerPayout).toBe(2_500); // on gross, not net
+    expect(r.closerPayout).toBe(2_500);
+    expect(r.overridePayout).toBe(625);
+    expect(r.totalRepPayout).toBe(5_625);
+    expect(r.houseNet).toBe(5_625); // 12,500 − 1,250 referral − 5,625 rep pay
     expect(r.net - r.totalRepPayout).toBe(r.houseNet);
   });
 

@@ -36,10 +36,10 @@ describe('repDealView', () => {
   });
   it('a referral fee on the deal reduces the share but is never shown', () => {
     const v = repDealView(deals[1]!, JULIAN, lines, clawbacks);
-    expect(v.share).toBe(630); // (2000 − 200 referral) × 35%
+    expect(v.share).toBe(700); // 2,000 gross × 35% — the referral fee is the house's, not the rep's
     // MBC has not paid F2 yet, so nothing is owed to Julian on it until the lender pays.
     expect(v).toMatchObject({ payoutStatus: 'Awaiting lender', accrued: 0, paid: 0, owed: 0, commissionStatus: 'Waiting for payment', lenderPaidLabel: 'Not collected' });
-    expect(repDealView({ ...deals[1]!, commCollected: 2_000 }, JULIAN, lines, clawbacks)).toMatchObject({ payoutStatus: 'Owed', accrued: 630, owed: 630 });
+    expect(repDealView({ ...deals[1]!, commCollected: 2_000 }, JULIAN, lines, clawbacks)).toMatchObject({ payoutStatus: 'Owed', accrued: 700, owed: 700 });
     expect(JSON.stringify(v)).not.toContain('HUB TRACKER'); // referral partner name
   });
   it('the override rep sees their own override line', () => {
@@ -51,11 +51,11 @@ describe('repDealView', () => {
 
 describe('repWallet', () => {
   it('reads repLedger and adds the awaiting-lender figure', () => {
-    // Julian: earned 350 + 630 = 980; accrued 350 (F2 uncollected); paid 350 (gross); cash 250; held 250 (350 − 100 recovered); owed max(0, 350 − 350 − 250) = 0; 630 awaits MBC.
-    expect(repWallet(ctx, JULIAN)).toEqual({ earned: 980, paid: 350, cash: 250, held: 250, recovered: 100, owed: 0, dealCount: 2, awaitingLender: 630 });
-    // once MBC pays F2 the 630 accrues and, net of the 250 still held, 380 is owed
+    // Julian: earned 350 + 700 = 1,050; accrued 350 (F2 uncollected); paid 350 (gross); cash 250; held 250 (350 − 100 recovered); owed max(0, 350 − 350 − 250) = 0; 700 awaits MBC.
+    expect(repWallet(ctx, JULIAN)).toEqual({ earned: 1_050, paid: 350, cash: 250, held: 250, recovered: 100, owed: 0, dealCount: 2, awaitingLender: 700 });
+    // once MBC pays F2 the 700 accrues and, net of the 250 still held, 450 is owed
     const collected = { ...ctx, deals: ctx.deals.map((d) => (d.id === 'F2' ? { ...d, commCollected: 2_000 } : d)) };
-    expect(repWallet(collected, JULIAN)).toMatchObject({ earned: 980, owed: 380, awaitingLender: 0 });
+    expect(repWallet(collected, JULIAN)).toMatchObject({ earned: 1_050, owed: 450, awaitingLender: 0 });
   });
 });
 
@@ -71,8 +71,8 @@ describe('repClawbackViews', () => {
 describe('leaderboard', () => {
   it('anonymizes everyone but the viewer and appends the viewer if outside the top N', () => {
     const rows = leaderboard(ctx, reps, JULIAN, 2);
-    expect(rows.map((r) => r.label)).toEqual(['Rep #1', 'You']); // Zach 400+720+500=1620 > Julian 980
-    expect(rows.find((r) => r.isMe)).toMatchObject({ rank: 2, commission: 980 });
+    expect(rows.map((r) => r.label)).toEqual(['Rep #1', 'You']); // Zach 400+800+500=1,700 > Julian 1,050
+    expect(rows.find((r) => r.isMe)).toMatchObject({ rank: 2, commission: 1_050 });
     const small = leaderboard(ctx, reps, 'rep-noah-levine', 1);
     expect(small.map((r) => r.label)).toEqual(['Rep #1', 'You']);
     expect(small[1]).toMatchObject({ commission: 0 });
@@ -90,7 +90,7 @@ describe('repDashboard', () => {
   it('buckets earned by funded date and paid by cleared date, ranks within the period, and lists what is owed', () => {
     const d = repDashboard(ctx, reps, runs, JULIAN, '2026-07-01', '2026-09-02');
     assertRepSafe(d);
-    expect(d.period).toMatchObject({ earned: 630, paid: 350, recovered: 100, owed: 0, funded: 20_000, dealCount: 1, rank: 2, repCount: 4 });
+    expect(d.period).toMatchObject({ earned: 700, paid: 350, recovered: 100, owed: 0, funded: 20_000, dealCount: 1, rank: 2, repCount: 4 });
     expect(d.nextPayout).toEqual({ date: '2026-09-15', runLabel: 'Sep 1 – Sep 15, 2026', cycle: 'Twice monthly' });
     expect(d.monthly.map((m) => m.month)).toEqual(['2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08', '2026-09']);
     expect(d.monthly.find((m) => m.month === '2026-06')).toEqual({ month: '2026-06', earned: 350, paid: 0 });
@@ -101,7 +101,7 @@ describe('repDashboard', () => {
     expect(repDashboard(collected, reps, runs, JULIAN, '2026-07-01', '2026-09-02').owedToMe.map((v) => v.id)).toEqual(['F2']);
   });
   it('YTD includes June', () => {
-    expect(repDashboard(ctx, reps, runs, JULIAN, '2026-01-01', '2026-09-02').period.earned).toBe(980);
+    expect(repDashboard(ctx, reps, runs, JULIAN, '2026-01-01', '2026-09-02').period.earned).toBe(1_050);
   });
 });
 

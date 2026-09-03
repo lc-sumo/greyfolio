@@ -47,8 +47,8 @@ describe('POST /api/admin/deals', () => {
     const res = await admin.post('/api/admin/deals').send(draft);
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({ id: 'F4', business: 'Northstar Dental', merchantEmail: 'mduran@northstar.test', funded: 100_000, gross: 14_500, referralPartner: 'MBC', referralFee: 2_175, net: 12_325, commissionStatus: 'Waiting for payment', lenderPaidLabel: 'Not collected', atRisk: true, crmUrl: 'https://crm.test/o/F4', dealStatus: 'Performing', storedDealStatus: 'Performing' });
-    expect(res.body.roles.map((r: { name: string; amount: number }) => [r.name, r.amount])).toEqual([['Julian Ribak', 4_313.75], ['Zach Sanders', 4_930], ['Raymond Amato', 616.25]]);
-    expect(res.body.houseNet).toBe(12_325 - 4_313.75 - 4_930 - 616.25);
+    expect(res.body.roles.map((r: { name: string; amount: number }) => [r.name, r.amount])).toEqual([['Julian Ribak', 5_075], ['Zach Sanders', 5_800], ['Raymond Amato', 725]]); // 35 / 40 / 5 % of the 14,500 gross
+    expect(res.body.houseNet).toBe(12_325 - 5_075 - 5_800 - 725); // net after referral, less rep pay
     expect(repo.audit.at(-1)).toMatchObject({ action: 'deal.create', actorRepId: 'rep-leor' });
     // and Julian now sees it in his portal
     const { rep } = await harness().then(async (h) => ({ rep: h.rep }));

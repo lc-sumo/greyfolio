@@ -225,6 +225,10 @@ export interface AdminRenewalRow {
   termDays: number | null;
   frequency: string;
   factor: number | null;
+  /** Sheet's Parent Deal column: the parent's id for a separately keyed draw; own id when this deal is a LOC / consolidation parent. */
+  parentId: string | null;
+  isParent: boolean;
+  drawCount: number;
   pctPaidIn: number;
   markDate: string | null;
   maturityDate: string | null;
@@ -261,6 +265,9 @@ export function adminRenewals(ctx: LedgerContext, reps: Rep[], settings: Setting
         termDays: d.termDays,
         frequency: d.frequency,
         factor: d.factor,
+        parentId: d.parentId,
+        isParent: d.drawSubsequentPct !== null || d.draws.length > 0,
+        drawCount: d.draws.length,
         pctPaidIn: r.pctPaidIn,
         markDate: r.markDate,
         maturityDate: r.maturityDate,

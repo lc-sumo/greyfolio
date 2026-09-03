@@ -38,7 +38,7 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
               <div className="nav-group label" style={{ color: 'var(--navy-text-3)' }}>{viewAs ? 'Rep portal (view as)' : 'My portal'}</div>
               <NavLink to="/"><i className="dot" />My dashboard</NavLink>
               <NavLink to="/deals"><i className="dot" />My deals</NavLink>
-              <NavLink to="/renewals"><i className="dot" />My renewals</NavLink>
+              <NavLink to="/renewals"><i className="dot" />Renewals</NavLink>
               <NavLink to="/clawbacks"><i className="dot" />Clawbacks</NavLink>
               <NavLink to="/payments"><i className="dot" />Pay history</NavLink>
             </>

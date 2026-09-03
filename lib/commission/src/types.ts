@@ -33,6 +33,21 @@ export interface Lender {
   upfrontPct?: number;
   remainder?: 'spread' | 'at-end';
   cadenceDays?: number;
+  /**
+   * Product names this lender funds. Increments only ever apply when one of
+   * them is an incremental (consolidation) product; empty/absent = any product.
+   */
+  products?: string[];
+  /** Lender clawback policy. Absent = the global clawback-window default. */
+  clawback?: LenderClawbackPolicy;
+}
+
+export type ClawbackBasis = 'none' | 'days' | 'payments';
+export interface LenderClawbackPolicy {
+  /** 'none' = this lender never claws back; 'days' after funding; 'payments' the merchant has made. */
+  basis: ClawbackBasis;
+  count: number;
+  note?: string;
 }
 
 export interface ReferralPartner {

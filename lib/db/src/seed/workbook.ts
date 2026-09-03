@@ -107,18 +107,23 @@ export const DEAL_STATUSES = ['Performing', 'Prospecting', 'Refi Ready', 'Refina
  * SETTINGS!E — lenders. Commission terms are not in the workbook; the weekly
  * lenders and their week counts come from the prototype. // assumption
  */
+// assumption: which products each lender funds and its clawback policy are not
+// in the workbook; these are editable in Settings › Lenders and listed for confirmation.
+const CONSOL = ['CONSOLIDATION - UPFRONT COMM', 'CONSOLIDATION DISBURSEMENT'];
+const REVERSE = ['REVERSE - TOTAL FUNDING', 'REVERSE - DISBURSEMENT'];
+const LOC = ['LOC - INITIAL', 'LOC DRAW'];
 export const LENDERS: readonly Lender[] = [
-  { name: 'MBC', terms: 'upfront', weeks: 0 },
-  { name: 'ACE FUNDING', terms: 'upfront', weeks: 0 },
-  { name: 'ROWAN', terms: 'weekly', weeks: 20 },
-  { name: 'ENOD CAPITAL', terms: 'weekly', weeks: 12 },
-  { name: 'IDEA', terms: 'upfront', weeks: 0 },
-  { name: 'BIZPOINT', terms: 'upfront', weeks: 0 },
-  { name: 'Lendini', terms: 'weekly', weeks: 16 },
-  { name: 'WALL', terms: 'upfront', weeks: 0 },
-  { name: 'UFS FUNDING', terms: 'upfront', weeks: 0 },
-  { name: 'MILVADO CAPITAL', terms: 'upfront', weeks: 0 }, // assumption: terms unknown
-  { name: 'Cetan Funds', terms: 'upfront', weeks: 0 }, // assumption: terms unknown
+  { name: 'MBC', terms: 'upfront', weeks: 0, products: ['MCA', 'TERM LOAN', 'SBA'], clawback: { basis: 'days', count: 30 } },
+  { name: 'ACE FUNDING', terms: 'upfront', weeks: 0, products: ['MCA', 'EQUIPMENT'], clawback: { basis: 'days', count: 45 } },
+  { name: 'ROWAN', terms: 'weekly', weeks: 20, products: [...CONSOL, 'MCA'], clawback: { basis: 'payments', count: 10 } },
+  { name: 'ENOD CAPITAL', terms: 'weekly', weeks: 12, products: [...CONSOL, ...REVERSE], clawback: { basis: 'payments', count: 15 } },
+  { name: 'IDEA', terms: 'upfront', weeks: 0, products: [...REVERSE, 'REAL ESTATE'], clawback: { basis: 'days', count: 30 } },
+  { name: 'BIZPOINT', terms: 'upfront', weeks: 0, products: [...LOC, 'MCA'], clawback: { basis: 'days', count: 30 } },
+  { name: 'Lendini', terms: 'weekly', weeks: 16, products: [...CONSOL], clawback: { basis: 'payments', count: 20 } },
+  { name: 'WALL', terms: 'upfront', weeks: 0, products: ['EQUIPMENT', 'REAL ESTATE', 'TERM LOAN'], clawback: { basis: 'none', count: 0 } },
+  { name: 'UFS FUNDING', terms: 'upfront', weeks: 0, products: [...LOC, 'SBA', 'TERM LOAN'], clawback: { basis: 'days', count: 60 } },
+  { name: 'MILVADO CAPITAL', terms: 'upfront', weeks: 0, products: ['MCA', ...REVERSE], clawback: { basis: 'days', count: 30 } }, // assumption: terms unknown
+  { name: 'Cetan Funds', terms: 'upfront', weeks: 0, products: ['MCA', 'EQUIPMENT'], clawback: { basis: 'days', count: 30 } }, // assumption: terms unknown
 ];
 
 /**

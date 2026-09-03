@@ -124,9 +124,9 @@ export function buildDemo(today = iso(new Date()), seed = 20260902): DemoData {
     n++;
     const id = `F${n}`;
     const lender = r.pick(LENDERS);
-    // Weekly lenders mostly fund consolidations — the only product family paid in increments.
-    const consol = fundableProducts.find((p) => p.incremental);
-    const product = lender.terms === 'weekly' && consol && r.next() < 0.7 ? consol : r.pick(fundableProducts);
+    // A lender funds only the products it is set up for (Settings › Lenders).
+    const funds = fundableProducts.filter((p) => !lender.products?.length || lender.products.includes(p.name));
+    const product = r.pick(funds.length ? funds : fundableProducts);
     const partnerName = r.pick(['None', 'None', 'None', 'MBC', 'HUB TRACKER']);
     const partner = partnerByName.get(partnerName)!;
     const funded = Math.round((28 + r.next() * 420) * 1000);

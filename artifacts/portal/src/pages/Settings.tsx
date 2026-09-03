@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Shell } from '../components/Shell';
 import { Card, Loading, Pill } from '../components/ui';
-import { api, post, type Lender, type ProductRule, type ReferralPartner, type RosterRep, type Settings as SettingsData, type Team, type Usage } from '../lib/api';
+import { api, post, type ClawbackBasis, type Lender, type ProductRule, type ReferralPartner, type RosterRep, type Settings as SettingsData, type Team, type Usage } from '../lib/api';
 import { compact, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 
@@ -48,7 +48,7 @@ export function Settings() {
       {err && <div className="note" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>{err}</div>}
       {!ready ? <Loading error={settings.error ?? usage.error ?? teams.error ?? roster.error} /> : (
         <>
-          {tab === 'lenders' && <LendersTab lenders={settings.data!.lenders} usage={usage.data!.lenders} run={run} />}
+          {tab === 'lenders' && <LendersTab lenders={settings.data!.lenders} products={settings.data!.products} thresholds={settings.data!.thresholds} usage={usage.data!.lenders} run={run} />}
           {tab === 'partners' && <PartnersTab partners={settings.data!.partners} usage={usage.data!.partners} run={run} />}
           {tab === 'products' && <ProductsTab products={settings.data!.products} usage={usage.data!.products} run={run} />}
           {tab === 'teams' && <TeamsTab teams={teams.data!.teams} reps={roster.data!.reps} usage={usage.data!.teams} run={run} />}
@@ -71,32 +71,63 @@ function Head({ children, cols }: { children: ReactNode; cols: string }) {
 }
 
 /* ---------- Lenders ---------- */
-function LendersTab({ lenders, usage, run }: { lenders: Lender[]; usage: Record<string, number>; run: Run }) {
+function LendersTab({ lenders, products, thresholds, usage, run }: { lenders: Lender[]; products: ProductRule[]; thresholds: SettingsData['thresholds']; usage: Record<string, number>; run: Run }) {
   const [rows, setRows] = useState(lenders);
   const [name, setName] = useState('');
   useEffect(() => setRows(lenders), [lenders]);
-  const cols = 'minmax(160px,1.2fr) 130px 80px 90px 190px 110px 100px 90px';
+  const cols = 'minmax(150px,1fr) minmax(300px,1.6fr) 150px 80px 80px 170px 100px 210px 90px 80px';
   const save = (next: Lender[]) => run('Lenders saved', () => post('/api/admin/settings/lenders', { lenders: next }, 'PUT'));
+  const set = (i: number, patch: Partial<Lender>) => setRows(rows.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  const fundsAll = (l: Lender) => !l.products?.length;
+  const funds = (l: Lender, p: string) => fundsAll(l) || !!l.products?.includes(p);
+  const doesIncrements = (l: Lender) => products.some((p) => p.incremental && funds(l, p.name));
+  const structure = (l: Lender) => {
+    if (!doesIncrements(l)) return 'Straight commission';
+    if (!(l.weeks > 0)) return 'Straight commission (no increments set)';
+    const up = l.upfrontPct ? Math.round(l.upfrontPct * 100) : 0;
+    return `${up ? `${up}/${100 - up}` : 'Increments'} · ${l.weeks} × ${l.cadenceDays === 14 ? 'bi-weekly' : l.cadenceDays === 30 ? 'monthly' : 'weekly'}${l.remainder === 'at-end' ? ' · rest at end' : ''}`;
+  };
+  const toggleProduct = (i: number, l: Lender, p: string) => {
+    const all = products.map((x) => x.name);
+    const cur = fundsAll(l) ? all : l.products!;
+    const next = cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p];
+    set(i, { products: next.length === all.length ? [] : next });
+  };
   return (
-    <Card title="Lenders" extra={`${rows.length} · in-use lenders refuse deletion · structure here is the default a new deal starts from`}>
-      <div className="scroller"><div style={{ minWidth: 1100 }}>
-      <Head cols={cols}><span>Lender</span><span>Commission terms</span><span>Increments</span><span>Upfront %</span><span>Remainder</span><span>Cadence</span><span>Usage</span><span /></Head>
-      {rows.map((l, i) => (
+    <Card title="Lenders" extra={`${rows.length} · toggle the products each lender funds; increments only apply to lenders that fund a consolidation · clawback policy drives "cleared clawback" on every deal`}>
+      <div className="scroller"><div style={{ minWidth: 1500 }}>
+      <Head cols={cols}><span>Lender</span><span>Products funded</span><span>Payout structure</span><span>Increments</span><span>Upfront %</span><span>Remainder</span><span>Cadence</span><span>Clawback policy</span><span>Usage</span><span /></Head>
+      {rows.map((l, i) => {
+        const inc = doesIncrements(l);
+        return (
         <Row key={i} cols={cols}>
-          <input value={l.name} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
-          <select value={l.terms} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, terms: e.target.value as Lender['terms'], weeks: e.target.value === 'weekly' ? x.weeks || 12 : 0 } : x)))}><option value="upfront">Upfront</option><option value="weekly">Weekly</option></select>
-          <input inputMode="numeric" disabled={l.terms !== 'weekly'} value={l.terms === 'weekly' ? l.weeks : ''} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, weeks: Number(e.target.value) || 0 } : x)))} />
-          <input inputMode="decimal" disabled={l.terms !== 'weekly'} placeholder="0" value={l.terms === 'weekly' && l.upfrontPct ? String(Math.round(l.upfrontPct * 100)) : ''} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, upfrontPct: (Number(e.target.value) || 0) / 100 } : x)))} />
-          <select disabled={l.terms !== 'weekly'} value={l.remainder ?? 'spread'} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, remainder: e.target.value as Lender['remainder'] } : x)))}><option value="spread">Spread across increments</option><option value="at-end">Once, when increments done</option></select>
-          <select disabled={l.terms !== 'weekly'} value={String(l.cadenceDays ?? 7)} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, cadenceDays: Number(e.target.value) } : x)))}><option value="7">Weekly</option><option value="14">Bi-weekly</option><option value="30">Monthly</option></select>
+          <input value={l.name} onChange={(e) => set(i, { name: e.target.value })} />
+          <div className="chips">
+            {products.map((p) => <button key={p.name} type="button" className={`chip ${funds(l, p.name) ? 'on' : ''} ${p.incremental ? 'inc' : ''}`} title={p.incremental ? 'Incremental product — paid in increments' : 'Straight commission'} onClick={() => toggleProduct(i, l, p.name)}>{p.name.replace(' - UPFRONT COMM', '').replace(' - TOTAL FUNDING', '')}</button>)}
+          </div>
+          <span className={`subtle ${inc ? 'num' : ''}`} style={{ fontSize: 11.5 }}>{structure(l)}</span>
+          <input inputMode="numeric" disabled={!inc} placeholder={inc ? '0' : '—'} value={inc && l.weeks ? l.weeks : ''} onChange={(e) => { const w = Number(e.target.value) || 0; set(i, { weeks: w, terms: w > 0 ? 'weekly' : 'upfront' }); }} />
+          <input inputMode="decimal" disabled={!inc} placeholder={inc ? '0' : '—'} value={inc && l.upfrontPct ? String(Math.round(l.upfrontPct * 100)) : ''} onChange={(e) => set(i, { upfrontPct: (Number(e.target.value) || 0) / 100 })} />
+          <select disabled={!inc} value={l.remainder ?? 'spread'} onChange={(e) => set(i, { remainder: e.target.value as Lender['remainder'] })}><option value="spread">Spread across increments</option><option value="at-end">Once, when increments done</option></select>
+          <select disabled={!inc} value={String(l.cadenceDays ?? 7)} onChange={(e) => set(i, { cadenceDays: Number(e.target.value) })}><option value="7">Weekly</option><option value="14">Bi-weekly</option><option value="30">Monthly</option></select>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 56px', gap: 6 }}>
+            <select value={l.clawback?.basis ?? 'default'} onChange={(e) => set(i, { clawback: e.target.value === 'default' ? undefined : { basis: e.target.value as ClawbackBasis, count: e.target.value === 'none' ? 0 : l.clawback?.count || (e.target.value === 'days' ? thresholds.clawbackWindowDays : 10) } })}>
+              <option value="default">Default · {thresholds.clawbackWindowDays} days</option>
+              <option value="none">No clawback</option>
+              <option value="days">Days after funding</option>
+              <option value="payments">Payments made</option>
+            </select>
+            <input inputMode="numeric" disabled={!l.clawback || l.clawback.basis === 'none'} value={l.clawback && l.clawback.basis !== 'none' ? l.clawback.count : ''} placeholder="—" onChange={(e) => set(i, { clawback: { basis: l.clawback?.basis ?? 'days', count: Number(e.target.value) || 0 } })} />
+          </div>
           <span className="num subtle">{usage[l.name] ? `${usage[l.name]} deal${usage[l.name] === 1 ? '' : 's'}` : 'unused'}</span>
           <button className="btn" disabled={!!usage[l.name]} title={usage[l.name] ? 'In use — cannot remove' : 'Remove'} onClick={() => setRows(rows.filter((_, j) => j !== i))}>Remove</button>
         </Row>
-      ))}
+        );
+      })}
       </div></div>
       <div className="toolbar" style={{ marginTop: 12 }}>
         <input className="search" placeholder="New lender name" value={name} onChange={(e) => setName(e.target.value)} />
-        <button className="btn" disabled={!name.trim()} onClick={() => { setRows([...rows, { name: name.trim(), terms: 'upfront', weeks: 0 }]); setName(''); }}>+ Add lender</button>
+        <button className="btn" disabled={!name.trim()} onClick={() => { setRows([...rows, { name: name.trim(), terms: 'upfront', weeks: 0, products: [] }]); setName(''); }}>+ Add lender</button>
         <span className="count" />
         <button className="btn primary" onClick={() => void save(rows)}>Save lenders</button>
       </div>

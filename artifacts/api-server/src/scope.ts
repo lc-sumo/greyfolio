@@ -8,6 +8,10 @@
  * `assertRepSafe` is the guard tests run over every projection.
  */
 import {
+  clawbackWindow,
+  type ClawbackWindow,
+  type Lender,
+  type ProductRule,
   collectionLabel,
   dealCommissionStatus,
   linesInPeriod,
@@ -115,6 +119,8 @@ export interface RepDealView {
   lenderPaidLabel: string;
   dealStatus: string;
   repPaid: string | null;
+  /** When this deal clears the lender's clawback window — the rep's commission is safe after that. */
+  clawbackWindow: ClawbackWindow;
   clawback: { amount: number; remaining: number; status: Clawback['status'] } | null;
 }
 
@@ -124,7 +130,11 @@ function payoutStatus(share: number, paid: number, accrued: number): PayoutStatu
   return accrued > paid ? 'Owed' : 'Awaiting lender';
 }
 
-export function repDealView(deal: Deal, repId: string, lines: PayoutLine[], clawbacks: Clawback[] = []): RepDealView {
+/** What the rep view needs from Settings to apply the lender's clawback policy. */
+export type ClawbackSettings = { lenders: Lender[]; products: ProductRule[]; thresholds: { clawbackWindowDays: number }; today?: string };
+const DEFAULT_CLAWBACK_SETTINGS: ClawbackSettings = { lenders: [], products: [], thresholds: { clawbackWindowDays: 30 } };
+
+export function repDealView(deal: Deal, repId: string, lines: PayoutLine[], clawbacks: Clawback[] = [], settings: ClawbackSettings = DEFAULT_CLAWBACK_SETTINGS): RepDealView {
   const mine = repLines(deal, repId);
   const paidSet = paidKeys(lines.filter((l) => l.repId === repId));
   const share = repShare(deal, repId);
@@ -169,6 +179,7 @@ export function repDealView(deal: Deal, repId: string, lines: PayoutLine[], claw
     dealStatus: deal.dealStatus,
     repPaid: deal.repPaid,
     clawback: cb && slice ? { amount: slice.share, remaining: slice.remaining, status: cb.status } : null,
+    clawbackWindow: clawbackWindow(deal, { lender: settings.lenders.find((l) => l.name === deal.lender), rule: settings.products.find((p) => p.name === deal.product), defaultDays: settings.thresholds.clawbackWindowDays }, settings.today ?? new Date().toISOString().slice(0, 10)),
   };
 }
 
@@ -295,7 +306,7 @@ function monthsEnding(to: string, count: number): string[] {
   return out;
 }
 
-export function repDashboard(ctx: LedgerContext, reps: Rep[], runs: PayrollRun[], repId: string, from: string, to: string, cycle = 'Twice monthly'): RepDashboard {
+export function repDashboard(ctx: LedgerContext, reps: Rep[], runs: PayrollRun[], repId: string, from: string, to: string, cycle = 'Twice monthly', settings: ClawbackSettings = DEFAULT_CLAWBACK_SETTINGS): RepDashboard {
   const wallet = repWallet(ctx, repId);
   const mine = repDeals(ctx.deals, repId);
   const inPeriod = (d: Deal) => d.date >= from && d.date <= to;
@@ -312,7 +323,7 @@ export function repDashboard(ctx: LedgerContext, reps: Rep[], runs: PayrollRun[]
   const unpaid = [...runs].filter((r) => r.status !== 'paid').sort((a, b) => a.end.localeCompare(b.end));
   const next = unpaid.find((r) => r.end >= to) ?? unpaid.at(-1) ?? null;
   const owedToMe = mine
-    .map((d) => repDealView(d, repId, ctx.lines, ctx.clawbacks))
+    .map((d) => repDealView(d, repId, ctx.lines, ctx.clawbacks, settings))
     .filter((v) => v.owed > 0)
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 5);

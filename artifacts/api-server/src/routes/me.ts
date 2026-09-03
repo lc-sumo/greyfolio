@@ -33,16 +33,16 @@ export function meRouter(repo: Repo): Router {
     const to = typeof req.query.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.to) ? req.query.to : today;
     const from = typeof req.query.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.from) ? req.query.from : `${to.slice(0, 4)}-01-01`;
     if (from > to) throw new HttpError(400, 'from must not be after to');
-    const [ctx, reps, runs, payroll] = await Promise.all([repo.loadContext(), repo.listReps(), repo.listRuns(), repo.getSetting<{ cycle: string }>('payroll')]);
-    res.json(repDashboard(ctx, reps, runs, scopeOf(req).effectiveRepId, from, to, payroll?.cycle ?? 'Twice monthly'));
+    const [ctx, reps, runs, settings] = await Promise.all([repo.loadContext(), repo.listReps(), repo.listRuns(), repo.getSettings()]);
+    res.json(repDashboard(ctx, reps, runs, scopeOf(req).effectiveRepId, from, to, settings.payroll?.cycle ?? 'Twice monthly', settings));
   });
 
   r.get('/deals', async (req, res) => {
     const repId = scopeOf(req).effectiveRepId;
-    const ctx = await repo.loadContext();
+    const [ctx, settings] = await Promise.all([repo.loadContext(), repo.getSettings()]);
     const q = typeof req.query.search === 'string' ? req.query.search.trim().toLowerCase() : '';
     const status = typeof req.query.status === 'string' ? req.query.status : 'all';
-    let rows = repDeals(ctx.deals, repId).map((d) => repDealView(d, repId, ctx.lines, ctx.clawbacks));
+    let rows = repDeals(ctx.deals, repId).map((d) => repDealView(d, repId, ctx.lines, ctx.clawbacks, settings));
     if (q) rows = rows.filter((d) => `${d.id} ${d.business} ${d.lender} ${d.product}`.toLowerCase().includes(q));
     if (status !== 'all') rows = rows.filter((d) => d.payoutStatus === status || d.commissionStatus === status);
     res.json({ count: rows.length, deals: rows });
@@ -50,11 +50,11 @@ export function meRouter(repo: Repo): Router {
 
   r.get('/deals/:id', async (req, res) => {
     const repId = scopeOf(req).effectiveRepId;
-    const ctx = await repo.loadContext();
+    const [ctx, settings] = await Promise.all([repo.loadContext(), repo.getSettings()]);
     const deal = ctx.deals.find((d) => d.id === req.params.id);
     // A deal the rep is not on is indistinguishable from one that does not exist.
     if (!deal || !repDeals([deal], repId).length) throw new HttpError(404, 'Deal not found');
-    const view = repDealView(deal, repId, ctx.lines, ctx.clawbacks);
+    const view = repDealView(deal, repId, ctx.lines, ctx.clawbacks, settings);
     const payments = ctx.lines
       .filter((l) => l.repId === repId && l.dealId === deal.id)
       .map((l) => ({ role: l.role, segmentKey: l.segmentKey, unit: /\|u(\d+)$/.test(l.key) ? (l.key.endsWith('|u0') ? 'Upfront' : `Increment ${/\|u(\d+)$/.exec(l.key)![1]}`) : null, amount: l.amount, paidAt: l.paidAt, runId: l.runId }))

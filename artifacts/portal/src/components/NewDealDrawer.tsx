@@ -184,8 +184,9 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
         <Field label="Lender">
           <select value={f.lender} onChange={set('lender')}>
             <option value="">— select —</option>
-            {settings.lenders.map((l) => <option key={l.name} value={l.name}>{l.name}{l.terms === 'weekly' ? ` · weekly ×${l.weeks}` : ''}</option>)}
+            {settings.lenders.filter((l) => !l.products?.length || l.products.includes(f.product ?? '')).map((l) => <option key={l.name} value={l.name}>{l.name}{canIncrement && l.terms === 'weekly' ? ` · ${l.weeks} increments` : ''}{l.clawback ? l.clawback.basis === 'none' ? ' · no clawback' : ` · clawback ${l.clawback.count} ${l.clawback.basis}` : ''}</option>)}
           </select>
+          <span className="subtle" style={{ fontSize: 11 }}>Only lenders set up for {f.product} (Settings › Lenders).</span>
         </Field>
         <Field label={amountLabel}><input inputMode="decimal" value={f.amount} onChange={set('amount')} placeholder="125000" /></Field>
         {rule?.term && <Field label="Term length (business days)" hint="Mon–Fri only, excludes weekends"><input inputMode="numeric" value={f.termDays} onChange={set('termDays')} /></Field>}

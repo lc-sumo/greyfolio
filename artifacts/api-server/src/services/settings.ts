@@ -48,11 +48,18 @@ function guardRemovals(before: string[], after: string[], used: Record<string, n
 
 export async function saveLenders(repo: Repo, input: unknown, actorRepId: string): Promise<Lender[]> {
   if (!Array.isArray(input)) throw new HttpError(400, 'lenders must be a list');
+  const [settings, u] = await Promise.all([repo.getSettings(), usage(repo)]);
+  const known = new Map(settings.products.map((p) => [p.name, p]));
   const lenders: Lender[] = input.map((l: Record<string, unknown>) => {
-    const terms = l.terms === 'weekly' ? 'weekly' : 'upfront';
-    const weeks = terms === 'weekly' ? Math.round(Number(l.weeks) || 0) : 0;
-    if (terms === 'weekly' && weeks < 1) throw new HttpError(400, `Weekly lender "${l.name}" needs a week count`);
-    const lender: Lender = { name: cleanName(l.name, 'Lender'), terms, weeks };
+    const name = cleanName(l.name, 'Lender');
+    const products = Array.isArray(l.products) ? [...new Set(l.products.map(String).filter((n) => known.has(n)))] : [];
+    // Increments are a consolidation thing: a lender only pays in increments when it funds an incremental product.
+    const incremental = products.length === 0 || products.some((n) => known.get(n)?.incremental);
+    const wantsWeekly = l.terms === 'weekly' || Number(l.weeks) > 0;
+    const weeks = incremental && wantsWeekly ? Math.round(Number(l.weeks) || 0) : 0;
+    if (incremental && l.terms === 'weekly' && weeks < 1) throw new HttpError(400, `Weekly lender "${name}" needs a week count`);
+    const terms = weeks > 0 ? 'weekly' : 'upfront';
+    const lender: Lender = { name, terms, weeks };
     if (terms === 'weekly') {
       const up = Number(l.upfrontPct);
       if (Number.isFinite(up) && up > 0) lender.upfrontPct = asRate(up);
@@ -60,10 +67,17 @@ export async function saveLenders(repo: Repo, input: unknown, actorRepId: string
       const cad = Math.round(Number(l.cadenceDays));
       if (Number.isFinite(cad) && cad > 0 && cad !== 7) lender.cadenceDays = cad;
     }
+    if (products.length) lender.products = products;
+    const cb = l.clawback as Record<string, unknown> | null | undefined;
+    if (cb && typeof cb === 'object' && (cb.basis === 'none' || cb.basis === 'days' || cb.basis === 'payments')) {
+      const count = cb.basis === 'none' ? 0 : Math.round(Number(cb.count) || 0);
+      if (cb.basis !== 'none' && count < 1) throw new HttpError(400, `Lender "${name}" clawback policy needs a ${cb.basis === 'days' ? 'day' : 'payment'} count`);
+      lender.clawback = { basis: cb.basis, count };
+      if (typeof cb.note === 'string' && cb.note.trim()) lender.clawback.note = cb.note.trim().slice(0, 200);
+    }
     return lender;
   });
   uniqueNames(lenders, 'lender');
-  const [settings, u] = await Promise.all([repo.getSettings(), usage(repo)]);
   guardRemovals(settings.lenders.map((x) => x.name), lenders.map((x) => x.name), u.lenders, 'Lenders');
   await repo.putSetting('lenders', lenders);
   await audit(repo, actorRepId, 'settings.update', '/api/admin/settings/lenders', { count: lenders.length });

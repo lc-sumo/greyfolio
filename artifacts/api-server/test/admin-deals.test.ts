@@ -114,6 +114,21 @@ describe('deal edits', () => {
     expect((await rep.patch('/api/admin/deals/F1/crm').send({ crmId: 'x' })).status).toBe(403);
     expect((await rep.get('/api/me/deals/F1')).body.crmId).toBeNull();
   });
+  it('every deal carries the lender clawback window, for admin and for the rep', async () => {
+    const { admin, rep } = await harness();
+    const a = await admin.get('/api/admin/deals/F1');
+    // F1 is an MBC deal funded 2026-06-05; MBC claws back for 30 days → cleared long ago
+    expect(a.body.clawbackWindow).toMatchObject({ basis: 'days', count: 30, source: 'lender', clearsOn: '2026-07-05', cleared: true });
+    expect(a.body.atRisk).toBe(false);
+    const r = await rep.get('/api/me/deals/F1');
+    expect(r.body.clawbackWindow).toMatchObject({ cleared: true, label: 'Cleared clawback · 30 days' });
+    const fresh = await admin.post('/api/admin/deals').send({ ...draft, lender: 'ACE FUNDING', referralPartner: null });
+    expect(fresh.body.clawbackWindow).toMatchObject({ basis: 'days', count: 45, source: 'lender', cleared: false, daysLeft: 45 });
+    // TERM LOAN carries no clawback in the product rules → exempt whatever the lender says
+    const exempt = await admin.post('/api/admin/deals').send({ ...draft, business: 'Exempt Co', lender: 'UFS FUNDING', product: 'TERM LOAN', factor: undefined, apr: 12, referralPartner: null });
+    expect(exempt.body.clawbackWindow).toMatchObject({ basis: 'none', source: 'product', cleared: true });
+    expect(fresh.body.atRisk).toBe(true);
+  });
   it('deal status is validated against settings', async () => {
     const { admin } = await harness();
     expect((await admin.patch('/api/admin/deals/F1/status').send({ dealStatus: 'Refinanced' })).body.dealStatus).toBe('Refinanced');
@@ -157,7 +172,7 @@ describe('consolidation payout structures', () => {
     const { admin } = await harness();
     const lenders = (await admin.get('/api/admin/settings')).body.lenders.map((l: { name: string }) => (l.name === 'ROWAN' ? { ...l, upfrontPct: 50, remainder: 'at-end', cadenceDays: 14 } : l));
     const saved = await admin.put('/api/admin/settings/lenders').send({ lenders });
-    expect(saved.body.lenders.find((l: { name: string }) => l.name === 'ROWAN')).toEqual({ name: 'ROWAN', terms: 'weekly', weeks: 20, upfrontPct: 0.5, remainder: 'at-end', cadenceDays: 14 });
+    expect(saved.body.lenders.find((l: { name: string }) => l.name === 'ROWAN')).toMatchObject({ name: 'ROWAN', terms: 'weekly', weeks: 20, upfrontPct: 0.5, remainder: 'at-end', cadenceDays: 14 });
     const res = await admin.post('/api/admin/deals').send({ ...draft, lender: 'ROWAN', product: CONSOL, referralPartner: null });
     expect(res.body.segments[0].schedule).toMatchObject({ weeks: 20, upfrontPct: 0.5, remainder: 'at-end', cadenceDays: 14 });
     const ov = (await admin.get('/api/admin/overview')).body.cards;

@@ -5,6 +5,7 @@ export * from './segments.js';
 export * from './collection.js';
 export * from './splits.js';
 export * from './clawback.js';
+export * from './clawback-window.js';
 export * from './ledger.js';
 export * from './payroll.js';
 export * from './draws.js';

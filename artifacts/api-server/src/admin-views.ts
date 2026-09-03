@@ -1,6 +1,7 @@
 /** Admin projections: everything, including house net, referral and every rep's name. Never served to reps. */
 import {
-  atRisk,
+  clawbackWindow,
+  type ClawbackWindow,
   clawbackSlices,
   collectedGross,
   collectedOf,
@@ -83,6 +84,8 @@ export interface AdminDealRow {
   dealStatus: string;
   storedDealStatus: string;
   atRisk: boolean;
+  /** The lender's clawback policy applied to this deal — when it clears. */
+  clawbackWindow: ClawbackWindow;
   repPaid: string | null;
   lenderPaid: string | null;
   crmId: string | null;
@@ -107,6 +110,7 @@ export function adminDealRow(deal: Deal, ctx: LedgerContext, reps: Rep[], settin
   };
   const segs = segments(deal);
   const full = segs.filter((s) => outstandingOf(s) === 0 && s.gross > 0).length;
+  const win = clawbackWindow(deal, { lender: settings.lenders.find((l) => l.name === deal.lender), rule: settings.products.find((p) => p.name === deal.product), defaultDays: settings.thresholds.clawbackWindowDays }, today);
   return {
     id: deal.id,
     opportunityId: deal.opportunityId,
@@ -142,7 +146,8 @@ export function adminDealRow(deal: Deal, ctx: LedgerContext, reps: Rep[], settin
     commissionStatus: dealCommissionStatus(deal),
     dealStatus: effectiveDealStatus(deal, settings.thresholds, today),
     storedDealStatus: deal.dealStatus,
-    atRisk: atRisk(deal, settings.thresholds.clawbackWindowDays, today),
+    atRisk: deal.dealStatus === 'Slow Pay' || deal.dealStatus === 'Default' || !win.cleared,
+    clawbackWindow: win,
     repPaid: deal.repPaid,
     lenderPaid: deal.lenderPaid,
     crmId: deal.crmId,

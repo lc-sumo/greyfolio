@@ -53,6 +53,25 @@ describe('lists with in-use guards', () => {
     expect((await admin.put('/api/admin/settings/lenders').send({ lenders: [...next, { name: 'Bad', terms: 'weekly', weeks: 0 }] })).body.error).toMatch(/week count/);
     expect((await admin.put('/api/admin/settings/lenders').send({ lenders: [...next, { name: 'MBC', terms: 'upfront' }] })).body.error).toMatch(/Duplicate/);
   });
+  it('lenders: increments follow the products a lender funds, and the clawback policy is saved', async () => {
+    const { admin } = await harness();
+    const current = (await admin.get('/api/admin/settings')).body.lenders;
+    const next = [
+      ...current,
+      // an MCA-only lender cannot pay in increments however it is typed
+      { name: 'MCA HOUSE', terms: 'weekly', weeks: 10, products: ['MCA', 'TERM LOAN'], clawback: { basis: 'days', count: 45 } },
+      // a consolidation lender does, with its structure
+      { name: 'CONSOL CO', terms: 'weekly', weeks: 8, upfrontPct: 50, remainder: 'at-end', products: ['CONSOLIDATION - UPFRONT COMM'], clawback: { basis: 'payments', count: 10, note: 'first 10 payments' } },
+      { name: 'NO CLAW', products: ['EQUIPMENT', 'Bogus Product'], clawback: { basis: 'none' } },
+    ];
+    const res = await admin.put('/api/admin/settings/lenders').send({ lenders: next });
+    expect(res.status).toBe(200);
+    const by = Object.fromEntries(res.body.lenders.map((l: { name: string }) => [l.name, l]));
+    expect(by['MCA HOUSE']).toEqual({ name: 'MCA HOUSE', terms: 'upfront', weeks: 0, products: ['MCA', 'TERM LOAN'], clawback: { basis: 'days', count: 45 } });
+    expect(by['CONSOL CO']).toEqual({ name: 'CONSOL CO', terms: 'weekly', weeks: 8, upfrontPct: 0.5, remainder: 'at-end', products: ['CONSOLIDATION - UPFRONT COMM'], clawback: { basis: 'payments', count: 10, note: 'first 10 payments' } });
+    expect(by['NO CLAW']).toEqual({ name: 'NO CLAW', terms: 'upfront', weeks: 0, products: ['EQUIPMENT'], clawback: { basis: 'none', count: 0 } });
+    expect((await admin.put('/api/admin/settings/lenders').send({ lenders: [...current, { name: 'X', clawback: { basis: 'days', count: 0 } }] })).body.error).toMatch(/day count/);
+  });
   it('partners: percent input normalises, blank cap = uncapped, in-use guard', async () => {
     const { admin } = await harness();
     const current = (await admin.get('/api/admin/settings')).body.partners;

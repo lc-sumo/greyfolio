@@ -33,6 +33,7 @@ export function DealDrawer({ id, onClose }: { id: string; onClose: () => void })
               <dt>Lender paid commission</dt><dd style={{ fontFamily: 'var(--sans)' }}><Pill tone={toneFor(d.commissionStatus)}>{d.lenderPaidLabel}</Pill></dd>
               <dt>Commission status</dt><dd style={{ fontFamily: 'var(--sans)' }}>{d.commissionStatus}</dd>
               <dt>Deal status</dt><dd style={{ fontFamily: 'var(--sans)' }}>{d.dealStatus}</dd>
+              <dt>Clawback</dt><dd style={{ fontFamily: 'var(--sans)' }}><Pill tone={d.clawbackWindow.cleared ? 'teal' : 'amber'}>{d.clawbackWindow.label}</Pill>{d.clawbackWindow.clearsOn && !d.clawbackWindow.cleared && <div className="subtle" style={{ fontSize: 11, marginTop: 3 }}>clears {fullDay(d.clawbackWindow.clearsOn)}</div>}</dd>
               <dt>Rep paid</dt><dd>{d.repPaid ? fullDay(d.repPaid) : '—'}</dd>
             </dl>
           </section>

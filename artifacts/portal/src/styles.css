@@ -336,3 +336,9 @@ input.mini-input:focus { border-color: var(--teal); }
 input.big { width: 24px; height: 24px; accent-color: var(--teal); cursor: pointer; margin: 0; }
 .table .td.pick { display: grid; place-items: center; cursor: pointer; align-self: stretch; padding: 0; }
 .table .td.pick:hover { background: var(--zebra-hover); }
+/* Payroll: deal rows with their draws collapsed underneath */
+.table .tr.sub { background: var(--sunken) !important; min-height: 48px; }
+.table .tr.sub .td { padding-top: 6px; padding-bottom: 6px; }
+.table .tr.sub .td:nth-child(3) { padding-left: 22px; }
+.expander { border: none; background: none; font: inherit; color: var(--ink); cursor: pointer; padding: 0; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.expander i { font-style: normal; color: var(--ink-subtle); width: 12px; }

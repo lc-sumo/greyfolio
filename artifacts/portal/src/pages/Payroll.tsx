@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { AdminDealDrawer } from '../components/AdminDealDrawer';
 import { Shell } from '../components/Shell';
 import { Card, Contact, Loading, Pill, toneFor } from '../components/ui';
@@ -55,6 +55,35 @@ export function Payroll() {
   const allShown = shown.length > 0 && shown.every((l) => (l.collectedKeys.length ? l.collectedKeys : l.uncollectedKeys).every((k) => selected[k]));
   const toggleRow = (l: PayableLineView) => setSelected((s) => { const n = { ...s }; const keys = l.collectedKeys.length ? l.collectedKeys : l.uncollectedKeys; const on = keys.every((k) => n[k]); for (const k of rowKeys(l)) delete n[k]; if (!on) for (const k of keys) n[k] = true; return n; });
   const toggleUncollected = (l: PayableLineView) => setSelected((s) => { const n = { ...s }; const on = l.uncollectedKeys.every((k) => n[k]); for (const k of l.uncollectedKeys) { if (on) delete n[k]; else n[k] = true; } return n; });
+  // Deals are the rows; an LOC's or consolidation's draws sit collapsed under the deal.
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const groups = useMemo(() => {
+    const order: string[] = [];
+    const by = new Map<string, PayableLineView[]>();
+    for (const l of shown) { if (!by.has(l.dealId)) { by.set(l.dealId, []); order.push(l.dealId); } by.get(l.dealId)!.push(l); }
+    return order.map((dealId) => ({ dealId, lines: by.get(dealId)! }));
+  }, [shown]);
+  const defaultKeys = (l: PayableLineView) => (l.collectedKeys.length ? l.collectedKeys : l.uncollectedKeys);
+  const groupState = (lines: PayableLineView[]): 'all' | 'some' | 'none' => {
+    const on = lines.filter(rowSelected).length;
+    return on === 0 ? 'none' : on === lines.length ? 'all' : 'some';
+  };
+  const toggleGroup = (lines: PayableLineView[]) => setSelected((s) => { const n = { ...s }; const all = lines.every((l) => defaultKeys(l).every((k) => n[k])); for (const l of lines) { for (const k of rowKeys(l)) delete n[k]; if (!all) for (const k of defaultKeys(l)) n[k] = true; } return n; });
+  const lineRow = (l: PayableLineView, sub: boolean) => (
+    <div className={`tr ${sub ? 'sub' : ''}`} key={l.key} style={{ background: rowSelected(l) ? 'var(--row-selected)' : !l.collected ? 'var(--row-uncollected)' : undefined }}>
+      <div className="td pick" onClick={(e) => { if ((e.target as HTMLElement).tagName !== 'INPUT') toggleRow(l); }} title="Select this line for payout"><input type="checkbox" className="big" checked={rowSelected(l)} onChange={() => toggleRow(l)} /></div>
+      <div className="td num" style={{ cursor: 'pointer' }} onClick={() => setOpen(l.dealId)}>{sub ? <span className="subtle">└</span> : l.dealId}</div>
+      <div className="td"><span className={l.segmentKey === 'base' ? 'muted' : 'warn'}>{l.segmentLabel}</span>{l.units && <div className="subtle num" style={{ fontSize: 12.5 }}>Lender paid {l.units.collected}/{l.units.total} · Rep paid {l.units.paid}/{l.units.total}</div>}</div>
+      <div className="td ellipsis">{sub ? <span className="subtle">{l.business}</span> : l.business}</div>
+      <div className="td contact-cell">{sub ? null : <Contact name={l.merchantContact} email={l.merchantEmail} phone={l.merchantPhone} />}</div>
+      <div className="td ellipsis">{sub ? null : l.lender}</div>
+      <div className="td r num">{compact(l.funded)}</div>
+      <div className="td"><Pill tone={l.role === 'Override' ? 'amber' : 'teal'}>{l.role}</Pill></div>
+      <div className="td r num">{pct(l.rate)}</div>
+      <div className="td r num">{l.units ? <>{money(l.collectedAmount)}<div className="subtle" style={{ fontSize: 12.5 }}>of {money(l.amount)} unpaid</div></> : money(l.amount)}</div>
+      <div className="td"><Pill tone={l.collected ? 'teal' : l.lenderPaidLabel === 'Not collected' ? 'grey' : 'amber'}>{l.lenderPaidLabel}</Pill>{l.uncollectedKeys.length > 0 && l.collectedKeys.length > 0 && <label className="subtle" style={{ display: 'block', fontSize: 12.5, marginTop: 3, cursor: 'pointer' }}><input type="checkbox" style={{ verticalAlign: '-2px', marginRight: 4 }} checked={l.uncollectedKeys.every((k) => selected[k])} onChange={() => toggleUncollected(l)} />+ {l.uncollectedKeys.length} uncollected · {money(l.uncollectedAmount)}</label>}</div>
+    </div>
+  );
 
   async function pay() {
     if (!activeRun || !payRepId || !selectedKeys.length) { notify('Select at least one deal line to pay'); return; }
@@ -154,7 +183,7 @@ export function Payroll() {
                   <div className="toolbar" style={{ marginBottom: 12 }}>
                     <input className="search" placeholder="Search deal ID, business, merchant contact, email or phone" value={search} onChange={(e) => setSearch(e.target.value)} style={{ minWidth: 340 }} />
                     <button className="btn" disabled={!shown.length} onClick={() => setSelected((s) => { const n = { ...s }; shown.forEach((l) => { const keys = l.collectedKeys.length ? l.collectedKeys : l.uncollectedKeys; if (allShown) rowKeys(l).forEach((k) => delete n[k]); else keys.forEach((k) => { n[k] = true; }); }); return n; })}>{allShown ? 'Clear selection' : 'Select all collected'}</button>
-                    <span className="count">{selLines.length} of {d?.lines.length ?? 0} rows · {selectedKeys.length} unit{selectedKeys.length === 1 ? '' : 's'}</span>
+                    <span className="count">{selLines.length} of {d?.lines.length ?? 0} lines · {selectedKeys.length} unit{selectedKeys.length === 1 ? '' : 's'}</span>
                   </div>
                   {!d ? <Loading error={detail.error} /> : shown.length === 0 ? (
                     <div className="empty">{d.lines.length === 0 ? `${d.rep.name} has nothing outstanding.` : `No deal lines match “${search}”.`}</div>
@@ -162,21 +191,34 @@ export function Payroll() {
                     <div className="scroller">
                       <div className="table" style={{ ['--cols' as string]: COLS, minWidth: 1180 }}>
                         <div className="tr th"><div className="td">Pay</div><div className="td">Deal</div><div className="td">Line</div><div className="td">Business</div><div className="td">Merchant contact</div><div className="td">Lender</div><div className="td r">Funded</div><div className="td">Role</div><div className="td r">Rate</div><div className="td r">Payout</div><div className="td">Lender paid comm</div></div>
-                        {shown.map((l) => (
-                          <div className="tr" key={l.key} style={{ background: rowSelected(l) ? 'var(--row-selected)' : !l.collected ? 'var(--row-uncollected)' : undefined }}>
-                            <div className="td pick" onClick={(e) => { if ((e.target as HTMLElement).tagName !== 'INPUT') toggleRow(l); }} title="Select this line for payout"><input type="checkbox" className="big" checked={rowSelected(l)} onChange={() => toggleRow(l)} /></div>
-                            <div className="td num" style={{ cursor: 'pointer' }} onClick={() => setOpen(l.dealId)}>{l.dealId}</div>
-                            <div className="td"><span className={l.segmentKey === 'base' ? 'muted' : 'warn'}>{l.segmentLabel}</span>{l.units && <div className="subtle num" style={{ fontSize: 12.5 }}>Lender paid {l.units.collected}/{l.units.total} · Rep paid {l.units.paid}/{l.units.total}</div>}</div>
-                            <div className="td ellipsis">{l.business}</div>
-                            <div className="td contact-cell"><Contact name={l.merchantContact} email={l.merchantEmail} phone={l.merchantPhone} /></div>
-                            <div className="td ellipsis">{l.lender}</div>
-                            <div className="td r num">{compact(l.funded)}</div>
-                            <div className="td"><Pill tone={l.role === 'Override' ? 'amber' : 'teal'}>{l.role}</Pill></div>
-                            <div className="td r num">{pct(l.rate)}</div>
-                            <div className="td r num">{l.units ? <>{money(l.collectedAmount)}<div className="subtle" style={{ fontSize: 12.5 }}>of {money(l.amount)} unpaid</div></> : money(l.amount)}</div>
-                            <div className="td"><Pill tone={l.collected ? 'teal' : l.lenderPaidLabel === 'Not collected' ? 'grey' : 'amber'}>{l.lenderPaidLabel}</Pill>{l.uncollectedKeys.length > 0 && l.collectedKeys.length > 0 && <label className="subtle" style={{ display: 'block', fontSize: 12.5, marginTop: 3, cursor: 'pointer' }}><input type="checkbox" style={{ verticalAlign: '-2px', marginRight: 4 }} checked={l.uncollectedKeys.every((k) => selected[k])} onChange={() => toggleUncollected(l)} />+ {l.uncollectedKeys.length} uncollected · {money(l.uncollectedAmount)}</label>}</div>
-                          </div>
-                        ))}
+                        {groups.map((g) => {
+                          const single = g.lines.length === 1;
+                          const l0 = g.lines[0]!;
+                          const isOpen = single || !!expanded[g.dealId];
+                          const state = groupState(g.lines);
+                          const roles = [...new Set(g.lines.map((l) => l.role))];
+                          const collectedSegs = g.lines.filter((l) => l.collected).length;
+                          return (
+                            <Fragment key={g.dealId}>
+                              {single ? lineRow(l0, false) : (
+                                <div className="tr deal" style={{ background: state === 'all' ? 'var(--row-selected)' : undefined }}>
+                                  <div className="td pick" onClick={(e) => { if ((e.target as HTMLElement).tagName !== 'INPUT') toggleGroup(g.lines); }} title="Select every line on this deal"><input type="checkbox" className="big" ref={(el) => { if (el) el.indeterminate = state === 'some'; }} checked={state === 'all'} onChange={() => toggleGroup(g.lines)} /></div>
+                                  <div className="td num" style={{ cursor: 'pointer' }} onClick={() => setOpen(g.dealId)}>{g.dealId}</div>
+                                  <div className="td"><button type="button" className="expander" onClick={() => setExpanded((x) => ({ ...x, [g.dealId]: !x[g.dealId] }))} aria-expanded={isOpen}><i>{isOpen ? '▾' : '▸'}</i> {g.lines.length} lines<span className="subtle"> · {g.lines.filter((l) => l.segmentKey !== 'base').length} draw{g.lines.filter((l) => l.segmentKey !== 'base').length === 1 ? '' : 's'}</span></button></div>
+                                  <div className="td ellipsis"><b>{l0.business}</b></div>
+                                  <div className="td contact-cell"><Contact name={l0.merchantContact} email={l0.merchantEmail} phone={l0.merchantPhone} /></div>
+                                  <div className="td ellipsis">{l0.lender}</div>
+                                  <div className="td r num">{compact(g.lines.reduce((t, l) => t + l.funded, 0))}</div>
+                                  <div className="td">{roles.map((r) => <Pill key={r} tone={r === 'Override' ? 'amber' : 'teal'}>{r}</Pill>)}</div>
+                                  <div className="td r num">{[...new Set(g.lines.map((l) => pct(l.rate)))].join('+')}</div>
+                                  <div className="td r num">{money(g.lines.reduce((t, l) => t + l.collectedAmount, 0))}{g.lines.some((l) => l.uncollectedAmount > 0) && <div className="subtle" style={{ fontSize: 12.5 }}>of {money(g.lines.reduce((t, l) => t + l.amount, 0))} unpaid</div>}</div>
+                                  <div className="td"><Pill tone={collectedSegs === g.lines.length ? 'teal' : collectedSegs ? 'amber' : 'grey'}>{collectedSegs}/{g.lines.length} lines collected</Pill></div>
+                                </div>
+                              )}
+                              {!single && isOpen && g.lines.map((l) => lineRow(l, true))}
+                            </Fragment>
+                          );
+                        })}
                       </div>
                     </div>
                   )}

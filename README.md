@@ -80,11 +80,13 @@ Sign in with any rep's email from the roster (e.g. `leor@greystoneus.com` for ad
 
 ## Launch checklist
 
-1. **Postgres + host.** Set `DATABASE_URL`, `SESSION_SECRET` (32+ chars), `BASE_URL`/`APP_ORIGIN`, then `pnpm db:migrate && pnpm db:seed` (reps, lenders, products and partners from the tracker's tabs). Production needs SSO (`OIDC_ISSUER`…) or password sign-in (on by default; `AUTH_PASSWORD=off` disables).
-2. **Bring the tracker in.** Google Sheets → File → Download → CSV of the FUNDED DEALS tab, then Settings › Import from sheet (preview, fix any red rows in the sheet, import) or `pnpm --filter @greystone/api-server import:sheet funded-deals.csv --commit`. Rows with a Rep Paid Date become paid ledger lines in a run called "Imported from sheet".
-3. **Passwords.** Settings › Reps › Set password for each rep who signs in without SSO.
-4. **Confirm the assumptions** in Settings › Lenders (which products each lender funds, increments, clawback policy) and the CRM link template.
-5. **CI** runs typecheck, tests, both portal builds and the Docker image on every push (`.github/workflows/ci.yml`). The API adds security headers, per-IP rate limits and JSON request logs; the Audit log page shows every login, edit, payout, void and password change.
+1. **Host it.** `docs/DEPLOY.md` has two paths: Render via `render.yaml` (managed Postgres with daily snapshots) or any Docker host via `docker-compose.prod.yml` (Postgres + app + a nightly `pg_dump` sidecar, `scripts/backup.sh`). First boot with `SEED=workbook` loads reps, lenders, products and partners from the tracker tabs; then set `SEED=none`.
+2. **Email.** `MAIL_PROVIDER=resend` (or `postmark`) + `MAIL_API_KEY` + a verified `MAIL_FROM`. That turns on forgot-password links, statement emails when a run is approved, clawback notices, and the daily renewal digest to admins. Without it the sign-in screen tells reps to ask an admin for a reset.
+3. **Bring the tracker in.** Google Sheets → File → Download → CSV of the FUNDED DEALS tab, then Settings › Import from sheet (preview, fix red rows, import). Re-exporting the whole sheet later is fine: tick *skip rows already in the portal* and only new rows come in. Rows with a Rep Paid Date become paid ledger lines in a run called "Imported from sheet".
+4. **Passwords and two-factor.** Settings › Reps › Set password for each rep. Reps can turn on two-factor sign-in from the sidebar (any authenticator app); an admin can reset it from Settings › Reps if a phone is lost.
+5. **Confirm the assumptions** in Settings › Lenders (which products each lender funds, increments, clawback policy) and the CRM link template.
+6. **Week to week.** Paste the lender's payment report into Settings › Lender remittance to mark increments and dollars received in one go. Record clawbacks from the deal drawer; notes and files live there too. Year-end totals per rep are on Run payroll (CSV for the accountant).
+7. **CI** runs typecheck, tests, both portal builds and the Docker image on every push (`.github/workflows/ci.yml`). The API adds security headers, per-IP rate limits and JSON request logs; the Audit log page shows every login, edit, payout, void, password change, email sent and file uploaded.
 
 ## The one rule
 

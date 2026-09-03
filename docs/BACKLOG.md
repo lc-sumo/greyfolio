@@ -29,6 +29,16 @@
 | Colour: four alternative palettes, then the brand palette from greystonemp.com as the default | Palette picker in the sidebar (Greystone brand default: cream + forest green + sage, serif display titles; Sand = the earlier look; Slate, Forest, Graphite, Midnight), each with light and dark variants, remembered per browser | Done |
 | Only reps on the tracker exist in the app | Roster seed replaced with the tracker's REPS tab (19 reps); lenders from its SETTINGS tab; demo and tests updated | Done |
 | Reps are paid on gross: 250k at 10% is 25k gross, a 40% open+close rep gets 10k, the house nets gross − referral − rep pay | Domain — rep lines, increment units, live math and clawback slices now use gross (`segment.gross × rate`); house net stays net-after-referral − rep payouts. Matches the tracker's Opener $/Closer $ columns, so imported figures reconcile with the sheet | Done |
+| Hosting: Render blueprint, Docker Compose with backups | `render.yaml`, `docker-compose.prod.yml`, `scripts/backup.sh`, `docs/DEPLOY.md` | Done |
+| Forgot password (emailed one-hour link) | `/auth/forgot`, `/auth/reset`, `commission_password_resets`, Login + `/reset` page | Done |
+| Outbound email (Resend / Postmark) | `services/mail.ts`, `MAIL_*` env | Done |
+| Statement email on run approval, clawback notices, daily renewal digest | `services/notify.ts`, audit `mail.sent` | Done |
+| Re-import a full sheet export without duplicates | Import `skipExisting`; Settings › Import checkbox | Done |
+| Lender remittance import (mark increments / dollars from the lender's report) | `services/remittance.ts`, Settings › Lender remittance | Done |
+| Year-end totals per rep (1099 handoff) | `GET /api/admin/reports/annual(.csv)`, Run payroll › Year-end; rep Pay history › By year | Done |
+| Two-factor sign-in (TOTP) | `auth/totp.ts`, `/api/me/totp/*`, `/auth/totp`, admin reset | Done |
+| Record a clawback from the deal drawer | `POST /api/admin/deals/:id/clawbacks` | Done |
+| Deal notes history and file attachments | `commission_deal_notes`, `commission_deal_files`, drawer sections | Done |
 | CRM integration that fires triggers (e.g. renewal-ready → CRM task) | After Phase 9 — needs the real CRM (open question #6: URL pattern, API) before anything beyond the deep link | Later |
 
 Payment math for a draw: `payback = amount × factor`; payments in the term at the deal's frequency are Daily = term, Weekly = term/5, Bi-Weekly = term/10, Monthly = term/21 (business days); `payment = payback / payments`.

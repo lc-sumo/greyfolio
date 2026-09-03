@@ -9,7 +9,7 @@ export type Role = 'Opener' | 'Closer' | 'Override';
 export const ROLES: readonly Role[] = ['Opener', 'Closer', 'Override'];
 
 /** Ledger rows carry a role, or the recovery marker. */
-export type LedgerRole = Role | 'Clawback recovery';
+export type LedgerRole = Role | 'Clawback recovery' | 'Void';
 
 /** `base` is the initial funding; `D1`, `D2`, … are draws. */
 export type SegmentKey = 'base' | `D${number}`;
@@ -246,6 +246,8 @@ export interface PayoutLine {
   clawbackId: string | null;
   /** Date the payout cleared, `YYYY-MM-DD`. */
   paidAt: string;
+  /** On a Void row: the key of the row it reverses. The ledger is append-only — nothing is ever deleted. */
+  voids?: string | null;
 }
 
 export interface Clawback {

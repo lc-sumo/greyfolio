@@ -76,6 +76,32 @@ describe('runs', () => {
   });
 });
 
+describe('voiding a payout', () => {
+  it('reverses rows in a run, makes them payable again, and shows in the run and the rep history', async () => {
+    const { admin, rep } = await harness();
+    // Julian was paid F1|Opener|base (350) in run-3 with a 100 recovery. Void everything in run-3 for him.
+    const res = await admin.post('/api/admin/payroll/runs/run-3/void').send({ repId: 'rep-julian-ribak' });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ rows: 2, reversed: 350, recoveriesReturned: 100 });
+    const detail = (await admin.get('/api/admin/payroll/runs/run-3/reps/rep-julian-ribak')).body;
+    expect(detail.paidInRun.filter((p: { voided: boolean }) => p.voided)).toHaveLength(2);
+    expect(detail.paidInRun.filter((p: { role: string }) => p.role === 'Void')).toHaveLength(2);
+    expect(detail.paidSummary).toMatchObject({ gross: 0, recovered: 0, voided: 350 });
+    // the line is payable again and the wallet reflects it
+    expect(detail.lines.map((l: { key: string }) => l.key)).toContain('F1|Opener|base');
+    const wallet = (await rep.get('/api/me/wallet')).body;
+    expect(wallet).toMatchObject({ paid: 0, cash: 0 });
+    const history = (await rep.get('/api/me/payments')).body;
+    expect(history.rows.filter((r: { voided: boolean }) => r.voided)).toHaveLength(2);
+    expect(history.rows.some((r: { segmentLabel: string }) => r.segmentLabel === 'Voided')).toBe(true);
+    // re-pay in run-4: the new row gets a #2 key, and the old one cannot be voided twice
+    const pay = await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: ['F1|Opener|base'] });
+    expect(pay.status).toBe(201);
+    expect((await admin.post('/api/admin/payroll/runs/run-3/void').send({ repId: 'rep-julian-ribak', keys: ['F1|Opener|base'] })).status).toBe(400);
+    expect((await admin.get('/api/admin/audit')).body.entries.some((e: { action: string }) => e.action === 'payroll.void')).toBe(true);
+  });
+});
+
 describe('per-rep payroll detail', () => {
   it('lists payable lines with collection state, the clawback queue, and what was paid in the run', async () => {
     const { admin } = await harness();
@@ -85,7 +111,7 @@ describe('per-rep payroll detail', () => {
     expect(res.body.clawbacks).toEqual([{ id: 'cb-1', dealId: 'F1', business: 'F1 Business', date: '2026-08-15', remaining: 250 }]);
     expect(res.body.outstandingClawback).toBe(250);
     expect(res.body.paidInRun.map((p: { role: string; amount: number }) => [p.role, p.amount])).toEqual([['Opener', 350], ['Clawback recovery', -100]]);
-    expect(res.body.paidSummary).toEqual({ gross: 350, recovered: 100, cash: 250, lineCount: 1 });
+    expect(res.body.paidSummary).toEqual({ gross: 350, recovered: 100, cash: 250, lineCount: 1, voided: 0 });
   });
   it('previews netting before commit', async () => {
     const { admin } = await harness();

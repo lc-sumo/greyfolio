@@ -123,6 +123,10 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
         const i = data.deals.findIndex((d) => d.id === id);
         if (i >= 0 && !data.deals[i]!.repPaid) data.deals[i] = { ...data.deals[i]!, repPaid: c.paidAt };
       }
+      for (const id of c.dealsUnstamped ?? []) {
+        const i = data.deals.findIndex((d) => d.id === id);
+        if (i >= 0) data.deals[i] = { ...data.deals[i]!, repPaid: null };
+      }
     },
   };
 }

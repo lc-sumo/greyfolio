@@ -1,44 +1,5 @@
 /** Admin projections: everything, including house net, referral and every rep's name. Never served to reps. */
-import {
-  clawbackWindow,
-  dealPayback,
-  disbursementOf,
-  effectiveIncrements,
-  type ClawbackWindow,
-  clawbackSlices,
-  collectedGross,
-  collectedOf,
-  collectionLabel,
-  crmUrl,
-  dealCommissionStatus,
-  dealLines,
-  houseNet,
-  outstandingGross,
-  outstandingOf,
-  paymentFor,
-  effectiveDealStatus,
-  renewalOf,
-  RENEWAL_BUCKET_LABEL,
-  scheduleEvents,
-  scheduleParts,
-  segmentStatus,
-  segments,
-  sum,
-  totalFunded,
-  totalGross,
-  totalNet,
-  totalRepPayout,
-  roleAssignments,
-  unitsPaid,
-  type Clawback,
-  type Deal,
-  type LedgerContext,
-  type Rep,
-  type RenewalBucket,
-  type Role,
-  type ScheduleEvent,
-  type Segment,
-} from '@greystone/commission';
+import { RENEWAL_BUCKET_LABEL, clawbackSlices, clawbackWindow, collectedGross, collectedOf, collectionLabel, crmUrl, dealCommissionStatus, dealLines, dealPayback, disbursementOf, effectiveDealStatus, effectiveIncrements, houseNet, isLinePaid, outstandingGross, outstandingOf, paidKeys, paymentFor, renewalOf, roleAssignments, scheduleEvents, scheduleParts, segmentStatus, segments, sum, totalFunded, totalGross, totalNet, totalRepPayout, type Clawback, type ClawbackWindow, type Deal, type LedgerContext, type RenewalBucket, type Rep, type Role, type ScheduleEvent, type Segment, unitsPaid } from '@greystone/commission';
 import type { Settings } from './repo.js';
 
 export interface RoleView {
@@ -107,10 +68,10 @@ export interface AdminDealRow {
 export function adminDealRow(deal: Deal, ctx: LedgerContext, reps: Rep[], settings: Settings, today: string): AdminDealRow {
   const name = (id: string | null) => (id ? reps.find((r) => r.id === id)?.name ?? id : null);
   const lines = dealLines(deal);
-  const paidKeys = new Set(ctx.lines.filter((l) => l.amount > 0).map((l) => l.key));
+  const paidSet = paidKeys(ctx.lines);
   const roleView = (role: Role, repId: string | null, rate: number): RoleView => {
     const mine = lines.filter((l) => l.role === role);
-    return { role, repId, name: name(repId), rate, amount: sum(mine.map((l) => l.amount)), paid: sum(mine.filter((l) => paidKeys.has(l.key)).map((l) => l.amount)) };
+    return { role, repId, name: name(repId), rate, amount: sum(mine.map((l) => l.amount)), paid: sum(mine.filter((l) => isLinePaid(l, paidSet)).map((l) => l.amount)) };
   };
   const segs = segments(deal);
   const full = segs.filter((s) => outstandingOf(s) === 0 && s.gross > 0).length;
@@ -298,7 +259,7 @@ function scheduleView(s: Segment, today: string, deal: Deal, ctx: LedgerContext,
 }
 
 function unitOf(key: string): string | null {
-  const m = /\|u(\d+)$/.exec(key);
+  const m = /\|u(\d+)(?:#\d+)?$/.exec(key);
   return m ? (Number(m[1]) === 0 ? 'Upfront' : `Increment ${m[1]}`) : null;
 }
 

@@ -1,4 +1,5 @@
 import { collectedOf as collectedOfSeg, scheduleEvents } from './collection.js';
+import { rowBase, standingLines } from './void.js';
 import { cents, sum } from './money.js';
 import { segments } from './segments.js';
 import type { Deal, PayoutLine, Rep, Role, Segment, SegmentKey, Team } from './types.js';
@@ -134,7 +135,7 @@ export function repDeals(deals: Deal[], repId: string): Deal[] {
  */
 export function paidKeys(lines: PayoutLine[]): Set<string> {
   const s = new Set<string>();
-  for (const l of lines) if (l.amount > 0) s.add(l.key);
+  for (const l of standingLines(lines)) if (l.amount > 0) s.add(rowBase(l.key));
   return s;
 }
 

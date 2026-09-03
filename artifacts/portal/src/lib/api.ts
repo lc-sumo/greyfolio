@@ -113,8 +113,8 @@ export interface PayrollRepDetail {
   lines: PayableLineView[];
   clawbacks: Array<{ id: string; dealId: string; business: string; date: string; remaining: number }>;
   outstandingClawback: number;
-  paidInRun: Array<{ key: string; dealId: string; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string; role: string; segmentKey: string | null; unitLabel: string | null; amount: number; paidAt: string }>;
-  paidSummary: { gross: number; recovered: number; cash: number; lineCount: number };
+  paidInRun: Array<{ key: string; dealId: string; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string; role: string; voided: boolean; voids: string | null; segmentKey: string | null; unitLabel: string | null; amount: number; paidAt: string }>;
+  paidSummary: { gross: number; recovered: number; cash: number; lineCount: number; voided: number };
 }
 export interface PayResult { repId: string; runId: string; gross: number; withheld: number; net: number; lines: number; recoveries: number; dealsFullyPaid: string[]; uncollectedDealIds: string[] }
 
@@ -123,7 +123,7 @@ export type RenewalBucket = 'due' | 'prospecting' | 'building' | 'risk' | 'refin
 export interface RenewalBase { id: string; crmId: string | null; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string; lender: string; product: string; date: string; funded: number; payback: number | null; termDays: number | null; frequency: string; factor: number | null; parentId: string | null; isParent: boolean; drawCount: number; pctPaidIn: number; markDate: string | null; maturityDate: string | null; daysToMark: number | null; bucket: RenewalBucket; bucketLabel: string; soon: boolean; prospectingDate: string; daysToProspecting: number; effectiveStatus: string; dealStatus: string }
 export interface RepRenewalView extends RenewalBase { roles: Role[]; whoCalls: 'You' | 'Closer' | 'Opener'; estRenewalShare: number }
 export interface AdminRenewalRow extends RenewalBase { whoCalls: string; estRenewalGross: number; crmUrl: string }
-export interface PayHistoryRow { key: string; paidAt: string; dealId: string; business: string; role: string; segmentKey: string | null; segmentLabel: string; amount: number; runId: string | null; runLabel: string | null }
+export interface PayHistoryRow { key: string; paidAt: string; dealId: string; business: string; role: string; segmentKey: string | null; segmentLabel: string; voided: boolean; amount: number; runId: string | null; runLabel: string | null }
 export interface PayHistory { rows: PayHistoryRow[]; days: Array<{ date: string; runLabel: string | null; grossPaid: number; recovered: number; cash: number; rows: PayHistoryRow[] }>; summary: { grossPaid: number; recovered: number; cash: number; payouts: number } }
 
 /** Statuses ops set by hand; Performing / Prospecting / Refi Ready follow the dates automatically. */

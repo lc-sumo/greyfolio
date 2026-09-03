@@ -245,6 +245,8 @@ export const commissionPayoutLines = pgTable(
     clawbackId: text('clawback_id').references(() => commissionClawbacks.id),
     /** Date the payout cleared — the axis "paid" buckets on (invariant #7). */
     paidAt: isoDate('paid_at').notNull(),
+    /** On a Void row: the key of the row it reverses. The ledger is append-only. */
+    voids: text('voids'),
     createdAt: createdAt(),
   },
   (t) => [

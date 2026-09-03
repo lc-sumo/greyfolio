@@ -85,6 +85,22 @@ export function Payroll() {
     </div>
   );
 
+  async function voidRows(keys?: string[]) {
+    if (!activeRun || !payRepId) return;
+    const what = keys ? 'this payout line' : `everything paid to ${d?.rep.name} in ${activeRun.label}`;
+    if (!window.confirm(`Void ${what}? Nothing is deleted: reversing rows are added, the lines become payable again, and any clawback withheld goes back on the clawback.`)) return;
+    setBusy(true);
+    try {
+      const r = await post<{ rows: number; reversed: number; recoveriesReturned: number }>(`/api/admin/payroll/runs/${activeRun.id}/void`, { repId: payRepId, keys });
+      await qc.invalidateQueries();
+      notify(`Voided ${r.rows} row(s) — ${money(r.reversed)} reversed${r.recoveriesReturned ? `, ${money(r.recoveriesReturned)} back on clawback` : ''}`);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Could not void');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function pay() {
     if (!activeRun || !payRepId || !selectedKeys.length) { notify('Select at least one deal line to pay'); return; }
     setBusy(true);
@@ -233,20 +249,20 @@ export function Payroll() {
                   {d && d.outstandingClawback > 0 && <div className="note" style={{ marginTop: 10, background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>Outstanding clawback balance for {d.rep.name}: <b>{money(d.outstandingClawback)}</b> across {d.clawbacks.length} deal(s){withheld ? <> — <b>{money(withheld)}</b> recovers on this payout, leaving {money(d.outstandingClawback - withheld)}.</> : '. It nets against the next payout that has gross to withhold from.'}</div>}
                 </Card>
 
-                <Card title="Paid in this run" extra={d && d.paidInRun.length ? `${d.paidSummary.lineCount} deal line(s) · cash ${money(d.paidSummary.cash)}` : ''}>
+                <Card title="Paid in this run" extra={d && d.paidInRun.length ? <>{d.paidSummary.lineCount} deal line(s) · cash {money(d.paidSummary.cash)}{d.paidSummary.voided ? ` · ${money(d.paidSummary.voided)} voided` : ''} {d.paidInRun.some((p) => !p.voided && p.role !== 'Void') && <button className="btn" style={{ marginLeft: 10, height: 28, padding: '0 10px', color: 'var(--red)' }} onClick={() => void voidRows()}>Void everything in this run for {d.rep.name}</button>}</> : ''}>
                   {!d || d.paidInRun.length === 0 ? <div className="muted">Nothing recorded for {d?.rep.name ?? 'this rep'} in {activeRun.label} yet.</div> : (
                     <>
                       <div className="scroller">
                         <div className="table" style={{ ['--cols' as string]: '90px minmax(170px,1.2fr) minmax(150px,1fr) 170px 120px minmax(0,1fr)', minWidth: 800 }}>
                           <div className="tr th"><div className="td">Deal</div><div className="td">Business</div><div className="td">Merchant</div><div className="td">Role</div><div className="td r">Amount</div><div className="td">Date</div></div>
                           {d.paidInRun.map((p) => (
-                            <div className="tr" key={p.key}>
+                            <div className={`tr ${p.voided ? 'voided' : ''}`} key={p.key}>
                               <div className="td num" style={{ cursor: 'pointer' }} onClick={() => setOpen(p.dealId)}>{p.dealId}</div>
                               <div className="td ellipsis">{p.business}</div>
                               <div className="td contact-cell"><Contact name={p.merchantContact} email={p.merchantEmail} phone={p.merchantPhone} /></div>
-                              <div className={`td ${p.amount < 0 ? 'neg' : ''}`}>{p.role}{p.segmentKey && p.segmentKey !== 'base' ? ` · ${p.segmentKey}` : ''}{p.unitLabel ? <span className="subtle"> · {p.unitLabel}</span> : ''}</div>
-                              <div className={`td r num ${p.amount < 0 ? 'neg' : 'pos'}`}>{money(p.amount)}</div>
-                              <div className="td num">{day(p.paidAt)}</div>
+                              <div className={`td ${p.role === 'Void' ? 'warn' : p.amount < 0 ? 'neg' : ''}`}>{p.role === 'Void' ? <>Void <span className="subtle">· reverses {p.voids?.startsWith('cbrec') ? 'clawback recovery' : p.unitLabel ?? 'payout'}</span></> : <>{p.role}{p.segmentKey && p.segmentKey !== 'base' ? ` · ${p.segmentKey}` : ''}{p.unitLabel ? <span className="subtle"> · {p.unitLabel}</span> : ''}{p.voided && <span className="subtle"> · voided</span>}</>}</div>
+                              <div className={`td r num ${p.role === 'Void' ? 'warn' : p.amount < 0 ? 'neg' : 'pos'}`}>{money(p.amount)}</div>
+                              <div className="td num">{day(p.paidAt)}{!p.voided && p.role !== 'Void' && p.amount > 0 && <button className="linkish" style={{ marginLeft: 8, color: 'var(--red)', fontSize: 12.5 }} title="Reverse this payout line; it becomes payable again" onClick={() => void voidRows([p.key])}>void</button>}</div>
                             </div>
                           ))}
                           <div className="tr total"><div className="td" style={{ gridColumn: '1 / 5' }}>Gross {money(d.paidSummary.gross)}{d.paidSummary.recovered ? ` − clawback recovered ${money(d.paidSummary.recovered)}` : ''} = cash paid {money(d.paidSummary.cash)}</div><div className="td r num">{money(d.paidSummary.cash)}</div><div className="td" /></div>

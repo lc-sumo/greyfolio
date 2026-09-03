@@ -7,43 +7,7 @@
  * override amounts belonging to someone else, other reps' ids or names.
  * `assertRepSafe` is the guard tests run over every projection.
  */
-import {
-  clawbackWindow,
-  dealPayback,
-  disbursementOf,
-  type ClawbackWindow,
-  type Lender,
-  type ProductRule,
-  collectionLabel,
-  dealCommissionStatus,
-  linesInPeriod,
-  monthlySeries,
-  paidFigures,
-  renewalOf,
-  RENEWAL_BUCKET_LABEL,
-  repClawback,
-  repDeals,
-  repLedger,
-  isLinePaid,
-  paidKeys,
-  repLines,
-  repShare,
-  segments,
-  unitsPaid,
-  sum,
-  cents,
-  totalFunded,
-  type Clawback,
-  type CommissionStatus,
-  type Deal,
-  type LedgerContext,
-  type PayoutLine,
-  type PayrollRun,
-  type Rep,
-  type RenewalBucket,
-  type RenewalSettings,
-  type Role,
-} from '@greystone/commission';
+import { RENEWAL_BUCKET_LABEL, cents, clawbackWindow, collectionLabel, dealCommissionStatus, dealPayback, disbursementOf, isLinePaid, linesInPeriod, monthlySeries, paidFigures, paidKeys, renewalOf, repClawback, repDeals, repLedger, repLines, repShare, segments, standingLines, sum, totalFunded, type Clawback, type ClawbackWindow, type CommissionStatus, type Deal, type LedgerContext, type Lender, type PayoutLine, type PayrollRun, type ProductRule, type RenewalBucket, type RenewalSettings, type Rep, type Role, unitsPaid, voidedKeys } from '@greystone/commission';
 
 /** Keys that must never appear anywhere in a rep-scoped payload. */
 export const REP_FORBIDDEN_KEYS: readonly string[] = [
@@ -145,7 +109,7 @@ export function repDealView(deal: Deal, repId: string, lines: PayoutLine[], claw
   const accrued = sum(mine.filter((l) => l.collected).map((l) => l.amount));
   const grouped = new Map<string, typeof mine>();
   for (const l of mine) grouped.set(`${l.role}|${l.segmentKey}`, [...(grouped.get(`${l.role}|${l.segmentKey}`) ?? []), l]);
-  const paid = sum(lines.filter((l) => l.repId === repId && l.dealId === deal.id && l.amount > 0).map((l) => l.amount));
+  const paid = sum(standingLines(lines).filter((l) => l.repId === repId && l.dealId === deal.id && l.amount > 0).map((l) => l.amount));
   const segs = segments(deal);
   const cb = clawbacks.find((c) => c.dealId === deal.id);
   const slice = cb ? repClawback(cb, deal, repId, lines) : null;
@@ -452,6 +416,8 @@ export interface PayHistoryRow {
   role: string;
   segmentKey: string | null;
   segmentLabel: string;
+  /** This row was later reversed by a void. */
+  voided: boolean;
   amount: number;
   runId: string | null;
   runLabel: string | null;
@@ -468,6 +434,7 @@ export interface PayHistory {
 export function repPayHistory(ctx: LedgerContext, runs: PayrollRun[], repId: string): PayHistory {
   const byDeal = new Map(ctx.deals.map((d) => [d.id, d]));
   const runLabel = new Map(runs.map((r) => [r.id, r.label]));
+  const gone = voidedKeys(ctx.lines);
   const rows: PayHistoryRow[] = ctx.lines
     .filter((l) => l.repId === repId)
     .map((l) => ({
@@ -477,7 +444,8 @@ export function repPayHistory(ctx: LedgerContext, runs: PayrollRun[], repId: str
       business: byDeal.get(l.dealId)?.business ?? l.dealId,
       role: l.role,
       segmentKey: l.segmentKey,
-      segmentLabel: !l.segmentKey ? 'Clawback' : l.segmentKey === 'base' ? 'Initial' : `Draw ${l.segmentKey.slice(1)}`,
+      segmentLabel: l.role === 'Void' ? 'Voided' : !l.segmentKey ? 'Clawback' : l.segmentKey === 'base' ? 'Initial' : `Draw ${l.segmentKey.slice(1)}`,
+      voided: gone.has(l.key),
       amount: l.amount,
       runId: l.runId,
       runLabel: l.runId ? runLabel.get(l.runId) ?? l.runId : null,

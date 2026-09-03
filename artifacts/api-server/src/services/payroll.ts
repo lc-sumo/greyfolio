@@ -1,4 +1,4 @@
-import { PayoutError, applyPayout, planPayout, type PayoutPlan, type PayrollRun } from '@greystone/commission';
+import { PayoutError, VoidError, applyPayout, applyVoid, planPayout, planVoid, type PayoutPlan, type PayrollRun, type VoidPlan } from '@greystone/commission';
 import { HttpError } from '../http-error.js';
 import type { Repo } from '../repo.js';
 
@@ -79,5 +79,35 @@ export async function paySelected(repo: Repo, req: PayRequest, actorRepId: strin
   applyPayout(ctx, plan);
   await repo.commitPayout({ lines: [...plan.lines, ...plan.recoveries], clawbackUpdates: plan.clawbackUpdates, dealsFullyPaid: plan.dealsFullyPaid, paidAt: today() });
   await repo.writeAudit({ actorRepId, action: 'payroll.pay', targetRepId: req.repId, path: `/api/admin/payroll/runs/${run.id}/pay`, detail: { lines: plan.lines.length, gross: plan.gross, withheld: plan.withheld, net: plan.net } });
+  return plan;
+}
+
+export interface VoidRequestInput {
+  runId: string;
+  repId: string;
+  /** Exact ledger row keys; omit to void everything paid to the rep in the run. */
+  keys?: string[];
+}
+
+/**
+ * Reverse a payout. Nothing is deleted: Void rows are appended, the lines
+ * become payable again, any clawback recovery withheld goes back on the
+ * clawback, and "paid in full" stamps that no longer hold are cleared.
+ */
+export async function voidPayout(repo: Repo, req: VoidRequestInput, actorRepId: string): Promise<VoidPlan> {
+  const runs = await repo.listRuns();
+  const run = runs.find((r) => r.id === req.runId);
+  if (!run) throw new HttpError(404, `Run ${req.runId} not found`);
+  const ctx = await repo.loadContext();
+  let plan: VoidPlan;
+  try {
+    plan = planVoid(ctx, { repId: req.repId, runId: run.id, keys: req.keys, paidAt: today() });
+  } catch (e) {
+    if (e instanceof VoidError) throw new HttpError(400, e.message);
+    throw e;
+  }
+  applyVoid(ctx, plan);
+  await repo.commitPayout({ lines: plan.lines, clawbackUpdates: plan.clawbackUpdates, dealsFullyPaid: [], dealsUnstamped: plan.dealsUnstamped, paidAt: today() });
+  await repo.writeAudit({ actorRepId, action: 'payroll.void', targetRepId: req.repId, path: `/api/admin/payroll/runs/${run.id}/void`, detail: { rows: plan.lines.length, reversed: plan.reversed, recoveriesReturned: plan.recoveriesReturned, keys: plan.lines.map((l) => l.voids) } });
   return plan;
 }

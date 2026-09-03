@@ -29,11 +29,11 @@ export function PayHistory() {
                 <div className="table" style={{ ['--cols' as string]: '90px minmax(170px,1.2fr) 170px 110px minmax(0,1fr)', minWidth: 720 }}>
                   <div className="tr th"><div className="td">Deal</div><div className="td">Business</div><div className="td">Line</div><div className="td r">Amount</div><div className="td">Run</div></div>
                   {d.rows.map((r) => (
-                    <div className="tr click" key={r.key} onClick={() => setOpen(r.dealId)}>
+                    <div className={`tr click ${r.voided ? 'voided' : ''}`} key={r.key} onClick={() => setOpen(r.dealId)}>
                       <div className="td num">{r.dealId}</div>
                       <div className="td ellipsis">{r.business}</div>
-                      <div className={`td ${r.amount < 0 ? 'neg' : ''}`}>{r.amount < 0 ? 'Clawback recovery' : `${r.role} · ${r.segmentLabel}`}</div>
-                      <div className={`td r num ${r.amount < 0 ? 'neg' : 'pos'}`}>{money(r.amount)}</div>
+                      <div className={`td ${r.role === 'Void' ? 'warn' : r.amount < 0 ? 'neg' : ''}`}>{r.role === 'Void' ? 'Voided payout' : r.amount < 0 ? 'Clawback recovery' : `${r.role} · ${r.segmentLabel}`}{r.voided && <span className="subtle"> · later voided</span>}</div>
+                      <div className={`td r num ${r.role === 'Void' ? 'warn' : r.amount < 0 ? 'neg' : 'pos'}`}>{money(r.amount)}</div>
                       <div className="td subtle ellipsis">{r.runLabel ?? '—'}</div>
                     </div>
                   ))}

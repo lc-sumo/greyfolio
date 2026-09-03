@@ -1,6 +1,7 @@
 import { cents, sum } from './money.js';
 import { clawbacksFor, repClawback } from './clawback.js';
 import { dealLines, repDeals, repShare } from './splits.js';
+import { standingLines, voidedKeys } from './void.js';
 import type { Deal, LedgerContext, PayoutLine } from './types.js';
 
 export interface RepLedger {
@@ -36,8 +37,8 @@ export function repLedger(ctx: LedgerContext, repId: string): RepLedger {
 
   const earned = sum(deals.map((d) => repShare(d, repId)));
   const accrued = sum(deals.flatMap((d) => dealLines(d).filter((l) => l.repId === repId && l.collected).map((l) => l.amount)));
-  const paid = sum(mine.filter((l) => l.amount > 0).map((l) => l.amount));
-  const cash = sum(mine.map((l) => l.amount));
+  const paid = sum(standingLines(mine).filter((l) => l.amount > 0).map((l) => l.amount));
+  const cash = sum(mine.map((l) => l.amount)); // voids cancel their originals here
 
   let held = 0;
   let recovered = 0;
@@ -60,6 +61,8 @@ export interface PaidFigures {
   /** gross − recovered. */
   cash: number;
   lineCount: number;
+  /** Commission reversed by voids in this set (informational). */
+  voided: number;
 }
 
 /**
@@ -67,10 +70,13 @@ export interface PaidFigures {
  * Sum only positive rows for the headline; surface withholding separately.
  */
 export function paidFigures(lines: PayoutLine[]): PaidFigures {
-  const pos = lines.filter((l) => l.amount > 0);
+  const gone = voidedKeys(lines);
+  const stands = lines.filter((l) => l.role !== 'Void' && !gone.has(l.key));
+  const pos = stands.filter((l) => l.amount > 0);
   const gross = sum(pos.map((l) => l.amount));
-  const recovered = cents(-sum(lines.filter((l) => l.amount < 0).map((l) => l.amount)));
-  return { gross, recovered, cash: cents(gross - recovered), lineCount: pos.length };
+  const recovered = cents(-sum(stands.filter((l) => l.amount < 0).map((l) => l.amount)));
+  const voided = sum(lines.filter((l) => l.role !== 'Void' && gone.has(l.key) && l.amount > 0).map((l) => l.amount));
+  return { gross, recovered, cash: cents(gross - recovered), lineCount: pos.length, voided };
 }
 
 /** Ledger rows whose payout cleared inside [from, to] (inclusive ISO dates). */
@@ -84,7 +90,7 @@ export function linesInPeriod(lines: PayoutLine[], from: string, to: string): Pa
  */
 export function monthlySeries(ctx: LedgerContext, repId: string, months: string[]): Array<{ month: string; earned: number; paid: number }> {
   const deals = repDeals(ctx.deals, repId);
-  const mine = ctx.lines.filter((l) => l.repId === repId && l.amount > 0);
+  const mine = standingLines(ctx.lines).filter((l) => l.repId === repId && l.amount > 0);
   return months.map((month) => ({
     month,
     earned: sum(deals.filter((d) => d.date.startsWith(month)).map((d) => repShare(d, repId))),

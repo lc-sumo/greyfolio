@@ -13,7 +13,7 @@ import { adminMerchants, adminOverview } from '../../../api-server/src/analytics
 import { memoryRepo } from '../../../api-server/src/repo.memory';
 import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repPayHistory, repRenewals, repStatements, repWallet } from '../../../api-server/src/scope';
 import { addDraw, createDeal, deleteDeal, setCollection, setCrmId, setDealStatus, updateSplits, updateTerms } from '../../../api-server/src/services/deals';
-import { advanceRun, createRun, paySelected } from '../../../api-server/src/services/payroll';
+import { advanceRun, createRun, paySelected, voidPayout } from '../../../api-server/src/services/payroll';
 import { createRep, createTeam, deleteTeam, saveCrm, saveLenders, savePartners, savePayroll, saveProducts, saveThresholds, updateRep, updateTeam, usage } from '../../../api-server/src/services/settings';
 import { payrollRepDetail, payrollReps, preview, runSummary } from '../../../api-server/src/payroll-views';
 import { ApiError, type SessionUser } from './api';
@@ -255,6 +255,11 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
       return json({ runs: [...d.runs].sort((a, b) => b.start.localeCompare(a.start)).map((run) => runSummary(run, ctx)), reps: rows, outstanding: rows.reduce((s2, x) => s2 + x.owed, 0) });
     }
     if (p === '/api/admin/payroll/runs' && method === 'POST') return json(await createRun(repo, me.repId, body.start && body.end ? { start: String(body.start), end: String(body.end) } : undefined));
+    const vm = p.match(/^\/api\/admin\/payroll\/runs\/([^/]+)\/void$/);
+    if (vm && method === 'POST') {
+      const plan = await voidPayout(repo, { runId: decodeURIComponent(vm[1]!), repId: String(body.repId ?? ''), keys: Array.isArray(body.keys) ? (body.keys as unknown[]).map(String) : undefined }, me.repId);
+      return json({ rows: plan.lines.length, reversed: plan.reversed, recoveriesReturned: plan.recoveriesReturned, dealsUnstamped: plan.dealsUnstamped });
+    }
     if (p === '/api/admin/payroll/preview' && method === 'POST') return json(preview(ctx, String(body.repId ?? ''), Array.isArray(body.selectedKeys) ? (body.selectedKeys as string[]) : []));
     const pr = p.match(/^\/api\/admin\/payroll\/runs\/([^/]+)\/(advance|pay|reps\/([^/]+))$/);
     if (pr) {

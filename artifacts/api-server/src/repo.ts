@@ -74,5 +74,7 @@ export interface PayoutCommit {
   lines: PayoutLine[];
   clawbackUpdates: Array<Pick<Clawback, 'id' | 'recovered' | 'status'>>;
   dealsFullyPaid: string[];
+  /** Deals whose repPaid stamp is cleared (a void undid the last line). */
+  dealsUnstamped?: string[];
   paidAt: string;
 }

@@ -75,12 +75,12 @@ describe('repLedger — invariant #1: one definition of a rep\'s money', () => {
 describe('paidFigures — invariant #6: a paid figure never renders negative', () => {
   it('a period containing only a recovery shows $0 paid and the withholding on its own line', () => {
     const rows = [line('cbrec|cb-1|run-3|rep-07', 'rep-07', -672, { role: 'Clawback recovery', clawbackId: 'cb-1', segmentKey: null, paidAt: '2026-08-20' })];
-    expect(paidFigures(rows)).toEqual({ gross: 0, recovered: 672, cash: -672, lineCount: 0 });
+    expect(paidFigures(rows)).toEqual({ gross: 0, recovered: 672, cash: -672, lineCount: 0, voided: 0 });
     expect(paidFigures(rows).gross).toBeGreaterThanOrEqual(0);
   });
   it('gross − recovered = cash', () => {
     const rows = [line('F1|Opener|base', 'rep-07', 1_000), line('cbrec|cb-1|run-3|rep-07', 'rep-07', -672, { role: 'Clawback recovery', clawbackId: 'cb-1', segmentKey: null })];
-    expect(paidFigures(rows)).toEqual({ gross: 1_000, recovered: 672, cash: 328, lineCount: 1 });
+    expect(paidFigures(rows)).toEqual({ gross: 1_000, recovered: 672, cash: 328, lineCount: 1, voided: 0 });
   });
   it('linesInPeriod buckets by the date the payout cleared', () => {
     const rows = [line('a|Opener|base', 'r', 1, { paidAt: '2026-08-01' }), line('b|Opener|base', 'r', 1, { paidAt: '2026-08-16' })];

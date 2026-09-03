@@ -99,6 +99,7 @@ export function toPayoutLine(l: PayoutLineRow): PayoutLine {
     runId: l.runId,
     clawbackId: l.clawbackId,
     paidAt: l.paidAt,
+    voids: l.voids ?? null,
   };
 }
 

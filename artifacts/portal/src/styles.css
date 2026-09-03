@@ -362,3 +362,5 @@ input.big { width: 24px; height: 24px; accent-color: var(--teal); cursor: pointe
 .palettes .sw { width: 100%; height: 18px; border-radius: 5px; display: grid; grid-template-columns: 1fr 1fr 1fr; overflow: hidden; }
 .palettes .sw i { display: block; }
 .palettes span { font-size: 10px; color: var(--navy-text-3); letter-spacing: .04em; }
+.table .tr.voided .td { text-decoration: line-through; opacity: .55; }
+.table .tr.voided .td .subtle { text-decoration: none; }

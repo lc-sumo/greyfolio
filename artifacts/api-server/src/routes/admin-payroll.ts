@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { HttpError, currentUser, requireRole } from '../auth/middleware.js';
 import { payableFor, payrollRepDetail, payrollReps, preview, runCsv, runSummary } from '../payroll-views.js';
 import type { Repo } from '../repo.js';
-import { advanceRun, createRun, paySelected } from '../services/payroll.js';
+import { advanceRun, createRun, paySelected, voidPayout } from '../services/payroll.js';
 
 /** Payroll: runs, per-rep payable lines, netting preview, pay + record, CSV. Admin only. */
 export function adminPayrollRouter(repo: Repo): Router {
@@ -39,6 +39,11 @@ export function adminPayrollRouter(repo: Repo): Router {
     res.status(201).json({ repId: plan.repId, runId: plan.runId, gross: plan.gross, withheld: plan.withheld, net: plan.net, lines: plan.lines.length, recoveries: plan.recoveries.length, dealsFullyPaid: plan.dealsFullyPaid, uncollectedDealIds: plan.uncollectedDealIds });
   });
 
+  r.post('/payroll/runs/:id/void', async (req, res) => {
+    const keys = Array.isArray(req.body?.keys) ? req.body.keys.map(String) : undefined;
+    const plan = await voidPayout(repo, { runId: String(req.params.id), repId: String(req.body?.repId ?? ''), keys }, currentUser(req)!.repId);
+    res.json({ rows: plan.lines.length, reversed: plan.reversed, recoveriesReturned: plan.recoveriesReturned, dealsUnstamped: plan.dealsUnstamped });
+  });
   r.get('/payroll/runs/:id/export.csv', async (req, res) => {
     const [ctx, reps] = await Promise.all([repo.loadContext(), repo.listReps()]);
     const repId = typeof req.query.rep === 'string' ? req.query.rep : undefined;

@@ -141,10 +141,11 @@ export function dbRepo(db: Database): Repo {
     async commitPayout(c: PayoutCommit) {
       await db.transaction(async (tx) => {
         for (const l of c.lines) {
-          await tx.insert(commissionPayoutLines).values({ key: l.key, dealId: l.dealId, segmentKey: l.segmentKey, role: l.role, repId: l.repId, amount: l.amount, runId: l.runId, clawbackId: l.clawbackId, paidAt: l.paidAt });
+          await tx.insert(commissionPayoutLines).values({ key: l.key, dealId: l.dealId, segmentKey: l.segmentKey, role: l.role, repId: l.repId, amount: l.amount, runId: l.runId, clawbackId: l.clawbackId, paidAt: l.paidAt, voids: l.voids ?? null });
         }
         for (const u of c.clawbackUpdates) await tx.update(commissionClawbacks).set({ recovered: u.recovered, status: u.status }).where(eq(commissionClawbacks.id, u.id));
         for (const id of c.dealsFullyPaid) await tx.update(commissionDeals).set({ repPaid: c.paidAt, updatedAt: sql`now()` }).where(sql`${commissionDeals.id} = ${id} and ${commissionDeals.repPaid} is null`);
+        for (const id of c.dealsUnstamped ?? []) await tx.update(commissionDeals).set({ repPaid: null, updatedAt: sql`now()` }).where(eq(commissionDeals.id, id));
       });
     },
     async writeAudit(entry: AuditEntry) {

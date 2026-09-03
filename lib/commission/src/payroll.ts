@@ -1,3 +1,4 @@
+import { nextRowKey } from './void.js';
 import { cents, sum } from './money.js';
 import { clawbackRecovered, clawbackStatus, clawbacksFor, repClawback } from './clawback.js';
 import { isDealFullyPaid, payableLines, type RepLine } from './splits.js';
@@ -92,8 +93,9 @@ export function planPayout(ctx: LedgerContext, req: PayoutRequest): PayoutPlan {
   if (selected.length === 0) throw new PayoutError('Select at least one deal line to pay');
 
   const gross = sum(selected.map((l) => l.amount));
+  const existing = new Set(ctx.lines.map((l) => l.key));
   const lines: PayoutLine[] = selected.map((l) => ({
-    key: l.key,
+    key: nextRowKey(l.key, existing),
     dealId: l.dealId,
     segmentKey: l.segmentKey,
     role: l.role,

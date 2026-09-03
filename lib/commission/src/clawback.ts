@@ -14,8 +14,9 @@ export interface RepClawback {
 
 /** Negative ledger rows recorded against a clawback. */
 export function recoveryLines(lines: PayoutLine[], clawbackId: string, repId?: string): PayoutLine[] {
+  const gone = new Set(lines.filter((l) => l.role === 'Void' && l.voids).map((l) => l.voids!));
   return lines.filter(
-    (l) => l.role === 'Clawback recovery' && l.clawbackId === clawbackId && l.amount < 0 && (!repId || l.repId === repId),
+    (l) => l.role === 'Clawback recovery' && l.clawbackId === clawbackId && l.amount < 0 && !gone.has(l.key) && (!repId || l.repId === repId),
   );
 }
 

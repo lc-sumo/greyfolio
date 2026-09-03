@@ -1,0 +1,1 @@
+ALTER TABLE "commission_payout_lines" ADD COLUMN "voids" text;

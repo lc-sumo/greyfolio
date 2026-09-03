@@ -30,12 +30,15 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
     amount: '', termDays: '120', factor: '1.35', apr: '', frequency: 'Daily', commRate: String((first?.comm ?? 0.12) * 100), psfPct: '0', originationFee: '0',
     referralPartner: 'None', referralRate: '0', creditLine: '', drawInitialPct: '', drawSubsequentPct: '',
     openerId: '', openerRate: '', closerId: '', closerRate: '', overrideId: '', overrideRate: '',
+    payout: 'lender', commIncrements: '', commUpfrontPct: '', commRemainder: 'spread', commCadenceDays: '7', commStartDate: '',
   });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF((s) => ({ ...s, [k]: e.target.value }));
 
   const rule = settings.products.find((p) => p.name === f.product);
+  const lender = settings.lenders.find((l) => l.name === f.lender);
+  const incremental = f.payout === 'increments' || (f.payout === 'lender' && lender?.terms === 'weekly');
   const partner = settings.partners.find((p) => p.name === f.referralPartner);
   const reps = roster.data?.reps ?? [];
   const assign: RepOption[] = board.repOptions.assign;
@@ -45,6 +48,11 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
     if (!rule) return;
     setF((s) => ({ ...s, commRate: String((rule.multiDraw ? rule.drawInitial ?? rule.comm : rule.comm) * 100), drawInitialPct: rule.drawInitial ? String(rule.drawInitial * 100) : '', drawSubsequentPct: rule.drawSubsequent ? String(rule.drawSubsequent * 100) : '' }));
   }, [rule?.name]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Lender change → seed the payout structure from the lender's defaults.
+  useEffect(() => {
+    if (!lender) return;
+    setF((s) => ({ ...s, commIncrements: lender.terms === 'weekly' ? String(lender.weeks) : s.commIncrements ?? '', commUpfrontPct: lender.upfrontPct ? String(lender.upfrontPct * 100) : s.payout === 'lender' ? '' : s.commUpfrontPct ?? '', commRemainder: lender.remainder ?? 'spread', commCadenceDays: String(lender.cadenceDays ?? 7) }));
+  }, [lender?.name]); // eslint-disable-line react-hooks/exhaustive-deps
   // Partner change → prefill its rate.
   useEffect(() => { setF((s) => ({ ...s, referralRate: partner ? String(partner.pct * 100) : '0' })); }, [partner?.name]); // eslint-disable-line react-hooks/exhaustive-deps
   // Opener / closer → rates from profiles; override defaults from the opener's team leader.
@@ -87,6 +95,11 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
         creditLine: rule?.multiDraw ? num(f.creditLine) || null : null, drawInitialPct: rule?.multiDraw ? num(f.drawInitialPct) : null, drawSubsequentPct: rule?.multiDraw ? num(f.drawSubsequentPct) : null,
         openerId: f.openerId || null, openerRate: num(f.openerRate), closerId: f.closerId || null, closerRate: num(f.closerRate), overrideId: f.overrideId || null, overrideRate: num(f.overrideRate),
         leadSource: priorDeals.length ? 'Existing client' : 'Direct',
+        commIncrements: f.payout === 'upfront' ? 0 : incremental ? num(f.commIncrements) || null : null,
+        commUpfrontPct: incremental ? num(f.commUpfrontPct) : null,
+        commRemainder: incremental ? (f.commRemainder as 'spread' | 'at-end') : null,
+        commCadenceDays: incremental ? num(f.commCadenceDays) || 7 : null,
+        commStartDate: incremental && f.commStartDate ? f.commStartDate : null,
       });
       await qc.invalidateQueries();
       notify(`${saved.id} saved — ${saved.roles.filter((r) => r.repId).length} rep portal(s) updated`);
@@ -145,6 +158,31 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
         <Field label="Origination fee ($)"><input inputMode="decimal" value={f.originationFee} onChange={set('originationFee')} /></Field>
         <Field label="Referral partner"><select value={f.referralPartner} onChange={set('referralPartner')}>{settings.partners.map((p) => <option key={p.name}>{p.name}</option>)}</select></Field>
         <Field label="Referral fee %"><input inputMode="decimal" value={f.referralRate} onChange={set('referralRate')} /></Field>
+        <div className="label" style={{ gridColumn: '1 / -1', marginTop: 6 }}>Commission payout from the lender</div>
+        <Field label="Payout structure" span>
+          <select value={f.payout} onChange={set('payout')}>
+            <option value="lender">{lender ? (lender.terms === 'weekly' ? `Lender default — ${lender.weeks} increments${lender.upfrontPct ? `, ${Math.round(lender.upfrontPct * 100)}% upfront` : ''}${lender.remainder === 'at-end' ? ', rest when done' : ''}` : 'Lender default — all upfront at funding') : 'Lender default'}</option>
+            <option value="upfront">All upfront at funding</option>
+            <option value="increments">In increments (consolidation-style)</option>
+          </select>
+        </Field>
+        {incremental && (
+          <>
+            <Field label="Upfront share %" hint="e.g. 50 → half at funding, the rest per the structure below"><input inputMode="decimal" placeholder="0" value={f.commUpfrontPct} onChange={set('commUpfrontPct')} /></Field>
+            <Field label="Number of increments"><input inputMode="numeric" value={f.commIncrements} onChange={set('commIncrements')} /></Field>
+            <Field label="Remainder">
+              <select value={f.commRemainder} onChange={set('commRemainder')}>
+                <option value="spread">Spread evenly across the increments</option>
+                <option value="at-end">Paid once, when the increments are done</option>
+              </select>
+            </Field>
+            <Field label="Increment cadence">
+              <select value={f.commCadenceDays} onChange={set('commCadenceDays')}><option value="7">Weekly</option><option value="14">Bi-weekly</option><option value="30">Monthly</option></select>
+            </Field>
+            <Field label="First increment expected" hint="defaults to one cadence after funding"><input type="date" value={f.commStartDate} onChange={set('commStartDate')} /></Field>
+            <div className="note" style={{ gridColumn: '1 / -1' }}>{structureNote(m.gross, f)}</div>
+          </>
+        )}
         <Field label="Payback" hint="computed"><input readOnly className="ro" value={m.payback === null ? 'n/a for this product' : money(m.payback)} /></Field>
         <Field label="Est. renewal date" hint="computed"><input readOnly className="ro" value={renewal ? fullDay(renewal) : 'Not renewal tracked'} /></Field>
 
@@ -184,4 +222,16 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
       <div className="subtle" style={{ fontSize: 11 }}>Rates: {pct(0.2)} means 20 — type either.</div>
     </Drawer>
   );
+}
+
+function structureNote(gross: number, f: Record<string, string>): string {
+  const n = num(f.commIncrements);
+  const up = Math.min(100, Math.max(0, num(f.commUpfrontPct)));
+  const upfront = gross * (up / 100);
+  const rest = gross - upfront;
+  const cadence = { '7': 'week', '14': 'two weeks', '30': 'month' }[f.commCadenceDays ?? '7'] ?? 'increment';
+  if (!n) return 'Enter the number of increments to project the receipts.';
+  const start = f.commStartDate || `one ${cadence} after funding`;
+  if (f.commRemainder === 'at-end') return `Expect ${money(upfront)} at funding${up ? '' : ' (nothing upfront)'}, then ${n} merchant increments every ${cadence} starting ${start}, and the remaining ${money(rest)} once they are done.`;
+  return `Expect ${up ? `${money(upfront)} at funding, then ` : ''}${n} receipts of ${money(rest / n)} every ${cadence} starting ${start} (${money(rest)} in total).`;
 }

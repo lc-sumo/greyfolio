@@ -27,8 +27,12 @@ export type LenderTerms = 'upfront' | 'weekly';
 export interface Lender {
   name: string;
   terms: LenderTerms;
-  /** Number of weekly increments when `terms === 'weekly'`; 0 otherwise. */
+  /** Number of increments when `terms === 'weekly'`; 0 otherwise. */
   weeks: number;
+  /** Default payout structure for this lender's incremental deals (overridable per deal). */
+  upfrontPct?: number;
+  remainder?: 'spread' | 'at-end';
+  cadenceDays?: number;
 }
 
 export interface ReferralPartner {
@@ -57,13 +61,30 @@ export interface ProductRule {
   drawSubsequent: number | null;
 }
 
-/** Weekly-increment commission: N equal receipts, `received` have landed. */
+/**
+ * Incremental commission from the lender (consolidations, some LOCs).
+ *
+ *   upfrontPct  share of gross paid at funding (0 = none, 0.5 = "50 upfront")
+ *   weeks       number of increments the lender pays after the upfront
+ *   cadenceDays days between increments (7 = weekly, 14, 30)
+ *   remainder   'spread' → the non-upfront share is split evenly across the increments
+ *               'at-end' → the non-upfront share is paid once, when the increments are done
+ *   received    increments that have landed (for 'at-end' this tracks the merchant's progress)
+ *   startDate   when the first increment is expected
+ */
 export interface WeeklySchedule {
   mode: 'weekly';
   weeks: number;
   received: number;
   startDate: string | null;
+  cadenceDays?: number;
+  upfrontPct?: number;
+  upfrontReceived?: boolean;
+  remainder?: 'spread' | 'at-end';
+  remainderReceived?: boolean;
 }
+
+export type CommissionSchedule = WeeklySchedule;
 
 export interface Rep {
   id: string;

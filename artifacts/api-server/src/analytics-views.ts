@@ -6,10 +6,12 @@ import {
   crmUrl,
   dealCommissionStatus,
   effectiveDealStatus,
+  expectedBetween,
   outstandingGross,
   paidFigures,
   renewalOf,
   repLedger,
+  segments,
   sum,
   totalFunded,
   totalGross,
@@ -111,6 +113,10 @@ export interface Overview {
     clawbackExposure: number;
     renewalReady: number;
     renewalGross: number;
+    /** Lender receipts (increments, upfronts, finals) expected in the next 30 days and overdue. */
+    expected30: number;
+    expected30Count: number;
+    overdueReceipts: number;
   };
   monthly: Array<{ month: string; funded: number; commission: number }>;
   lenders: Array<{ lender: string; deals: number; funded: number; avgFactor: number | null; collectedPct: number }>;
@@ -135,6 +141,10 @@ export function adminOverview(ctx: LedgerContext, reps: Rep[], settings: Setting
   const ren = ctx.deals.map((d) => ({ d, r: renewalOf(d, settings.thresholds, today) })).filter((x) => x.r.bucket === 'due');
   const first = (id: string | null) => (id ? (reps.find((r) => r.id === id)?.name ?? id).split(' ')[0]! : '—');
 
+  const allSegs = ctx.deals.flatMap((d) => segments(d));
+  const in30 = new Date(new Date(`${today}T00:00:00Z`).getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
+  const exp = expectedBetween(allSegs, today, in30, today);
+
   const months: string[] = [];
   for (let d = new Date(`${from.slice(0, 7)}-01T00:00:00Z`); d.toISOString().slice(0, 7) <= to.slice(0, 7); d.setUTCMonth(d.getUTCMonth() + 1)) months.push(d.toISOString().slice(0, 7));
 
@@ -155,6 +165,9 @@ export function adminOverview(ctx: LedgerContext, reps: Rep[], settings: Setting
       clawbackExposure: sum(exposure.map((e) => e.remaining)),
       renewalReady: ren.length,
       renewalGross: sum(ren.map((x) => x.r.estRenewalGross)),
+      expected30: exp.amount,
+      expected30Count: exp.count,
+      overdueReceipts: exp.overdue,
     },
     monthly: months.map((m) => {
       const ds = inPeriod.filter((d) => d.date.startsWith(m));

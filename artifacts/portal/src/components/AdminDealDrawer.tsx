@@ -91,17 +91,36 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
 
           {d.segments.map((s) => s.schedule && (
             <section className="card" key={s.sk}>
-              <h3>Weekly commission schedule{s.sk !== 'base' && <small>{s.label}</small>}</h3>
-              <div className="muted" style={{ marginBottom: 10 }}>{d.lender} pays {money(s.gross)} in {s.schedule.weeks} weekly increments of <b className="num">{money(s.schedule.perWeek)}</b>{s.schedule.startDate ? `, starting ${day(s.schedule.startDate)}` : ''}.</div>
-              <div className="pips">{Array.from({ length: s.schedule.weeks }, (_, i) => <i key={i} className={i < s.schedule!.received ? 'on' : ''} />)}</div>
+              <h3>Commission payout schedule{s.sk !== 'base' && <small>{s.label}</small>}{s.schedule.overdue > 0 && <small className="neg">{s.schedule.overdue} overdue · {money(s.schedule.overdueAmount)}</small>}</h3>
+              <div className="muted" style={{ marginBottom: 10 }}>
+                {d.lender} pays {money(s.gross)}:{s.schedule.upfrontPct > 0 && <> <b className="num">{money(s.schedule.upfrontAmount)}</b> upfront ({Math.round(s.schedule.upfrontPct * 100)}%), then</>} {s.schedule.weeks} increments every {s.schedule.cadenceDays === 7 ? 'week' : s.schedule.cadenceDays === 14 ? 'two weeks' : `${s.schedule.cadenceDays} days`}
+                {s.schedule.remainder === 'spread' ? <> of <b className="num">{money(s.schedule.perWeek)}</b></> : <>, and <b className="num">{money(s.schedule.remainderAmount)}</b> once they are done</>}{s.schedule.startDate ? `, starting ${day(s.schedule.startDate)}` : ''}.
+              </div>
+              <div className="pips">{s.schedule.events.filter((e) => e.kind === 'increment').map((e) => <i key={e.n} className={e.received ? 'on' : e.overdue ? 'late' : ''} title={`${e.label} · ${e.expected ? fullDay(e.expected) : '—'}${e.amount ? ` · ${money(e.amount)}` : ''}${e.received ? ' · received' : e.overdue ? ' · overdue' : ''}`} />)}</div>
               <dl className="kv" style={{ marginTop: 12 }}>
-                <dt>Received</dt><dd>{s.schedule.received}/{s.schedule.weeks} wks · {money(s.collected)}</dd>
+                {s.schedule.upfrontPct > 0 && <><dt>Upfront {money(s.schedule.upfrontAmount)}</dt><dd style={{ fontFamily: 'var(--sans)' }}>{s.schedule.upfrontReceived ? <span className="pos">received</span> : <button className="btn" style={{ height: 26, padding: '0 8px', fontSize: 11.5 }} onClick={() => void collect({ segmentKey: s.sk, markUpfront: true }, `${d.id} — upfront ${money(s.schedule!.upfrontAmount)} received`)}>Record upfront received</button>}</dd></>}
+                <dt>Increments received</dt><dd>{s.schedule.received}/{s.schedule.weeks}{s.schedule.remainder === 'spread' ? ` · ${money(s.schedule.perWeek * s.schedule.received)}` : ''}</dd>
+                <dt>Collected so far</dt><dd>{money(s.collected)} <span className="subtle">of {money(s.gross)}</span></dd>
                 <dt>Still to come</dt><dd>{money(s.outstanding)}</dd>
-                <dt>Next due</dt><dd>{s.schedule.received >= s.schedule.weeks ? 'Complete' : s.schedule.startDate ? day(addWeeks(s.schedule.startDate, s.schedule.received)) : '—'}</dd>
+                <dt>Next expected</dt><dd>{s.schedule.nextExpected ? <>{s.schedule.nextExpected.expected ? day(s.schedule.nextExpected.expected) : '—'} <span className="subtle" style={{ fontFamily: 'var(--sans)' }}>· {s.schedule.nextExpected.label}{s.schedule.nextExpected.amount ? ` · ${money(s.schedule.nextExpected.amount)}` : ''}{s.schedule.nextExpected.overdue ? <b className="neg"> · overdue</b> : ''}</span></> : <span className="pos">Complete</span>}</dd>
+                {s.schedule.remainder === 'at-end' && <><dt>Final {money(s.schedule.remainderAmount)}</dt><dd style={{ fontFamily: 'var(--sans)' }}>{s.schedule.remainderReceived ? <span className="pos">received</span> : s.schedule.received >= s.schedule.weeks ? <button className="btn primary" style={{ height: 26, padding: '0 8px', fontSize: 11.5 }} onClick={() => void collect({ segmentKey: s.sk, markRemainder: true }, `${d.id} — final ${money(s.schedule!.remainderAmount)} received`)}>Record final received</button> : <span className="subtle">due when increments are done</span>}</dd></>}
               </dl>
+              <details style={{ marginTop: 10 }}>
+                <summary className="muted" style={{ cursor: 'pointer', fontSize: 12 }}>Expected receipts ({s.schedule.events.length})</summary>
+                <div className="pl" style={{ marginTop: 6 }}>
+                  {s.schedule.events.map((e) => (
+                    <div className="row" key={`${e.kind}-${e.n}`} style={{ gridTemplateColumns: 'minmax(0,1fr) 90px 100px 90px' }}>
+                      <span className={e.overdue ? 'neg' : ''}>{e.label}</span>
+                      <span className="num subtle">{e.expected ? day(e.expected) : '—'}</span>
+                      <span className="num">{e.amount ? money(e.amount) : <span className="subtle">progress</span>}</span>
+                      <Pill tone={e.received ? 'teal' : e.overdue ? 'red' : 'grey'}>{e.received ? 'Received' : e.overdue ? 'Overdue' : 'Expected'}</Pill>
+                    </div>
+                  ))}
+                </div>
+              </details>
               <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                <button className="btn primary" disabled={s.schedule.received >= s.schedule.weeks} onClick={() => void collect({ segmentKey: s.sk, recordWeeks: 1 }, `${d.id} — week ${s.schedule!.received + 1} of ${s.schedule!.weeks} received`)}>Record week received</button>
-                <button className="btn" disabled={s.schedule.received <= 0} onClick={() => void collect({ segmentKey: s.sk, recordWeeks: -1 }, `${d.id} — last week reversed`)}>Reverse last</button>
+                <button className="btn primary" disabled={s.schedule.received >= s.schedule.weeks} onClick={() => void collect({ segmentKey: s.sk, recordWeeks: 1 }, `${d.id} — increment ${s.schedule!.received + 1} of ${s.schedule!.weeks} received`)}>Record increment received</button>
+                <button className="btn" disabled={s.schedule.received <= 0} onClick={() => void collect({ segmentKey: s.sk, recordWeeks: -1 }, `${d.id} — last increment reversed`)}>Reverse last</button>
               </div>
             </section>
           ))}

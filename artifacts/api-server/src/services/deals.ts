@@ -6,9 +6,12 @@ import {
   nextDealId,
   priceDeal,
   recordWeek,
+  scheduleFor,
   segmentOf,
   withCollection,
+  withRemainder,
   withStatus,
+  withUpfront,
   MANUAL_DEAL_STATUSES,
   type CommissionStatus,
   type Deal,
@@ -129,7 +132,9 @@ export type CollectionInput =
   | { segmentKey: SegmentKey; dollars: number }
   | { segmentKey: SegmentKey; status: CommissionStatus; partialDollars?: number }
   | { segmentKey: SegmentKey; recordWeeks: number }
-  | { segmentKey: SegmentKey; toggle: true };
+  | { segmentKey: SegmentKey; toggle: true }
+  | { segmentKey: SegmentKey; markUpfront: boolean }
+  | { segmentKey: SegmentKey; markRemainder: boolean };
 
 /**
  * THE single collection writer. The status dropdown, the lender-paid pill,
@@ -145,7 +150,13 @@ export async function setCollection(repo: Repo, id: string, input: CollectionInp
   else if ('status' in input) patch = withStatus(seg, input.status, input.partialDollars);
   else if ('recordWeeks' in input) {
     patch = recordWeek(seg, Number(input.recordWeeks));
-    if (!patch) throw new HttpError(400, `${id} ${seg.sk} is not on a weekly schedule`);
+    if (!patch) throw new HttpError(400, `${id} ${seg.sk} is not on an incremental schedule`);
+  } else if ('markUpfront' in input) {
+    patch = withUpfront(seg, !!input.markUpfront);
+    if (!patch) throw new HttpError(400, `${id} ${seg.sk} has no upfront share`);
+  } else if ('markRemainder' in input) {
+    patch = withRemainder(seg, !!input.markRemainder);
+    if (!patch) throw new HttpError(400, `${id} ${seg.sk} has no at-end remainder`);
   } else {
     const s = seg.schedule;
     if (s) patch = recordWeek(seg, s.received >= s.weeks ? -s.weeks : 1)!;

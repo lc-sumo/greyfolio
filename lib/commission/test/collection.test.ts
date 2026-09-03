@@ -104,7 +104,7 @@ describe('withCollection / recordWeek', () => {
     expect(recordWeek({ gross: 10, collected: 0, schedule: null })).toBeNull();
   });
   it('scheduleFor builds a schedule only for weekly lenders', () => {
-    expect(scheduleFor({ name: 'ROWAN', terms: 'weekly', weeks: 20 }, '2026-07-17')).toEqual({ mode: 'weekly', weeks: 20, received: 0, startDate: '2026-07-17' });
+    expect(scheduleFor({ name: 'ROWAN', terms: 'weekly', weeks: 20 }, '2026-07-17')).toMatchObject({ mode: 'weekly', weeks: 20, received: 0, startDate: '2026-07-24', cadenceDays: 7, remainder: 'spread' });
     expect(scheduleFor({ name: 'MBC', terms: 'upfront', weeks: 0 }, '2026-07-17')).toBeNull();
   });
   it('the base segment of a deal reads its collection from the deal columns', () => {

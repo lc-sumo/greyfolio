@@ -52,7 +52,15 @@ export async function saveLenders(repo: Repo, input: unknown, actorRepId: string
     const terms = l.terms === 'weekly' ? 'weekly' : 'upfront';
     const weeks = terms === 'weekly' ? Math.round(Number(l.weeks) || 0) : 0;
     if (terms === 'weekly' && weeks < 1) throw new HttpError(400, `Weekly lender "${l.name}" needs a week count`);
-    return { name: cleanName(l.name, 'Lender'), terms, weeks };
+    const lender: Lender = { name: cleanName(l.name, 'Lender'), terms, weeks };
+    if (terms === 'weekly') {
+      const up = Number(l.upfrontPct);
+      if (Number.isFinite(up) && up > 0) lender.upfrontPct = asRate(up);
+      if (l.remainder === 'at-end') lender.remainder = 'at-end';
+      const cad = Math.round(Number(l.cadenceDays));
+      if (Number.isFinite(cad) && cad > 0 && cad !== 7) lender.cadenceDays = cad;
+    }
+    return lender;
   });
   uniqueNames(lenders, 'lender');
   const [settings, u] = await Promise.all([repo.getSettings(), usage(repo)]);

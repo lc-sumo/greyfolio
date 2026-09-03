@@ -15,6 +15,8 @@ import {
   effectiveDealStatus,
   renewalOf,
   RENEWAL_BUCKET_LABEL,
+  scheduleEvents,
+  scheduleParts,
   segmentStatus,
   segments,
   sum,
@@ -28,6 +30,8 @@ import {
   type Rep,
   type RenewalBucket,
   type Role,
+  type ScheduleEvent,
+  type Segment,
 } from '@greystone/commission';
 import type { Settings } from './repo.js';
 
@@ -84,6 +88,9 @@ export interface AdminDealRow {
   creditLine: number | null;
   drawSubsequentPct: number | null;
   hasClawback: boolean;
+  /** Lender receipts expected before today that have not landed. */
+  overdueReceipts: number;
+  overdueAmount: number;
 }
 
 export function adminDealRow(deal: Deal, ctx: LedgerContext, reps: Rep[], settings: Settings, today: string): AdminDealRow {
@@ -139,6 +146,8 @@ export function adminDealRow(deal: Deal, ctx: LedgerContext, reps: Rep[], settin
     creditLine: deal.creditLine,
     drawSubsequentPct: deal.drawSubsequentPct,
     hasClawback: ctx.clawbacks.some((c) => c.dealId === deal.id),
+    overdueReceipts: segs.reduce((n, s) => n + scheduleEvents(s, today).filter((e) => e.overdue).length, 0),
+    overdueAmount: sum(segs.flatMap((s) => scheduleEvents(s, today).filter((e) => e.overdue).map((e) => e.amount))),
   };
 }
 
@@ -156,7 +165,23 @@ export interface SegmentView {
   outstanding: number;
   status: string;
   lenderPaidLabel: string;
-  schedule: { weeks: number; received: number; startDate: string | null; perWeek: number } | null;
+  schedule: {
+    weeks: number;
+    received: number;
+    startDate: string | null;
+    perWeek: number;
+    cadenceDays: number;
+    upfrontPct: number;
+    upfrontAmount: number;
+    upfrontReceived: boolean;
+    remainder: 'spread' | 'at-end';
+    remainderAmount: number;
+    remainderReceived: boolean;
+    events: ScheduleEvent[];
+    nextExpected: ScheduleEvent | null;
+    overdue: number;
+    overdueAmount: number;
+  } | null;
   /** Funding terms: the deal's for the initial segment, the draw's own for draws. */
   termDays: number | null;
   factor: number | null;
@@ -194,7 +219,7 @@ export function adminDealDetail(deal: Deal, ctx: LedgerContext, reps: Rep[], set
       outstanding: outstandingOf(s),
       status: segmentStatus(s),
       lenderPaidLabel: collectionLabel(s),
-      schedule: s.schedule ? { weeks: s.schedule.weeks, received: s.schedule.received, startDate: s.schedule.startDate, perWeek: sum([s.gross / s.schedule.weeks]) } : null,
+      schedule: s.schedule ? scheduleView(s, today) : null,
       ...(s.sk === 'base'
         ? { termDays: deal.termDays, factor: deal.factor, payback: deal.payback, payment: paymentFor({ payback: deal.payback, termDays: deal.termDays, frequency: deal.frequency }) }
         : termsOfDraw(deal, s.sk)),
@@ -206,6 +231,30 @@ export function adminDealDetail(deal: Deal, ctx: LedgerContext, reps: Rep[], set
     clawbacks: ctx.clawbacks
       .filter((c) => c.dealId === deal.id)
       .map((c) => ({ ...c, slices: clawbackSlices(c, deal, ctx.lines).map((s) => ({ ...s, name: name(s.repId) })) })),
+  };
+}
+
+function scheduleView(s: Segment, today: string): NonNullable<SegmentView['schedule']> {
+  const sch = s.schedule!;
+  const parts = scheduleParts(s.gross, sch);
+  const events = scheduleEvents(s, today);
+  const pending = events.filter((e) => !e.received && e.expected);
+  return {
+    weeks: sch.weeks,
+    received: sch.received,
+    startDate: sch.startDate,
+    perWeek: parts.perIncrement,
+    cadenceDays: sch.cadenceDays ?? 7,
+    upfrontPct: sch.upfrontPct ?? 0,
+    upfrontAmount: parts.upfront,
+    upfrontReceived: !!sch.upfrontReceived,
+    remainder: sch.remainder ?? 'spread',
+    remainderAmount: parts.remainder,
+    remainderReceived: !!sch.remainderReceived,
+    events,
+    nextExpected: pending.sort((a, b) => (a.expected! < b.expected! ? -1 : 1))[0] ?? null,
+    overdue: events.filter((e) => e.overdue).length,
+    overdueAmount: sum(events.filter((e) => e.overdue).map((e) => e.amount)),
   };
 }
 

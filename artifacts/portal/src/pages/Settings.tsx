@@ -75,20 +75,25 @@ function LendersTab({ lenders, usage, run }: { lenders: Lender[]; usage: Record<
   const [rows, setRows] = useState(lenders);
   const [name, setName] = useState('');
   useEffect(() => setRows(lenders), [lenders]);
-  const cols = 'minmax(180px,1.2fr) 150px 100px 110px 90px';
+  const cols = 'minmax(160px,1.2fr) 130px 80px 90px 190px 110px 100px 90px';
   const save = (next: Lender[]) => run('Lenders saved', () => post('/api/admin/settings/lenders', { lenders: next }, 'PUT'));
   return (
-    <Card title="Lenders" extra={`${rows.length} · in-use lenders refuse deletion`}>
-      <Head cols={cols}><span>Lender</span><span>Commission terms</span><span>Weeks</span><span>Usage</span><span /></Head>
+    <Card title="Lenders" extra={`${rows.length} · in-use lenders refuse deletion · structure here is the default a new deal starts from`}>
+      <div className="scroller"><div style={{ minWidth: 1100 }}>
+      <Head cols={cols}><span>Lender</span><span>Commission terms</span><span>Increments</span><span>Upfront %</span><span>Remainder</span><span>Cadence</span><span>Usage</span><span /></Head>
       {rows.map((l, i) => (
         <Row key={i} cols={cols}>
           <input value={l.name} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
           <select value={l.terms} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, terms: e.target.value as Lender['terms'], weeks: e.target.value === 'weekly' ? x.weeks || 12 : 0 } : x)))}><option value="upfront">Upfront</option><option value="weekly">Weekly</option></select>
           <input inputMode="numeric" disabled={l.terms !== 'weekly'} value={l.terms === 'weekly' ? l.weeks : ''} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, weeks: Number(e.target.value) || 0 } : x)))} />
+          <input inputMode="decimal" disabled={l.terms !== 'weekly'} placeholder="0" value={l.terms === 'weekly' && l.upfrontPct ? String(Math.round(l.upfrontPct * 100)) : ''} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, upfrontPct: (Number(e.target.value) || 0) / 100 } : x)))} />
+          <select disabled={l.terms !== 'weekly'} value={l.remainder ?? 'spread'} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, remainder: e.target.value as Lender['remainder'] } : x)))}><option value="spread">Spread across increments</option><option value="at-end">Once, when increments done</option></select>
+          <select disabled={l.terms !== 'weekly'} value={String(l.cadenceDays ?? 7)} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, cadenceDays: Number(e.target.value) } : x)))}><option value="7">Weekly</option><option value="14">Bi-weekly</option><option value="30">Monthly</option></select>
           <span className="num subtle">{usage[l.name] ? `${usage[l.name]} deal${usage[l.name] === 1 ? '' : 's'}` : 'unused'}</span>
           <button className="btn" disabled={!!usage[l.name]} title={usage[l.name] ? 'In use — cannot remove' : 'Remove'} onClick={() => setRows(rows.filter((_, j) => j !== i))}>Remove</button>
         </Row>
       ))}
+      </div></div>
       <div className="toolbar" style={{ marginTop: 12 }}>
         <input className="search" placeholder="New lender name" value={name} onChange={(e) => setName(e.target.value)} />
         <button className="btn" disabled={!name.trim()} onClick={() => { setRows([...rows, { name: name.trim(), terms: 'upfront', weeks: 0 }]); setName(''); }}>+ Add lender</button>

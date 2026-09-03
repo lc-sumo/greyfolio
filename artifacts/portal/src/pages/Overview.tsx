@@ -31,6 +31,7 @@ export function Overview() {
             <Metric label="Paid vs owed" value={`${compact(o.cards.paid)} / ${compact(o.cards.owed)}`} tone={o.cards.owed ? 'warn' : undefined} sub="paid this period · owed to reps (lifetime)" />
             <Metric label="Clawback exposure" value={money(o.cards.clawbackExposure)} tone={o.cards.clawbackExposure ? 'neg' : undefined} sub="open, not yet recovered from reps" />
             <Metric label="Renewal pipeline" value={String(o.cards.renewalReady)} tone="pos" sub={`renewable now · ${compact(o.cards.renewalGross)} est. commission`} />
+            <Metric label="Expected from lenders · 30 days" value={money(o.cards.expected30)} tone={o.cards.overdueReceipts ? 'neg' : undefined} sub={`${o.cards.expected30Count} receipt${o.cards.expected30Count === 1 ? '' : 's'} due${o.cards.overdueReceipts ? ` · ${money(o.cards.overdueReceipts)} overdue` : ''}`} />
           </div>
 
           <div className="two">

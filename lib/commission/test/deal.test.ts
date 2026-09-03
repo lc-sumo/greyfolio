@@ -18,8 +18,13 @@ describe('priceDeal', () => {
   });
   it('attaches a weekly schedule for weekly lenders and starts uncollected', () => {
     const d = priceDeal({ ...draft, lender: 'ROWAN' }, ctx({ lender: { name: 'ROWAN', terms: 'weekly', weeks: 20 } }));
-    expect(d.commSchedule).toEqual({ mode: 'weekly', weeks: 20, received: 0, startDate: '2026-09-01' });
+    expect(d.commSchedule).toMatchObject({ mode: 'weekly', weeks: 20, received: 0, startDate: '2026-09-08', cadenceDays: 7, remainder: 'spread' });
     expect(d.commCollected).toBeNull();
+    expect(collectedOf(segments(d)[0]!)).toBe(0);
+  });
+  it('a consolidation can ask for 50 upfront and the rest when the increments are done', () => {
+    const d = priceDeal({ ...draft, lender: 'MBC', commIncrements: 12, commUpfrontPct: 50, commRemainder: 'at-end', commCadenceDays: 7 }, ctx());
+    expect(d.commSchedule).toMatchObject({ weeks: 12, upfrontPct: 0.5, upfrontReceived: false, remainder: 'at-end', remainderReceived: false, cadenceDays: 7, startDate: '2026-09-08' });
     expect(collectedOf(segments(d)[0]!)).toBe(0);
   });
   it('applies the partner rate and cap', () => {

@@ -36,6 +36,12 @@ export interface NewDealDraft {
   leadSource?: string | null;
   notes?: string | null;
   crmId?: string | null;
+  /** Commission payout structure from the lender (consolidations): increments, upfront share, remainder, cadence. */
+  commIncrements?: number | null;
+  commUpfrontPct?: number | null;
+  commRemainder?: 'spread' | 'at-end' | null;
+  commCadenceDays?: number | null;
+  commStartDate?: string | null;
 }
 
 export interface PricingContext {
@@ -92,7 +98,7 @@ export function priceDeal(draft: NewDealDraft, ctx: PricingContext): Deal {
     closerRate,
     overrideRate,
   });
-  const schedule = scheduleFor(ctx.lender, draft.fundedDate);
+  const schedule = scheduleFor(ctx.lender, draft.fundedDate, { increments: draft.commIncrements, upfrontPct: draft.commUpfrontPct, remainder: draft.commRemainder, cadenceDays: draft.commCadenceDays, startDate: draft.commStartDate });
 
   return {
     id: ctx.id,

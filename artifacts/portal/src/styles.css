@@ -177,6 +177,7 @@ input.search:focus, select.filter:focus { border-color: var(--teal); }
 .pips { display: flex; flex-wrap: wrap; gap: 4px; }
 .pips i { width: 14px; height: 10px; border-radius: 3px; background: var(--border-light-2); }
 .pips i.on { background: var(--teal); }
+.pips i.late { background: var(--red-light-2); outline: 1px solid var(--red); outline-offset: -1px; }
 select.mini { height: 28px; border: 1px solid var(--border-strong); border-radius: 7px; background: #fff; font-size: 11.5px; padding: 0 6px; max-width: 100%; }
 .pl .row.draw { grid-template-columns: minmax(0, 1.2fr) 100px 60px 100px auto; align-items: center; }
 .pl .row.draw.total { font-weight: 700; border-bottom: none; }

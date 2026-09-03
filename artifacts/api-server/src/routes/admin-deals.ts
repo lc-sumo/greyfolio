@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { repOptions } from '@greystone/commission';
 import { HttpError, currentUser, requireRole } from '../auth/middleware.js';
 import { adminDealDetail, adminDealRow, adminRenewals } from '../admin-views.js';
+import { adminMerchants, adminOverview } from '../analytics-views.js';
 import type { Repo } from '../repo.js';
 import { addDraw, createDeal, setCollection, setCrmId, setDealStatus, updateSplits } from '../services/deals.js';
 
@@ -18,6 +19,20 @@ export function adminDealsRouter(repo: Repo): Router {
 
   r.get('/settings', async (_req, res) => {
     res.json(await repo.getSettings());
+  });
+
+  r.get('/merchants', async (_req, res) => {
+    const [ctx, settings] = await Promise.all([repo.loadContext(), repo.getSettings()]);
+    res.json({ merchants: adminMerchants(ctx, settings, today()) });
+  });
+
+  r.get('/overview', async (req, res) => {
+    const t = today();
+    const to = typeof req.query.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.to) ? req.query.to : t;
+    const from = typeof req.query.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.from) ? req.query.from : `${to.slice(0, 4)}-01-01`;
+    if (from > to) throw new HttpError(400, 'from must not be after to');
+    const [ctx, reps, settings] = await Promise.all([repo.loadContext(), repo.listReps(), repo.getSettings()]);
+    res.json(adminOverview(ctx, reps, settings, from, to, t));
   });
 
   r.get('/renewals', async (_req, res) => {

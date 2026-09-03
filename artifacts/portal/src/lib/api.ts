@@ -121,3 +121,15 @@ export interface PayHistory { rows: PayHistoryRow[]; days: Array<{ date: string;
 /** Statuses ops set by hand; Performing / Prospecting / Refi Ready follow the dates automatically. */
 export const MANUAL_DEAL_STATUSES = ['Refinanced', 'Default', 'Slow Pay', 'Paid In Full'] as const;
 export const DEAL_STATUS_OPTIONS = [{ value: 'Performing', label: 'Auto (Performing → Prospecting → Refi Ready)' }, ...MANUAL_DEAL_STATUSES.map((v) => ({ value: v, label: v }))];
+
+/* ---- Merchants + overview (Phase 6b). Admin only. ---- */
+export interface MerchantDealRow { id: string; crmId: string | null; date: string; business: string; lender: string; product: string; funded: number; gross: number; outstanding: number; commissionStatus: string; dealStatus: string; drawCount: number; crmUrl: string }
+export interface MerchantRow { email: string; business: string; contact: string; phone: string; dealCount: number; funded: number; gross: number; outstanding: number; firstFunded: string; lastFunded: string; deals: MerchantDealRow[] }
+export interface Overview {
+  period: { from: string; to: string };
+  cards: { funded: number; commissions: number; opportunities: number; drawLines: number; avgDealSize: number; avgFactor: number | null; paid: number; owed: number; clawbackExposure: number; renewalReady: number; renewalGross: number };
+  monthly: Array<{ month: string; funded: number; commission: number }>;
+  lenders: Array<{ lender: string; deals: number; funded: number; avgFactor: number | null; collectedPct: number }>;
+  renewals: Array<{ id: string; crmId: string | null; business: string; lender: string; funded: number; markDate: string | null; whoCalls: string; estRenewalGross: number }>;
+  clawbacks: Array<{ id: string; dealId: string; business: string; amount: number; repTotal: number; recovered: number; remaining: number; date: string }>;
+}

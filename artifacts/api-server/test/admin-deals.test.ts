@@ -2,7 +2,8 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { configFromEnv } from '../src/config.js';
-import { memoryRepo } from './memory-repo.js';
+import { repLedger } from '@greystone/commission';
+import { clawbacks, deals, lines, memoryRepo, reps } from './memory-repo.js';
 
 const config = configFromEnv({ AUTH_MODE: 'dev', SESSION_SECRET: 'test-secret', PORT: '0' });
 const today = new Date().toISOString().slice(0, 10);
@@ -146,6 +147,31 @@ describe('admin renewals', () => {
     expect(res.body.renewals.find((r: { id: string }) => r.id === 'F1')).toMatchObject({ whoCalls: 'Zach', bucket: 'due', effectiveStatus: 'Refi Ready', estRenewalGross: 1_000, merchantContact: 'Daniel Reyes' });
     // F3 funded Aug 2 with a 120-day term: eligible for more capital after 30 days, nowhere near the mark
     expect(res.body.renewals.find((r: { id: string }) => r.id === 'F3')).toMatchObject({ bucket: 'prospecting', effectiveStatus: 'Prospecting', prospectingDate: '2026-09-01' });
+  });
+});
+
+describe('merchants and overview', () => {
+  it('groups deals by merchant email with totals and history', async () => {
+    const { admin, rep } = await harness();
+    expect((await rep.get('/api/admin/merchants')).status).toBe(403);
+    const res = await admin.get('/api/admin/merchants');
+    expect(res.body.merchants).toHaveLength(3);
+    const f1 = res.body.merchants.find((m: { email: string }) => m.email === 'f1@merchant.test');
+    expect(f1).toMatchObject({ business: 'F1 Business', contact: 'Daniel Reyes', dealCount: 1, funded: 10_000, gross: 1_000, outstanding: 0 });
+    expect(f1.deals[0]).toMatchObject({ id: 'F1', commissionStatus: 'YES - Paid In Full' });
+  });
+  it('the overview totals the period and reads owed from the ledger', async () => {
+    const { admin, rep } = await harness();
+    expect((await rep.get('/api/admin/overview')).status).toBe(403);
+    const res = await admin.get('/api/admin/overview?from=2026-06-01&to=2026-08-31');
+    expect(res.body.cards).toMatchObject({ funded: 35_000, commissions: 3_500, opportunities: 3, drawLines: 0, avgFactor: 1.3, paid: 350, renewalReady: 1 });
+    const ctx = { deals, lines, clawbacks };
+    expect(res.body.cards.owed).toBe(reps.reduce((sum, r) => sum + repLedger(ctx, r.id).owed, 0)); // one definition of owed
+    expect(res.body.cards.clawbackExposure).toBe(700); // cb-1: 800 rep total − 100 recovered
+    expect(res.body.monthly.map((m: { month: string; funded: number }) => [m.month, m.funded])).toEqual([['2026-06', 10_000], ['2026-07', 20_000], ['2026-08', 5_000]]);
+    expect(res.body.lenders[0]).toMatchObject({ lender: 'MBC', deals: 3, funded: 35_000, collectedPct: 29 });
+    expect(res.body.clawbacks[0]).toMatchObject({ dealId: 'F1', remaining: 700 });
+    expect((await admin.get('/api/admin/overview?from=2026-09-01&to=2026-01-01')).status).toBe(400);
   });
 });
 

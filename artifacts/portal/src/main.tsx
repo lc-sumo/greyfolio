@@ -9,6 +9,8 @@ import { Dashboard } from './pages/Dashboard';
 import { Deals } from './pages/Deals';
 import { Login } from './pages/Login';
 import { MasterDeals } from './pages/MasterDeals';
+import { Merchants } from './pages/Merchants';
+import { Overview } from './pages/Overview';
 import { Payroll } from './pages/Payroll';
 import { Roster } from './pages/Roster';
 import { Soon } from './pages/Soon';
@@ -34,7 +36,9 @@ function App() {
   const repMode = auth.user.role === 'rep' || !!viewAs;
   return (
     <Routes>
-      <Route path="/" element={repMode ? <Dashboard /> : <Roster />} />
+      <Route path="/" element={repMode ? <Dashboard /> : auth.user.role === 'admin' ? <Overview /> : <Roster />} />
+      <Route path="/roster" element={!repMode ? <Roster /> : <Navigate to="/" replace />} />
+      <Route path="/merchants" element={!repMode && auth.user.role === 'admin' ? <Merchants /> : <Navigate to="/" replace />} />
       <Route path="/deals" element={repMode ? <Deals /> : auth.user.role === 'admin' ? <MasterDeals /> : <Navigate to="/" replace />} />
       <Route path="/payroll" element={!repMode && auth.user.role === 'admin' ? <Payroll /> : <Navigate to="/" replace />} />
       <Route path="/clawbacks" element={repMode ? <Clawbacks /> : <Navigate to="/" replace />} />

@@ -9,6 +9,7 @@ import { repDeals, repLedger, repOptions, type Rep, type Team } from '@greystone
 import { buildDemo, type DemoData } from '@greystone/db/seed/demo';
 import { LENDERS, LISTS, PARTNERS, PRODUCTS, THRESHOLDS } from '@greystone/db/seed';
 import { adminDealDetail, adminDealRow, adminRenewals } from '../../../api-server/src/admin-views';
+import { adminMerchants, adminOverview } from '../../../api-server/src/analytics-views';
 import { memoryRepo } from '../../../api-server/src/repo.memory';
 import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repPayHistory, repRenewals, repStatements, repWallet } from '../../../api-server/src/scope';
 import { addDraw, createDeal, setCollection, setCrmId, setDealStatus, updateSplits } from '../../../api-server/src/services/deals';
@@ -181,6 +182,13 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
   if (p === '/api/admin/audit') return json({ entries: await repo.listAudit(100) });
   if (p === '/api/admin/settings') return json(settings);
   if (p === '/api/admin/renewals') return json({ renewals: adminRenewals(ctx, d.reps, settings, today) });
+  if (p === '/api/admin/merchants') return json({ merchants: adminMerchants(ctx, settings, today) });
+  if (p === '/api/admin/overview') {
+    const to = q.get('to') ?? today;
+    const from = q.get('from') ?? `${to.slice(0, 4)}-01-01`;
+    if (from > to) throw new ApiError(400, 'from must not be after to');
+    return json(adminOverview(ctx, d.reps, settings, from, to, today));
+  }
 
   const detail = async (id: string) => {
     const c = await repo.loadContext();

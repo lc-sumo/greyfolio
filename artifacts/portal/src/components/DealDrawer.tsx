@@ -17,7 +17,7 @@ export function DealDrawer({ id, onClose }: { id: string; onClose: () => void })
           <div className="share">
             <div className="label" style={{ color: 'var(--navy-text-3)' }}>My share of this deal</div>
             <div className="big">{money(d.share)}</div>
-            <div style={{ color: 'var(--navy-text-2)', fontSize: 12.5 }}>
+            <div style={{ color: 'var(--navy-text-2)', fontSize: 14.5 }}>
               {d.lines.map((l) => `${l.role} ${pct(l.rate)}${l.segment !== 'Initial' ? ` · ${l.segment}` : ''}`).join(' + ')}
               {' · '}
               <b style={{ color: d.owed ? 'var(--amber-bright)' : 'var(--teal-bright)' }}>{d.owed ? `${money(d.owed)} still owed to me` : d.paid >= d.share ? 'paid in full' : d.paid > 0 ? 'rest awaiting lender payment' : 'awaiting lender payment'}</b>
@@ -33,7 +33,7 @@ export function DealDrawer({ id, onClose }: { id: string; onClose: () => void })
               <dt>Lender paid commission</dt><dd style={{ fontFamily: 'var(--sans)' }}><Pill tone={toneFor(d.commissionStatus)}>{d.lenderPaidLabel}</Pill></dd>
               <dt>Commission status</dt><dd style={{ fontFamily: 'var(--sans)' }}>{d.commissionStatus}</dd>
               <dt>Deal status</dt><dd style={{ fontFamily: 'var(--sans)' }}>{d.dealStatus}</dd>
-              <dt>Clawback</dt><dd style={{ fontFamily: 'var(--sans)' }}><Pill tone={d.clawbackWindow.cleared ? 'teal' : 'amber'}>{d.clawbackWindow.label}</Pill>{d.clawbackWindow.clearsOn && !d.clawbackWindow.cleared && <div className="subtle" style={{ fontSize: 11, marginTop: 3 }}>clears {fullDay(d.clawbackWindow.clearsOn)}</div>}</dd>
+              <dt>Clawback</dt><dd style={{ fontFamily: 'var(--sans)' }}><Pill tone={d.clawbackWindow.cleared ? 'teal' : 'amber'}>{d.clawbackWindow.label}</Pill>{d.clawbackWindow.clearsOn && !d.clawbackWindow.cleared && <div className="subtle" style={{ fontSize: 13, marginTop: 3 }}>clears {fullDay(d.clawbackWindow.clearsOn)}</div>}</dd>
               <dt>Rep paid</dt><dd>{d.repPaid ? fullDay(d.repPaid) : '—'}</dd>
             </dl>
           </section>
@@ -43,8 +43,8 @@ export function DealDrawer({ id, onClose }: { id: string; onClose: () => void })
             <div className="pl">
               {d.lines.map((l) => (
                 <div className="row" key={`${l.role}|${l.segmentKey}`}>
-                  <span>{l.segment} · {l.role} <span className="subtle num">{pct(l.rate)}</span>{l.units && <div className="subtle num" style={{ fontSize: 11 }}>Lender paid {l.units.collected}/{l.units.total} · You paid {l.units.paid}/{l.units.total}</div>}</span>
-                  <span className="num">{money(l.amount)}{l.paidAmount > 0 && !l.paid && <div className="subtle" style={{ fontSize: 10.5 }}>{money(l.paidAmount)} paid</div>}</span>
+                  <span>{l.segment} · {l.role} <span className="subtle num">{pct(l.rate)}</span>{l.units && <div className="subtle num" style={{ fontSize: 13 }}>Lender paid {l.units.collected}/{l.units.total} · You paid {l.units.paid}/{l.units.total}</div>}</span>
+                  <span className="num">{money(l.amount)}{l.paidAmount > 0 && !l.paid && <div className="subtle" style={{ fontSize: 12.5 }}>{money(l.paidAmount)} paid</div>}</span>
                   <Pill tone={l.paid ? 'teal' : l.paidAmount > 0 ? 'amber' : 'grey'}>{l.paid ? 'Paid' : l.paidAmount > 0 ? 'Partly paid' : 'Owed'}</Pill>
                 </div>
               ))}

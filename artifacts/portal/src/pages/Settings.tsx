@@ -105,7 +105,7 @@ function LendersTab({ lenders, products, thresholds, usage, run }: { lenders: Le
           <div className="chips">
             {products.map((p) => <button key={p.name} type="button" className={`chip ${funds(l, p.name) ? 'on' : ''} ${p.incremental ? 'inc' : ''}`} title={p.incremental ? 'Incremental product — paid in increments' : 'Straight commission'} onClick={() => toggleProduct(i, l, p.name)}>{p.name.replace(' - UPFRONT COMM', '').replace(' - TOTAL FUNDING', '')}</button>)}
           </div>
-          <span className={`subtle ${inc ? 'num' : ''}`} style={{ fontSize: 11.5 }}>{structure(l)}</span>
+          <span className={`subtle ${inc ? 'num' : ''}`} style={{ fontSize: 13.5 }}>{structure(l)}</span>
           <input inputMode="numeric" disabled={!inc} placeholder={inc ? '0' : '—'} value={inc && l.weeks ? l.weeks : ''} onChange={(e) => { const w = Number(e.target.value) || 0; set(i, { weeks: w, terms: w > 0 ? 'weekly' : 'upfront' }); }} />
           <input inputMode="decimal" disabled={!inc} placeholder={inc ? '0' : '—'} value={inc && l.upfrontPct ? String(Math.round(l.upfrontPct * 100)) : ''} onChange={(e) => set(i, { upfrontPct: (Number(e.target.value) || 0) / 100 })} />
           <select disabled={!inc} value={l.remainder ?? 'spread'} onChange={(e) => set(i, { remainder: e.target.value as Lender['remainder'] })}><option value="spread">Spread across increments</option><option value="at-end">Once, when increments done</option></select>
@@ -194,9 +194,9 @@ function ProductsTab({ products, usage, run }: { products: ProductRule[]; usage:
               <button className="btn" disabled={!!usage[p.name]} onClick={() => setRows(rows.filter((_, j) => j !== i))}>Remove</button>
             </Row>
           ))}
-          <div className="subtle" style={{ fontSize: 11, margin: '6px 0' }}>Multi-draw: <span className="num">{rows.filter((p) => p.multiDraw).map((p) => p.name).join(', ') || 'none'}</span> · toggle per product below. Incremental payout: <span className="num">{rows.filter((p) => p.incremental).map((p) => p.name).join(', ') || 'none'}</span> — LOCs and LOC draws are paid upfront.</div>
+          <div className="subtle" style={{ fontSize: 13, margin: '6px 0' }}>Multi-draw: <span className="num">{rows.filter((p) => p.multiDraw).map((p) => p.name).join(', ') || 'none'}</span> · toggle per product below. Incremental payout: <span className="num">{rows.filter((p) => p.incremental).map((p) => p.name).join(', ') || 'none'}</span> — LOCs and LOC draws are paid upfront.</div>
           <div className="toolbar" style={{ marginTop: 8, gap: 8 }}>
-            {rows.map((p, i) => <button key={i} className={`btn ${p.multiDraw ? 'primary' : ''}`} style={{ height: 28, padding: '0 10px', fontSize: 11.5 }} onClick={() => set(i, { multiDraw: !p.multiDraw, drawInitial: p.drawInitial || p.comm, drawSubsequent: p.drawSubsequent || String(Number(p.comm) / 2) })}>{p.name || '(unnamed)'}: {p.multiDraw ? 'multi-draw' : 'single'}</button>)}
+            {rows.map((p, i) => <button key={i} className={`btn ${p.multiDraw ? 'primary' : ''}`} style={{ height: 28, padding: '0 10px', fontSize: 13.5 }} onClick={() => set(i, { multiDraw: !p.multiDraw, drawInitial: p.drawInitial || p.comm, drawSubsequent: p.drawSubsequent || String(Number(p.comm) / 2) })}>{p.name || '(unnamed)'}: {p.multiDraw ? 'multi-draw' : 'single'}</button>)}
           </div>
         </div>
       </div>
@@ -225,7 +225,7 @@ function TeamsTab({ teams, reps, usage, run }: { teams: Team[]; reps: RosterRep[
           return (
             <section className="card" key={t.id}>
               <div className="label">{t.name}</div>
-              <div className="metric">{members.length}<span className="muted" style={{ fontSize: 13, fontFamily: 'var(--sans)', fontWeight: 500 }}> reps</span></div>
+              <div className="metric">{members.length}<span className="muted" style={{ fontSize: 15, fontFamily: 'var(--sans)', fontWeight: 500 }}> reps</span></div>
               <div className="sub">Lead: <b>{leader?.name ?? '— none —'}</b> · override {pct(t.overrideRate)}</div>
               <div className="sub">Earned {compact(members.reduce((s, r) => s + r.earned, 0))} · owed {compact(members.reduce((s, r) => s + r.owed, 0))}</div>
             </section>
@@ -339,15 +339,15 @@ function CrmTab({ settings, run }: { settings: SettingsData; run: Run }) {
       <Card title="CRM deep link" extra="tokens: {id} {opportunity} {business}">
         <label className="field"><span className="label">URL template</span><input value={tpl} onChange={(e) => setTpl(e.target.value)} placeholder="https://crm.example.com/opportunity/{id}" /></label>
         <div className="note" style={{ marginTop: 10 }}>{preview ? <>Preview: <a href={preview} target="_blank" rel="noopener" className="num">{preview}</a></> : 'Blank template — no CRM links are shown anywhere.'}</div>
-        <div className="subtle" style={{ fontSize: 11.5, marginTop: 8 }}>{'{id}'} is the CRM deal ID when one is set, else the sheet row. Each token is URL-encoded.</div>
+        <div className="subtle" style={{ fontSize: 13.5, marginTop: 8 }}>{'{id}'} is the CRM deal ID when one is set, else the sheet row. Each token is URL-encoded.</div>
         <button className="btn primary" style={{ marginTop: 12 }} onClick={() => void run('CRM template saved', () => post('/api/admin/settings/crm', { urlTemplate: tpl }, 'PUT'))}>Save CRM template</button>
       </Card>
       <Card title="Thresholds" extra="days are calendar days; the mark is % of term paid in">
         <div className="form">
-          <label className="field"><span className="label">Clawback window (days)</span><input inputMode="numeric" value={t.clawbackWindowDays} onChange={(e) => setT({ ...t, clawbackWindowDays: e.target.value })} /><span className="subtle" style={{ fontSize: 11 }}>Deals stay AT RISK this long after funding</span></label>
-          <label className="field"><span className="label">Payment overdue after (days)</span><input inputMode="numeric" value={t.paymentOverdueDays} onChange={(e) => setT({ ...t, paymentOverdueDays: e.target.value })} /><span className="subtle" style={{ fontSize: 11 }}>Unpaid lender commission older than this turns red</span></label>
-          <label className="field"><span className="label">Renewal mark (% paid in)</span><input inputMode="decimal" value={t.renewalMark} onChange={(e) => setT({ ...t, renewalMark: e.target.value })} /><span className="subtle" style={{ fontSize: 11 }}>Renewable now once this far through the term</span></label>
-          <label className="field"><span className="label">Additional capital after (days)</span><input inputMode="numeric" value={t.additionalCapitalAfterDays} onChange={(e) => setT({ ...t, additionalCapitalAfterDays: e.target.value })} /><span className="subtle" style={{ fontSize: 11 }}>Flips to Prospecting — merchant eligible for more capital</span></label>
+          <label className="field"><span className="label">Clawback window (days)</span><input inputMode="numeric" value={t.clawbackWindowDays} onChange={(e) => setT({ ...t, clawbackWindowDays: e.target.value })} /><span className="subtle" style={{ fontSize: 13 }}>Deals stay AT RISK this long after funding</span></label>
+          <label className="field"><span className="label">Payment overdue after (days)</span><input inputMode="numeric" value={t.paymentOverdueDays} onChange={(e) => setT({ ...t, paymentOverdueDays: e.target.value })} /><span className="subtle" style={{ fontSize: 13 }}>Unpaid lender commission older than this turns red</span></label>
+          <label className="field"><span className="label">Renewal mark (% paid in)</span><input inputMode="decimal" value={t.renewalMark} onChange={(e) => setT({ ...t, renewalMark: e.target.value })} /><span className="subtle" style={{ fontSize: 13 }}>Renewable now once this far through the term</span></label>
+          <label className="field"><span className="label">Additional capital after (days)</span><input inputMode="numeric" value={t.additionalCapitalAfterDays} onChange={(e) => setT({ ...t, additionalCapitalAfterDays: e.target.value })} /><span className="subtle" style={{ fontSize: 13 }}>Flips to Prospecting — merchant eligible for more capital</span></label>
           <label className="field" style={{ gridColumn: '1 / -1' }}><span className="label">Payout cycle</span><select value={cycle} onChange={(e) => setCycle(e.target.value)}>{['Weekly', 'Twice monthly', 'Monthly', 'Per deal on lender payment'].map((c) => <option key={c}>{c}</option>)}</select></label>
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>

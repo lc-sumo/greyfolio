@@ -134,7 +134,7 @@ export function Payroll() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                     <div>
                       <div className="label">{activeRun.label}</div>
-                      <h2 style={{ margin: '4px 0 0', fontSize: 21, letterSpacing: '-.035em' }}>{d?.rep.name ?? '—'}</h2>
+                      <h2 style={{ margin: '4px 0 0', fontSize: 23, letterSpacing: '-.035em' }}>{d?.rep.name ?? '—'}</h2>
                       <div className="muted">pays {fullDay(activeRun.end)} · {activeRun.status}</div>
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
@@ -166,15 +166,15 @@ export function Payroll() {
                           <div className="tr" key={l.key} style={{ background: rowSelected(l) ? '#f6faf8' : !l.collected ? '#fdfaf5' : undefined }}>
                             <div className="td"><input type="checkbox" checked={rowSelected(l)} onChange={() => toggleRow(l)} /></div>
                             <div className="td num" style={{ cursor: 'pointer' }} onClick={() => setOpen(l.dealId)}>{l.dealId}</div>
-                            <div className="td"><span className={l.segmentKey === 'base' ? 'muted' : 'warn'}>{l.segmentLabel}</span>{l.units && <div className="subtle num" style={{ fontSize: 10.5 }}>Lender paid {l.units.collected}/{l.units.total} · Rep paid {l.units.paid}/{l.units.total}</div>}</div>
+                            <div className="td"><span className={l.segmentKey === 'base' ? 'muted' : 'warn'}>{l.segmentLabel}</span>{l.units && <div className="subtle num" style={{ fontSize: 12.5 }}>Lender paid {l.units.collected}/{l.units.total} · Rep paid {l.units.paid}/{l.units.total}</div>}</div>
                             <div className="td ellipsis">{l.business}</div>
                             <div className="td contact-cell"><Contact name={l.merchantContact} email={l.merchantEmail} phone={l.merchantPhone} /></div>
                             <div className="td ellipsis">{l.lender}</div>
                             <div className="td r num">{compact(l.funded)}</div>
                             <div className="td"><Pill tone={l.role === 'Override' ? 'amber' : 'teal'}>{l.role}</Pill></div>
                             <div className="td r num">{pct(l.rate)}</div>
-                            <div className="td r num">{l.units ? <>{money(l.collectedAmount)}<div className="subtle" style={{ fontSize: 10.5 }}>of {money(l.amount)} unpaid</div></> : money(l.amount)}</div>
-                            <div className="td"><Pill tone={l.collected ? 'teal' : l.lenderPaidLabel === 'Not collected' ? 'grey' : 'amber'}>{l.lenderPaidLabel}</Pill>{l.uncollectedKeys.length > 0 && l.collectedKeys.length > 0 && <label className="subtle" style={{ display: 'block', fontSize: 10.5, marginTop: 3, cursor: 'pointer' }}><input type="checkbox" style={{ verticalAlign: '-2px', marginRight: 4 }} checked={l.uncollectedKeys.every((k) => selected[k])} onChange={() => toggleUncollected(l)} />+ {l.uncollectedKeys.length} uncollected · {money(l.uncollectedAmount)}</label>}</div>
+                            <div className="td r num">{l.units ? <>{money(l.collectedAmount)}<div className="subtle" style={{ fontSize: 12.5 }}>of {money(l.amount)} unpaid</div></> : money(l.amount)}</div>
+                            <div className="td"><Pill tone={l.collected ? 'teal' : l.lenderPaidLabel === 'Not collected' ? 'grey' : 'amber'}>{l.lenderPaidLabel}</Pill>{l.uncollectedKeys.length > 0 && l.collectedKeys.length > 0 && <label className="subtle" style={{ display: 'block', fontSize: 12.5, marginTop: 3, cursor: 'pointer' }}><input type="checkbox" style={{ verticalAlign: '-2px', marginRight: 4 }} checked={l.uncollectedKeys.every((k) => selected[k])} onChange={() => toggleUncollected(l)} />+ {l.uncollectedKeys.length} uncollected · {money(l.uncollectedAmount)}</label>}</div>
                           </div>
                         ))}
                       </div>

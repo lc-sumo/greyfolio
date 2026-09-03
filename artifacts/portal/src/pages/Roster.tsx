@@ -34,7 +34,7 @@ export function Roster() {
                 </div>
                 {reps.map((r) => (
                   <div className="tr" key={r.id}>
-                    <div className="td ellipsis"><b>{r.name}</b><div className="subtle ellipsis" style={{ fontSize: 11 }}>{r.email}</div></div>
+                    <div className="td ellipsis"><b>{r.name}</b><div className="subtle ellipsis" style={{ fontSize: 13 }}>{r.email}</div></div>
                     <div className="td ellipsis">{r.team ?? '—'}</div>
                     <div className="td">{r.role === 'admin' ? 'Master' : r.role === 'manager' ? 'Team lead' : 'Rep'}</div>
                     <div className="td r num">{pct(r.openerRate)}</div>

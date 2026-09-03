@@ -14,7 +14,7 @@ function Field({ label, hint, children, span }: { label: React.ReactNode; hint?:
     <label className="field" style={span ? { gridColumn: '1 / -1' } : undefined}>
       <span className="label">{label}</span>
       {children}
-      {hint && <span className="subtle" style={{ fontSize: 11 }}>{hint}</span>}
+      {hint && <span className="subtle" style={{ fontSize: 13 }}>{hint}</span>}
     </label>
   );
 }
@@ -142,7 +142,7 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
       <div className="form">
         <Field label="Product" span>
           <select value={f.product} onChange={set('product')}>{settings.products.map((p) => <option key={p.name}>{p.name}</option>)}</select>
-          <span className="muted" style={{ fontSize: 12 }}>{explainer}</span>
+          <span className="muted" style={{ fontSize: 14 }}>{explainer}</span>
         </Field>
         {rule?.parent && (
           <Field label="Parent opportunity" span>
@@ -186,7 +186,7 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
             <option value="">— select —</option>
             {settings.lenders.filter((l) => !l.products?.length || l.products.includes(f.product ?? '')).map((l) => <option key={l.name} value={l.name}>{l.name}{canIncrement && l.terms === 'weekly' ? ` · ${l.weeks} increments` : ''}{l.clawback ? l.clawback.basis === 'none' ? ' · no clawback' : ` · clawback ${l.clawback.count} ${l.clawback.basis}` : ''}</option>)}
           </select>
-          <span className="subtle" style={{ fontSize: 11 }}>Only lenders set up for {f.product} (Settings › Lenders).</span>
+          <span className="subtle" style={{ fontSize: 13 }}>Only lenders set up for {f.product} (Settings › Lenders).</span>
         </Field>
         <Field label={amountLabel}><input inputMode="decimal" value={f.amount} onChange={set('amount')} placeholder="125000" /></Field>
         {rule?.term && <Field label="Term length (business days)" hint="Mon–Fri only, excludes weekends"><input inputMode="numeric" value={f.termDays} onChange={set('termDays')} /></Field>}
@@ -294,7 +294,7 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
         <button className="btn primary big" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save deal & push to Sheets'}</button>
         <button className="btn big" onClick={onClose}>Cancel</button>
       </div>
-      <div className="subtle" style={{ fontSize: 11 }}>Rates: {pct(0.2)} means 20 — type either.</div>
+      <div className="subtle" style={{ fontSize: 13 }}>Rates: {pct(0.2)} means 20 — type either.</div>
     </Drawer>
   );
 }

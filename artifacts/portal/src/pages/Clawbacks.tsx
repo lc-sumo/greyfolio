@@ -39,7 +39,7 @@ export function Clawbacks() {
                   <div className="td num">{day(c.date)}</div>
                   <div className="td ellipsis">{c.business}</div>
                   <div className="td r num">{money(c.dealClawback)}</div>
-                  <div className="td r num neg">{c.status === 'open' ? money(c.remaining) : money(c.recovered)}<div className="subtle" style={{ fontSize: 10.5 }}>{c.status === 'open' ? 'remaining' : 'withheld'}</div></div>
+                  <div className="td r num neg">{c.status === 'open' ? money(c.remaining) : money(c.recovered)}<div className="subtle" style={{ fontSize: 12.5 }}>{c.status === 'open' ? 'remaining' : 'withheld'}</div></div>
                   <div className="td ellipsis">{c.reason}</div>
                   <div className="td"><Pill tone={toneFor(c.status)}>{c.status === 'open' ? 'Open' : 'Recovered'}</Pill></div>
                 </div>

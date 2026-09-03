@@ -72,7 +72,7 @@ export function Overview() {
                 <div className="lb">
                   {o.renewals.map((r) => (
                     <div className="row click" key={r.id} style={{ gridTemplateColumns: 'minmax(0,1fr) auto auto', cursor: 'pointer' }} onClick={() => setOpen(r.id)}>
-                      <span className="ellipsis"><b>{r.business}</b> <span className="subtle num">{r.crmId ?? r.id}</span><div className="subtle" style={{ fontSize: 11 }}>{r.lender} · {compact(r.funded)} · mark {day(r.markDate)} · {r.whoCalls} calls</div></span>
+                      <span className="ellipsis"><b>{r.business}</b> <span className="subtle num">{r.crmId ?? r.id}</span><div className="subtle" style={{ fontSize: 13 }}>{r.lender} · {compact(r.funded)} · mark {day(r.markDate)} · {r.whoCalls} calls</div></span>
                       <span className="amt pos">{money(r.estRenewalGross)}</span>
                     </div>
                   ))}
@@ -86,7 +86,7 @@ export function Overview() {
                     <div key={c.id} className="cbar click" onClick={() => setOpen(c.dealId)} style={{ cursor: 'pointer' }}>
                       <div className="cbar-head"><span className="ellipsis"><b>{c.business}</b> <span className="subtle num">{c.dealId} · {day(c.date)}</span></span><span className="num neg">{money(c.remaining)}</span></div>
                       <div className="cbar-track"><i style={{ width: `${(c.repTotal / maxCb) * 100}%` }}><b style={{ width: `${c.repTotal ? (c.recovered / c.repTotal) * 100 : 0}%` }} /></i></div>
-                      <div className="subtle" style={{ fontSize: 10.5 }}>deal clawback {money(c.amount)} · reps owe {money(c.repTotal)} · recovered {money(c.recovered)}</div>
+                      <div className="subtle" style={{ fontSize: 12.5 }}>deal clawback {money(c.amount)} · reps owe {money(c.repTotal)} · recovered {money(c.recovered)}</div>
                     </div>
                   ))}
                 </div>

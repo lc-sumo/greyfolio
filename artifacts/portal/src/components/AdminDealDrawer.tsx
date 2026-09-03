@@ -71,7 +71,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
               {d.apr !== null && <><dt>APR</dt><dd>{d.apr}%</dd></>}
               {d.termDays !== null && <><dt>Term</dt><dd>{d.termDays} business days · {d.frequency}</dd></>}
               {d.payback !== null && <><dt>Payback</dt><dd>{money(d.payback)}</dd></>}
-              <dt>Clawback</dt><dd style={{ fontFamily: 'var(--sans)' }}><Pill tone={d.clawbackWindow.cleared ? 'teal' : d.atRisk && (d.dealStatus === 'Default' || d.dealStatus === 'Slow Pay') ? 'red' : 'amber'}>{d.clawbackWindow.label}</Pill>{d.clawbackWindow.clearsOn && !d.clawbackWindow.cleared && <div className="subtle" style={{ fontSize: 11, marginTop: 3 }}>clears {fullDay(d.clawbackWindow.clearsOn)} · {d.clawbackWindow.source === 'lender' ? `${d.lender} policy` : 'default window'}</div>}</dd>
+              <dt>Clawback</dt><dd style={{ fontFamily: 'var(--sans)' }}><Pill tone={d.clawbackWindow.cleared ? 'teal' : d.atRisk && (d.dealStatus === 'Default' || d.dealStatus === 'Slow Pay') ? 'red' : 'amber'}>{d.clawbackWindow.label}</Pill>{d.clawbackWindow.clearsOn && !d.clawbackWindow.cleared && <div className="subtle" style={{ fontSize: 13, marginTop: 3 }}>clears {fullDay(d.clawbackWindow.clearsOn)} · {d.clawbackWindow.source === 'lender' ? `${d.lender} policy` : 'default window'}</div>}</dd>
               {d.segments[0]?.payment != null && <><dt>Payment</dt><dd>{money(d.segments[0].payment)} <span className="subtle">/ {d.frequency.toLowerCase()}</span></dd></>}
               <dt>Commission</dt><dd>{pct(d.commRate)}{d.psfPct ? ` + PSF ${pct(d.psfPct)}` : ''}{d.originationFee ? ` + ${money(d.originationFee)} orig.` : ''}</dd>
               <dt>Referral</dt><dd>{d.referralPartner ? `${d.referralPartner} ${pct(d.referralRate)} · ${money(d.referralFee)}` : '—'}</dd>
@@ -99,16 +99,16 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
               </div>
               <div className="pips">{s.schedule.events.filter((e) => e.kind === 'increment').map((e) => <i key={e.n} className={e.received ? 'on' : e.overdue ? 'late' : ''} title={`${e.label} · ${e.expected ? fullDay(e.expected) : '—'}${e.amount ? ` · ${money(e.amount)}` : ''}${e.received ? ' · received' : e.overdue ? ' · overdue' : ''}`} />)}</div>
               <dl className="kv" style={{ marginTop: 12 }}>
-                {s.schedule.upfrontPct > 0 && <><dt>Upfront {money(s.schedule.upfrontAmount)}</dt><dd style={{ fontFamily: 'var(--sans)' }}>{s.schedule.upfrontReceived ? <span className="pos">received</span> : <button className="btn" style={{ height: 26, padding: '0 8px', fontSize: 11.5 }} onClick={() => void collect({ segmentKey: s.sk, markUpfront: true }, `${d.id} — upfront ${money(s.schedule!.upfrontAmount)} received`)}>Record upfront received</button>}</dd></>}
+                {s.schedule.upfrontPct > 0 && <><dt>Upfront {money(s.schedule.upfrontAmount)}</dt><dd style={{ fontFamily: 'var(--sans)' }}>{s.schedule.upfrontReceived ? <span className="pos">received</span> : <button className="btn" style={{ height: 26, padding: '0 8px', fontSize: 13.5 }} onClick={() => void collect({ segmentKey: s.sk, markUpfront: true }, `${d.id} — upfront ${money(s.schedule!.upfrontAmount)} received`)}>Record upfront received</button>}</dd></>}
                 <dt>Lender paid</dt><dd>{s.schedule.received}/{s.schedule.weeks} increments{s.schedule.remainder === 'spread' ? ` · ${money(s.schedule.perWeek * s.schedule.received)}` : ''}</dd>
                 <dt>Collected so far</dt><dd>{money(s.collected)} <span className="subtle">of {money(s.gross)}</span></dd>
                 {s.schedule.paidToReps.length > 0 && <><dt>Rep paid</dt><dd style={{ fontFamily: 'var(--sans)' }}>{s.schedule.paidToReps.map((r) => <div key={r.role}><span className="num">{r.paid}/{r.total}</span> <span className="subtle">{r.name} · {r.role}</span></div>)}</dd></>}
                 <dt>Still to come</dt><dd>{money(s.outstanding)}</dd>
                 <dt>Next expected</dt><dd>{s.schedule.nextExpected ? <>{s.schedule.nextExpected.expected ? day(s.schedule.nextExpected.expected) : '—'} <span className="subtle" style={{ fontFamily: 'var(--sans)' }}>· {s.schedule.nextExpected.label}{s.schedule.nextExpected.amount ? ` · ${money(s.schedule.nextExpected.amount)}` : ''}{s.schedule.nextExpected.overdue ? <b className="neg"> · overdue</b> : ''}</span></> : <span className="pos">Complete</span>}</dd>
-                {s.schedule.remainder === 'at-end' && <><dt>Final {money(s.schedule.remainderAmount)}</dt><dd style={{ fontFamily: 'var(--sans)' }}>{s.schedule.remainderReceived ? <span className="pos">received</span> : s.schedule.received >= s.schedule.weeks ? <button className="btn primary" style={{ height: 26, padding: '0 8px', fontSize: 11.5 }} onClick={() => void collect({ segmentKey: s.sk, markRemainder: true }, `${d.id} — final ${money(s.schedule!.remainderAmount)} received`)}>Record final received</button> : <span className="subtle">due when increments are done</span>}</dd></>}
+                {s.schedule.remainder === 'at-end' && <><dt>Final {money(s.schedule.remainderAmount)}</dt><dd style={{ fontFamily: 'var(--sans)' }}>{s.schedule.remainderReceived ? <span className="pos">received</span> : s.schedule.received >= s.schedule.weeks ? <button className="btn primary" style={{ height: 26, padding: '0 8px', fontSize: 13.5 }} onClick={() => void collect({ segmentKey: s.sk, markRemainder: true }, `${d.id} — final ${money(s.schedule!.remainderAmount)} received`)}>Record final received</button> : <span className="subtle">due when increments are done</span>}</dd></>}
               </dl>
               <details style={{ marginTop: 10 }}>
-                <summary className="muted" style={{ cursor: 'pointer', fontSize: 12 }}>Expected receipts ({s.schedule.events.length})</summary>
+                <summary className="muted" style={{ cursor: 'pointer', fontSize: 14 }}>Expected receipts ({s.schedule.events.length})</summary>
                 <div className="pl" style={{ marginTop: 6 }}>
                   {s.schedule.events.map((e) => (
                     <div className="row" key={`${e.kind}-${e.n}`} style={{ gridTemplateColumns: 'minmax(0,1fr) 90px 100px 90px' }}>
@@ -133,7 +133,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
               <div className="pl">
                 {d.segments.map((s) => (
                   <div className="row draw" key={s.sk}>
-                    <span><b>{s.label}</b> <span className="subtle num">{day(s.date)}</span>{s.payment != null && <div className="subtle" style={{ fontSize: 11 }}>{s.termDays} days · {s.factor?.toFixed(2)} · {money(s.payback ?? 0)} payback · <b className="num">{money(s.payment)}</b> / {d.frequency.toLowerCase()}</div>}</span>
+                    <span><b>{s.label}</b> <span className="subtle num">{day(s.date)}</span>{s.payment != null && <div className="subtle" style={{ fontSize: 13 }}>{s.termDays} days · {s.factor?.toFixed(2)} · {money(s.payback ?? 0)} payback · <b className="num">{money(s.payment)}</b> / {d.frequency.toLowerCase()}</div>}</span>
                     <span className="num">{money(s.amount)}</span>
                     <span className="num subtle">{pct(s.commRate)}</span>
                     <span className="num">{money(s.net)}</span>

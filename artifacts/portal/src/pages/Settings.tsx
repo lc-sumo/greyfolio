@@ -6,7 +6,7 @@ import { api, post, type ClawbackBasis, type Lender, type ProductRule, type Refe
 import { compact, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 
-type TabKey = 'lenders' | 'partners' | 'products' | 'teams' | 'reps' | 'crm';
+type TabKey = 'lenders' | 'partners' | 'products' | 'teams' | 'reps' | 'crm' | 'import';
 const TABS: Array<{ key: TabKey; label: string; hint: string }> = [
   { key: 'lenders', label: 'Lenders', hint: 'Each lender funds certain products and has its own clawback policy. Lenders that fund consolidations pay commission in increments; everyone else pays straight commission.' },
   { key: 'partners', label: 'Referral partners', hint: 'Fee % of gross commission and an optional monthly cap. Blank cap = uncapped.' },
@@ -14,6 +14,7 @@ const TABS: Array<{ key: TabKey; label: string; hint: string }> = [
   { key: 'teams', label: 'Teams', hint: 'A team has a leader who earns the override on the team’s deals. Set the leader here.' },
   { key: 'reps', label: 'Reps', hint: 'Rates default onto new deals and can be overridden per deal. Deactivating never changes history.' },
   { key: 'crm', label: 'CRM & thresholds', hint: 'CRM deep link template and the day counts that drive at-risk, Prospecting and renewals.' },
+  { key: 'import', label: 'Import from sheet', hint: 'Bring the FUNDED DEALS tab in from a CSV export. Preview first; nothing is written until the file is clean.' },
 ];
 
 export function Settings() {
@@ -54,6 +55,7 @@ export function Settings() {
           {tab === 'teams' && <TeamsTab teams={teams.data!.teams} reps={roster.data!.reps} usage={usage.data!.teams} run={run} />}
           {tab === 'reps' && <RepsTab reps={roster.data!.reps} teams={teams.data!.teams} run={run} onViewAs={(id) => setViewAs(id)} />}
           {tab === 'crm' && <CrmTab settings={settings.data!} run={run} />}
+          {tab === 'import' && <ImportTab />}
         </>
       )}
     </Shell>
@@ -383,4 +385,84 @@ function tempPassword(): string {
   const words = ['Harbor', 'Cedar', 'Summit', 'Granite', 'Willow', 'Copper', 'Meadow', 'Falcon', 'Timber', 'Anchor', 'Beacon', 'Ridge'];
   const pick = () => words[Math.floor(Math.random() * words.length)]!;
   return `${pick()}-${pick()}-${1000 + Math.floor(Math.random() * 9000)}`;
+}
+
+/* ---------- Import from sheet ---------- */
+interface ImportRow { line: number; id: string; action: 'deal' | 'draw'; parentId: string | null; business: string; lender: string; product: string; amount: number; date: string; opener: string | null; closer: string | null; override: string | null; commissionStatus: string; repPaid: string | null; clawback: number | null; problems: string[]; warnings: string[] }
+interface ImportPreview { rows: ImportRow[]; skipped: number; problems: string[]; summary: { deals: number; draws: number; funded: number; withPayouts: number; warnings: number; clawbacks: number; problems: number } }
+function ImportTab() {
+  const { notify } = useSession();
+  const qc = useQueryClient();
+  const [csv, setCsv] = useState('');
+  const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [onlyProblems, setOnlyProblems] = useState(false);
+  const [done, setDone] = useState<{ deals: number; draws: number; clawbacks: number; payoutLines: number; runId: string | null } | null>(null);
+  async function file(f: File | undefined) { if (!f) return; setCsv(await f.text()); setPreview(null); setDone(null); }
+  async function run() {
+    setBusy(true);
+    try { setPreview(await post<ImportPreview>('/api/admin/import/preview', { csv })); } catch (e) { notify(e instanceof Error ? e.message : 'Preview failed'); } finally { setBusy(false); }
+  }
+  async function commit() {
+    if (!preview || preview.summary.problems) return;
+    if (!window.confirm(`Import ${preview.summary.deals} deals and ${preview.summary.draws} draws (${compact(preview.summary.funded)} funded)? Rows with a Rep Paid Date become paid ledger lines in a run called "Imported from sheet".`)) return;
+    setBusy(true);
+    try {
+      const r = await post<{ deals: number; draws: number; clawbacks: number; payoutLines: number; runId: string | null }>('/api/admin/import', { csv });
+      setDone(r); setPreview(null); setCsv('');
+      await qc.invalidateQueries();
+      notify(`Imported ${r.deals} deals, ${r.draws} draws, ${r.payoutLines} paid lines`);
+    } catch (e) { notify(e instanceof Error ? e.message : 'Import failed'); } finally { setBusy(false); }
+  }
+  const rows = preview ? preview.rows.filter((r) => !onlyProblems || r.problems.length || r.warnings.length) : [];
+  return (
+    <Card title="Import the FUNDED DEALS tab" extra="Google Sheets → File → Download → CSV of the FUNDED DEALS tab · reps, lenders, products and partners must already exist in Settings">
+      <div style={{ display: 'grid', gap: 10 }}>
+        <div className="toolbar">
+          <input type="file" accept=".csv,text/csv" onChange={(e) => void file(e.target.files?.[0])} />
+          <span className="count">{csv ? `${csv.length.toLocaleString()} characters loaded` : 'or paste the CSV below'}</span>
+          <button className="btn primary" disabled={!csv.trim() || busy} onClick={() => void run()}>{busy ? 'Working…' : 'Preview'}</button>
+        </div>
+        <textarea rows={4} value={csv} onChange={(e) => { setCsv(e.target.value); setPreview(null); }} placeholder="Deal ID,Parent Deal,Date,Business Name,Lender,Product,…" style={{ border: '1px solid var(--border-strong)', borderRadius: 8, padding: '8px 10px', background: 'var(--input-bg)', color: 'inherit', font: 'inherit', fontFamily: 'var(--mono)', fontSize: 12.5, resize: 'vertical', outline: 'none' }} />
+        {done && <div className="note" style={{ background: 'var(--teal-light)', borderColor: 'var(--teal-light-2)' }}>Imported <b>{done.deals}</b> deals, <b>{done.draws}</b> draws, <b>{done.clawbacks}</b> clawbacks and <b>{done.payoutLines}</b> paid ledger lines{done.runId ? ` (run ${done.runId})` : ''}. The master board, rep portals and payroll now reflect them.</div>}
+        {preview && (
+          <>
+            <div className="grid-auto">
+              <section className="card"><div className="label">Deals</div><div className="metric">{preview.summary.deals}</div><div className="sub">{preview.summary.draws} draws · {preview.skipped} banner/total rows skipped</div></section>
+              <section className="card"><div className="label">Funded</div><div className="metric">{compact(preview.summary.funded)}</div></section>
+              <section className="card"><div className="label">Already paid to reps</div><div className="metric">{preview.summary.withPayouts}</div><div className="sub">rows with a Rep Paid Date → ledger</div></section>
+              <section className="card"><div className="label">Problems</div><div className={`metric ${preview.summary.problems ? 'neg' : 'pos'}`}>{preview.summary.problems}</div><div className="sub">{preview.summary.warnings} warning{preview.summary.warnings === 1 ? '' : 's'} · {preview.summary.clawbacks} clawbacks</div></section>
+            </div>
+            {preview.problems.map((p, i) => <div key={i} className="note" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>{p}</div>)}
+            <div className="toolbar">
+              <label className="subtle" style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}><input type="checkbox" checked={onlyProblems} onChange={(e) => setOnlyProblems(e.target.checked)} /> only rows with problems or warnings</label>
+              <span className="count">{rows.length} of {preview.rows.length} rows</span>
+              <button className="btn primary" disabled={busy || preview.summary.problems > 0} title={preview.summary.problems ? 'Fix the problems in the sheet, export again and preview' : undefined} onClick={() => void commit()}>Import {preview.summary.deals + preview.summary.draws} rows</button>
+            </div>
+            <div className="scroller">
+              <div className="table" style={{ ['--cols' as string]: '60px 70px 70px minmax(180px,1.4fr) 110px 150px 110px 100px 130px 130px 130px minmax(260px,1.6fr)', minWidth: 1500 }}>
+                <div className="tr th"><div className="td">Line</div><div className="td">ID</div><div className="td">Row</div><div className="td">Business</div><div className="td">Lender</div><div className="td">Product</div><div className="td r">Amount</div><div className="td">Date</div><div className="td">Opener / Closer</div><div className="td">Comm. status</div><div className="td">Rep paid</div><div className="td">Problems</div></div>
+                {rows.map((r) => (
+                  <div className={`tr ${r.problems.length ? 'tint' : ''}`} key={r.line}>
+                    <div className="td num subtle">{r.line}</div>
+                    <div className="td num">{r.id || <span className="subtle">new</span>}</div>
+                    <div className="td">{r.action === 'draw' ? <Pill tone="amber">draw of {r.parentId}</Pill> : <Pill tone="teal">deal</Pill>}</div>
+                    <div className="td ellipsis">{r.business}</div>
+                    <div className="td ellipsis">{r.lender}</div>
+                    <div className="td ellipsis">{r.product}</div>
+                    <div className="td r num">{money(r.amount)}</div>
+                    <div className="td num">{r.date || '—'}</div>
+                    <div className="td ellipsis" style={{ fontSize: 13 }}>{[r.opener, r.closer].filter(Boolean).join(' / ') || '—'}{r.override ? ` · ov ${r.override}` : ''}</div>
+                    <div className="td ellipsis" style={{ fontSize: 13 }}>{r.commissionStatus || '—'}</div>
+                    <div className="td num">{r.repPaid ?? '—'}</div>
+                    <div className="td" style={{ fontSize: 13 }}>{r.problems.map((p, i) => <div key={i} className="neg">{p}</div>)}{r.warnings.map((w, i) => <div key={`w${i}`} className="warn">{w}</div>)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </Card>
+  );
 }

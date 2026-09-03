@@ -41,10 +41,10 @@ describe('lists with in-use guards', () => {
   it('lenders: add and edit freely, refuse removing one in use', async () => {
     const { admin, repo } = await harness();
     const current = (await admin.get('/api/admin/settings')).body.lenders;
-    const next = [...current.map((l: { name: string }) => (l.name === 'ROWAN' ? { ...l, weeks: 24 } : l)), { name: 'NEW CAPITAL', terms: 'weekly', weeks: 10 }];
+    const next = [...current.map((l: { name: string }) => (l.name === 'GFE' ? { ...l, weeks: 24 } : l)), { name: 'NEW CAPITAL', terms: 'weekly', weeks: 10 }];
     const res = await admin.put('/api/admin/settings/lenders').send({ lenders: next });
     expect(res.status).toBe(200);
-    expect(res.body.lenders.find((l: { name: string }) => l.name === 'ROWAN').weeks).toBe(24);
+    expect(res.body.lenders.find((l: { name: string }) => l.name === 'GFE').weeks).toBe(24);
     expect(res.body.lenders.at(-1)).toEqual({ name: 'NEW CAPITAL', terms: 'weekly', weeks: 10 });
     expect(repo.audit.at(-1)).toMatchObject({ action: 'settings.update' });
     const removeMbc = await admin.put('/api/admin/settings/lenders').send({ lenders: next.filter((l: { name: string }) => l.name !== 'MBC') });

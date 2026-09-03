@@ -49,7 +49,7 @@ export function Login({ oidc, devAuth, password: passwordAuth = true }: { oidc: 
               {DEMO ? (
                 <div className="note">
                   <b>Preview with demo data.</b> Nothing here is real. Sign in as <button type="button" className="linkish" style={{ color: 'var(--teal)', padding: 0, font: 'inherit', fontWeight: 600 }} onClick={() => setEmail('leor@greystoneus.com')}>Leor (admin)</button>,{' '}
-                  <button type="button" className="linkish" style={{ color: 'var(--teal)', padding: 0, font: 'inherit', fontWeight: 600 }} onClick={() => setEmail('julian.ribak@greystoneus.com')}>Julian Ribak (rep)</button> or{' '}
+                  <button type="button" className="linkish" style={{ color: 'var(--teal)', padding: 0, font: 'inherit', fontWeight: 600 }} onClick={() => setEmail('noah.levine@greystoneus.com')}>Noah Levine (rep)</button> or{' '}
                   <button type="button" className="linkish" style={{ color: 'var(--teal)', padding: 0, font: 'inherit', fontWeight: 600 }} onClick={() => setEmail('raymond.amato@greystoneus.com')}>Raymond Amato (team lead)</button>.
                 </div>
               ) : devAuth ? (

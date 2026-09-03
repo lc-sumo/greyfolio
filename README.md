@@ -50,7 +50,7 @@ git clone https://github.com/lc-sumo/greyfolio -b claude/new-session-kdfrhy && c
 docker compose up --build
 ```
 
-Open http://localhost:8080 and sign in with `leor@greystoneus.com` (admin), `julian.ribak@greystoneus.com` (rep) or `raymond.amato@greystoneus.com` (team lead). The container applies migrations and loads the demo board on every start (`SEED=demo`); set `SEED=none` in `docker-compose.yml` to keep your data between restarts. `docker compose down -v` wipes the database.
+Open http://localhost:8080 and sign in with `leor@greystoneus.com` (admin), `noah.levine@greystoneus.com` (rep) or `raymond.amato@greystoneus.com` (team lead). The container applies migrations and loads the demo board on every start (`SEED=demo`); set `SEED=none` in `docker-compose.yml` to keep your data between restarts. `docker compose down -v` wipes the database.
 
 ### Manual setup
 
@@ -74,7 +74,7 @@ pnpm portal:build
 AUTH_MODE=dev SESSION_SECRET=local DATABASE_URL=… PORTAL_DIST=artifacts/portal/dist pnpm api:dev
 ```
 
-Sign in with any rep's email from the roster (e.g. `leor@greystoneus.com` for admin, `julian.ribak@greystoneus.com` for a rep, `raymond.amato@greystoneus.com` for a team lead). In production set `OIDC_ISSUER` and leave `AUTH_MODE` unset.
+Sign in with any rep's email from the roster (e.g. `leor@greystoneus.com` for admin, `noah.levine@greystoneus.com` for a rep, `raymond.amato@greystoneus.com` for a team lead). In production set `OIDC_ISSUER` and leave `AUTH_MODE` unset.
 
 **Email + password accounts** work everywhere (set `AUTH_PASSWORD=off` to disable). An admin sets or resets a rep's password in Settings › Reps (a readable temporary one is suggested); the rep signs in with email + password and can change it from the sidebar. Passwords are scrypt-hashed in `commission_reps.password_hash` (migration `0003_rep_passwords`) and never leave the API; five failed attempts lock an email for 15 minutes.
 

@@ -10,7 +10,9 @@
     ".": "./src/index.ts",
     "./schema": "./src/schema/commission.ts",
     "./seed": "./src/seed/workbook.ts",
-    "./seed/demo": "./src/seed/demo.ts"
+    "./seed/demo": "./src/seed/demo.ts",
+    "./seed/csv": "./src/seed/funded-deals-csv.ts",
+    "./seed/columns": "./src/seed/funded-deals-columns.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate",

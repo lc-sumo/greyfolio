@@ -5,7 +5,7 @@ import { COMMISSION_STATUSES, DEAL_STATUSES, FREQUENCIES, LENDERS, PARTNERS, PRO
 
 describe('REPS tab', () => {
   it('carries every rep on the workbook tab with rates as fractions', () => {
-    expect(WORKBOOK_REPS).toHaveLength(25);
+    expect(WORKBOOK_REPS).toHaveLength(19);
     for (const r of WORKBOOK_REPS) {
       expect(r.openerRate).toBeGreaterThan(0);
       expect(r.openerRate).toBeLessThanOrEqual(1);
@@ -16,11 +16,11 @@ describe('REPS tab', () => {
   });
   it('matches spot values from the sheet', () => {
     const by = Object.fromEntries(WORKBOOK_REPS.map((r) => [r.name, r]));
-    expect(by['Zach Sanders']).toMatchObject({ openerRate: 0.4, closerRate: 0.4 });
-    expect(by['Julian Ribak']).toMatchObject({ openerRate: 0.35, overrideRate: 0.025 });
-    expect(by['Albert Dichy']).toMatchObject({ openerRate: 0.2, overrideRate: 0.075 });
+    expect(by['Azi Sharbani']).toMatchObject({ openerRate: 0.2, closerRate: 0.2, overrideRate: 0.05 });
+    expect(by['Noah Levine']).toMatchObject({ openerRate: 0.2, closerRate: 0.15, overrideRate: null });
     expect(by['Solomon Gold']).toMatchObject({ openerRate: 0.2, closerRate: 0.15, overrideRate: null });
-    expect(by['Edward Obi']).toMatchObject({ openerRate: 0.15 });
+    expect(by['Jordan Levy']).toMatchObject({ openerRate: 0.2, closerRate: 0.2 });
+    expect(by['Zach Sanders']).toBeUndefined(); // not on the tracker → not in the portal
   });
   it('produces unique ids and emails', () => {
     const reps = seedReps();
@@ -32,19 +32,19 @@ describe('REPS tab', () => {
   it('only Leor is an admin; everyone is active and assignable', () => {
     const reps = seedReps();
     expect(reps.filter((r) => r.role === 'admin').map((r) => r.name)).toEqual(['Leor']);
-    expect(repOptions(reps, 'assign')).toHaveLength(25);
+    expect(repOptions(reps, 'assign')).toHaveLength(19);
   });
   it('defaults a new deal from the profiles', () => {
     const reps = seedReps();
-    const opener = reps.find((r) => r.name === 'Zach Sanders')!;
-    const closer = reps.find((r) => r.name === 'Edward Obi')!;
-    expect(defaultSplits(opener, closer, reps, [])).toEqual({ openerRate: 0.4, closerRate: 0.15, overrideId: null, overrideRate: 0 });
+    const opener = reps.find((r) => r.name === 'Azi Sharbani')!;
+    const closer = reps.find((r) => r.name === 'Noah Levine')!;
+    expect(defaultSplits(opener, closer, reps, [])).toEqual({ openerRate: 0.2, closerRate: 0.15, overrideId: null, overrideRate: 0 });
   });
 });
 
 describe('SETTINGS tab', () => {
   it('lists the workbook lenders, products, statuses and frequencies', () => {
-    expect(LENDERS.map((l) => l.name)).toEqual(['MBC', 'ACE FUNDING', 'ROWAN', 'ENOD CAPITAL', 'IDEA', 'BIZPOINT', 'Lendini', 'WALL', 'UFS FUNDING', 'MILVADO CAPITAL', 'Cetan Funds']);
+    expect(LENDERS.map((l) => l.name)).toEqual(['MBC', 'GFE', 'House', 'Forward', 'Lendini', 'Wall', 'LG', 'Capitalize', 'Byzfunder', 'RTMI', 'Highland Hill', 'Revenued']);
     expect(PRODUCTS.map((p) => p.name)).toEqual([
       'MCA',
       'LOC - INITIAL',

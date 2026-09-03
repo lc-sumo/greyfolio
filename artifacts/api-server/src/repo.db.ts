@@ -1,5 +1,5 @@
 import { desc, eq, sql } from 'drizzle-orm';
-import type { Deal, DealDraw, LedgerContext, PayrollRun, Rep, Team, WeeklySchedule } from '@greystone/commission';
+import type { Clawback, Deal, DealDraw, LedgerContext, PayrollRun, Rep, Team, WeeklySchedule } from '@greystone/commission';
 import {
   commissionAuditLog,
   commissionClawbacks,
@@ -69,6 +69,9 @@ export function dbRepo(db: Database): Repo {
         crm: map.crm ?? { urlTemplate: '' },
         payroll: map.payroll ?? { cycle: 'Twice monthly' },
       };
+    },
+    async insertClawback(c: Clawback) {
+      await db.insert(commissionClawbacks).values({ id: c.id, dealId: c.dealId, date: c.date, amount: c.amount, reason: c.reason, status: c.status, recovered: c.recovered });
     },
     async deleteDeal(id: string) {
       await db.transaction(async (tx) => {

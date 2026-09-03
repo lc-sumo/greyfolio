@@ -21,32 +21,27 @@ export interface WorkbookRep {
   active: boolean;
 }
 
+// GREYSTONE_FUNDING_TRACKER (FINAL) → REPS tab, verbatim. Only these reps exist in the portal.
 export const WORKBOOK_REPS: readonly WorkbookRep[] = [
-  { name: 'Leor', openerRate: 0.2, closerRate: 0.2, overrideRate: 0.05, active: true },
-  { name: 'Raymond Amato', openerRate: 0.2, closerRate: 0.2, overrideRate: 0.05, active: true },
+  { name: 'Leor', openerRate: 0.2, closerRate: 0.2, overrideRate: null, active: true },
+  { name: 'Raymond Amato', openerRate: 0.2, closerRate: 0.2, overrideRate: null, active: true },
   { name: 'Azi Sharbani', openerRate: 0.2, closerRate: 0.2, overrideRate: 0.05, active: true },
-  { name: 'Nick Faldo', openerRate: 0.2, closerRate: 0.2, overrideRate: 0.05, active: true },
-  { name: 'Zach Sanders', openerRate: 0.4, closerRate: 0.4, overrideRate: 0.05, active: true },
-  { name: 'Gil Dichy', openerRate: 0.3, closerRate: 0.3, overrideRate: 0.05, active: true },
-  { name: 'Julian Ribak', openerRate: 0.35, closerRate: 0.35, overrideRate: 0.025, active: true },
-  { name: 'Louie Palleta', openerRate: 0.35, closerRate: 0.35, overrideRate: 0.05, active: true },
-  { name: 'Jacobo Simkin', openerRate: 0.35, closerRate: 0.35, overrideRate: 0.05, active: true },
-  { name: 'Gabriel Barnes', openerRate: 0.3, closerRate: 0.3, overrideRate: 0.05, active: true },
-  { name: 'Edward Obi', openerRate: 0.15, closerRate: 0.15, overrideRate: 0.05, active: true },
-  { name: 'Shulamit Cohen', openerRate: 0.3, closerRate: 0.3, overrideRate: 0.05, active: true },
-  { name: 'Albert Dichy', openerRate: 0.2, closerRate: 0.2, overrideRate: 0.075, active: true },
-  { name: 'Louie Espinoza', openerRate: 0.35, closerRate: 0.35, overrideRate: 0.05, active: true },
-  { name: 'Noah Levine', openerRate: 0.2, closerRate: 0.2, overrideRate: 0.05, active: true },
-  { name: 'Samuel Knox', openerRate: 0.2, closerRate: 0.2, overrideRate: 0.05, active: true },
-  { name: 'Rav Sova', openerRate: 0.2, closerRate: 0.2, overrideRate: 0.05, active: true },
-  { name: 'Netanel Benjamin', openerRate: 0.2, closerRate: 0.2, overrideRate: 0.05, active: true },
+  { name: 'Nick Faldo', openerRate: 0.2, closerRate: 0.2, overrideRate: null, active: true },
+  { name: 'Noah Levine', openerRate: 0.2, closerRate: 0.15, overrideRate: null, active: true },
+  { name: 'Samuel Knox', openerRate: 0.2, closerRate: 0.2, overrideRate: null, active: true },
+  { name: 'Rav Sova', openerRate: 0.2, closerRate: 0.15, overrideRate: null, active: true },
+  { name: 'Netanel Benjamin', openerRate: 0.2, closerRate: 0.15, overrideRate: null, active: true },
   { name: 'Solomon Gold', openerRate: 0.2, closerRate: 0.15, overrideRate: null, active: true },
-  { name: 'Mark Gold', openerRate: 0.2, closerRate: 0.2, overrideRate: null, active: true },
-  { name: 'Aaron Dahan', openerRate: 0.2, closerRate: 0.2, overrideRate: null, active: true },
-  { name: 'Darren Wolf', openerRate: 0.2, closerRate: 0.15, overrideRate: null, active: true },
   { name: 'David Silvers', openerRate: 0.2, closerRate: 0.15, overrideRate: null, active: true },
   { name: 'Jason Reed', openerRate: 0.2, closerRate: 0.2, overrideRate: null, active: true },
+  { name: 'Darren Wolf', openerRate: 0.2, closerRate: 0.15, overrideRate: null, active: true },
   { name: 'Levi Forgash', openerRate: 0.2, closerRate: 0.2, overrideRate: null, active: true },
+  { name: 'Mark Gold', openerRate: 0.2, closerRate: 0.2, overrideRate: null, active: true },
+  { name: 'Elie Miller', openerRate: 0.2, closerRate: 0.15, overrideRate: null, active: true },
+  { name: 'Stephen Pierce', openerRate: 0.2, closerRate: 0.15, overrideRate: null, active: true },
+  { name: 'Aaron Dahan', openerRate: 0.2, closerRate: 0.15, overrideRate: null, active: true },
+  { name: 'Jordan Levy', openerRate: 0.2, closerRate: 0.2, overrideRate: null, active: true },
+  { name: 'Asher Cohen', openerRate: 0.2, closerRate: 0.2, overrideRate: null, active: true },
 ];
 
 /** Workbook defaults: 20% opener / 20% closer / 5% override. */
@@ -112,18 +107,21 @@ export const DEAL_STATUSES = ['Performing', 'Prospecting', 'Refi Ready', 'Refina
 const CONSOL = ['CONSOLIDATION - UPFRONT COMM', 'CONSOLIDATION DISBURSEMENT'];
 const REVERSE = ['REVERSE - TOTAL FUNDING', 'REVERSE - DISBURSEMENT'];
 const LOC = ['LOC - INITIAL', 'LOC DRAW'];
+// SETTINGS!E of GREYSTONE_FUNDING_TRACKER (FINAL). Which products each lender funds follows the
+// funded deals on that sheet; increments and clawback policies are assumptions to confirm in Settings › Lenders.
 export const LENDERS: readonly Lender[] = [
-  { name: 'MBC', terms: 'upfront', weeks: 0, products: ['MCA', 'TERM LOAN', 'SBA'], clawback: { basis: 'days', count: 30 } },
-  { name: 'ACE FUNDING', terms: 'upfront', weeks: 0, products: ['MCA', 'EQUIPMENT'], clawback: { basis: 'days', count: 45 } },
-  { name: 'ROWAN', terms: 'weekly', weeks: 20, products: [...CONSOL, 'MCA'], clawback: { basis: 'payments', count: 10 } },
-  { name: 'ENOD CAPITAL', terms: 'weekly', weeks: 12, products: [...CONSOL, ...REVERSE], clawback: { basis: 'payments', count: 15 } },
-  { name: 'IDEA', terms: 'upfront', weeks: 0, products: [...REVERSE, 'REAL ESTATE'], clawback: { basis: 'days', count: 30 } },
-  { name: 'BIZPOINT', terms: 'upfront', weeks: 0, products: [...LOC, 'MCA'], clawback: { basis: 'days', count: 30 } },
+  { name: 'MBC', terms: 'upfront', weeks: 0, products: ['MCA', ...LOC], clawback: { basis: 'days', count: 30 } },
+  { name: 'GFE', terms: 'weekly', weeks: 20, products: [...CONSOL, 'MCA'], clawback: { basis: 'payments', count: 10 } }, // assumption: 20 weekly increments
+  { name: 'House', terms: 'upfront', weeks: 0, products: ['MCA'], clawback: { basis: 'none', count: 0 } },
+  { name: 'Forward', terms: 'upfront', weeks: 0, products: ['MCA'], clawback: { basis: 'days', count: 30 } },
   { name: 'Lendini', terms: 'weekly', weeks: 16, products: [...CONSOL], clawback: { basis: 'payments', count: 20 } },
-  { name: 'WALL', terms: 'upfront', weeks: 0, products: ['EQUIPMENT', 'REAL ESTATE', 'TERM LOAN'], clawback: { basis: 'none', count: 0 } },
-  { name: 'UFS FUNDING', terms: 'upfront', weeks: 0, products: [...LOC, 'SBA', 'TERM LOAN'], clawback: { basis: 'days', count: 60 } },
-  { name: 'MILVADO CAPITAL', terms: 'upfront', weeks: 0, products: ['MCA', ...REVERSE], clawback: { basis: 'days', count: 30 } }, // assumption: terms unknown
-  { name: 'Cetan Funds', terms: 'upfront', weeks: 0, products: ['MCA', 'EQUIPMENT'], clawback: { basis: 'days', count: 30 } }, // assumption: terms unknown
+  { name: 'Wall', terms: 'upfront', weeks: 0, products: ['EQUIPMENT', 'REAL ESTATE', 'TERM LOAN'], clawback: { basis: 'none', count: 0 } },
+  { name: 'LG', terms: 'upfront', weeks: 0, products: ['MCA'], clawback: { basis: 'days', count: 30 } },
+  { name: 'Capitalize', terms: 'upfront', weeks: 0, products: ['MCA'], clawback: { basis: 'days', count: 30 } },
+  { name: 'Byzfunder', terms: 'upfront', weeks: 0, products: ['MCA'], clawback: { basis: 'days', count: 30 } },
+  { name: 'RTMI', terms: 'upfront', weeks: 0, products: ['MCA'], clawback: { basis: 'days', count: 30 } },
+  { name: 'Highland Hill', terms: 'weekly', weeks: 20, products: [...CONSOL], clawback: { basis: 'payments', count: 10 } }, // assumption
+  { name: 'Revenued', terms: 'upfront', weeks: 0, products: [...LOC], clawback: { basis: 'days', count: 30 } },
 ];
 
 /**

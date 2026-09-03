@@ -97,8 +97,8 @@ export function buildDemo(today = iso(new Date()), seed = 20260902): DemoData {
   const teams: Team[] = [
     { id: 'team-amato', name: 'Team Amato', leaderRepId: byName('Raymond Amato').id, overrideRate: 0.05 },
     { id: 'team-sharbani', name: 'Team Sharbani', leaderRepId: byName('Azi Sharbani').id, overrideRate: 0.05 },
-    { id: 'team-dichy', name: 'Team Dichy', leaderRepId: byName('Gil Dichy').id, overrideRate: 0.05 },
-    { id: 'team-sanders', name: 'Team Sanders', leaderRepId: byName('Zach Sanders').id, overrideRate: 0.05 },
+    { id: 'team-gold', name: 'Team Gold', leaderRepId: byName('Solomon Gold').id, overrideRate: 0.05 },
+    { id: 'team-reed', name: 'Team Reed', leaderRepId: byName('Jason Reed').id, overrideRate: 0.05 },
   ];
   reps.forEach((rep, i) => {
     rep.teamId = teams[i % teams.length]!.id;

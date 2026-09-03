@@ -62,6 +62,9 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
     async insertDeal(deal) {
       data.deals.unshift({ ...deal, draws: [...deal.draws] });
     },
+    async insertClawback(c) {
+      data.clawbacks.push({ ...c });
+    },
     async deleteDeal(id) {
       const i = data.deals.findIndex((d) => d.id === id);
       if (i >= 0) data.deals.splice(i, 1);

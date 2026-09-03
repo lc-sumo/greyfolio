@@ -154,8 +154,8 @@ describe('POST pay', () => {
 describe('increments paid to reps', () => {
   it('a consolidation pays per lender receipt; the row tracks 4/20 paid', async () => {
     const { admin } = await harness();
-    // $100k consolidation on ROWAN (20 weekly increments), Julian opener 35%, no closer/override.
-    const created = await admin.post('/api/admin/deals').send({ business: 'Consol Co', fundedDate: today, lender: 'ROWAN', product: 'CONSOLIDATION - UPFRONT COMM', amount: 100_000, termDays: 200, factor: 1.3, commRate: 10, openerId: 'rep-julian-ribak', openerRate: 35, referralPartner: null });
+    // $100k consolidation on GFE (20 weekly increments), Julian opener 35%, no closer/override.
+    const created = await admin.post('/api/admin/deals').send({ business: 'Consol Co', fundedDate: today, lender: 'GFE', product: 'CONSOLIDATION - UPFRONT COMM', amount: 100_000, termDays: 200, factor: 1.3, commRate: 10, openerId: 'rep-julian-ribak', openerRate: 35, referralPartner: null });
     expect(created.status).toBe(201);
     const id = created.body.id as string;
     await admin.post(`/api/admin/deals/${id}/collection`).send({ segmentKey: 'base', recordWeeks: 4 });

@@ -14,6 +14,7 @@ import { memoryRepo } from '../../../api-server/src/repo.memory';
 import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repPayHistory, repRenewals, repStatements, repWallet } from '../../../api-server/src/scope';
 import { addDraw, createDeal, deleteDeal, setCollection, setCrmId, setDealStatus, updateSplits, updateTerms } from '../../../api-server/src/services/deals';
 import { advanceRun, createRun, paySelected, voidPayout } from '../../../api-server/src/services/payroll';
+import { commitImport, previewImport } from '../../../api-server/src/services/import';
 import { createRep, createTeam, deleteTeam, saveCrm, saveLenders, savePartners, savePayroll, saveProducts, saveThresholds, updateRep, updateTeam, usage } from '../../../api-server/src/services/settings';
 import { payrollRepDetail, payrollReps, preview, runSummary } from '../../../api-server/src/payroll-views';
 import { ApiError, type SessionUser } from './api';
@@ -47,7 +48,7 @@ function user(): SessionUser | null {
   } catch { /* ignore */ }
   if (store.get(OUT) === '1') return (memoryUser = null);
   // First visit: open straight into a rep's portal so the preview shows something at rest.
-  const rep = board().d.reps.find((r) => r.name === 'Julian Ribak')!;
+  const rep = board().d.reps.find((r) => r.name === 'Noah Levine')!;
   memoryUser = { repId: rep.id, email: rep.email, name: rep.name, role: rep.role };
   store.set(KEY, JSON.stringify(memoryUser));
   return memoryUser;
@@ -219,6 +220,8 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     const tm = p.match(/^\/api\/admin\/teams\/([^/]+)$/);
     if (tm && method === 'PATCH') return json(await updateTeam(repo, decodeURIComponent(tm[1]!), body as never, me.repId));
     if (tm && method === 'DELETE') { await deleteTeam(repo, decodeURIComponent(tm[1]!), me.repId); return json(null); }
+    if (p === '/api/admin/import/preview' && method === 'POST') return json(await previewImport(repo, String(body.csv ?? '')));
+    if (p === '/api/admin/import' && method === 'POST') return json(await commitImport(repo, String(body.csv ?? ''), me.repId));
     if (p === '/api/admin/reps' && method === 'POST') return json(await createRep(repo, body as never, me.repId));
     const rm = p.match(/^\/api\/admin\/reps\/([^/]+)$/);
     if (rm && method === 'PATCH') return json(await updateRep(repo, decodeURIComponent(rm[1]!), body as never, me.repId));

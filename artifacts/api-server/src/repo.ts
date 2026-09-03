@@ -50,6 +50,7 @@ export interface Repo {
   updateDeal(id: string, patch: DealPatch): Promise<void>;
   /** Removes the deal and its draws. Callers must first prove nothing in the ledger references it. */
   deleteDeal(id: string): Promise<void>;
+  insertClawback(c: Clawback): Promise<void>;
   insertDraw(dealId: string, draw: DealDraw): Promise<void>;
   updateDraw(dealId: string, ref: string, patch: { collected: number | null; schedule: WeeklySchedule | null }): Promise<void>;
   // Payroll (admin only — enforced by the routes)

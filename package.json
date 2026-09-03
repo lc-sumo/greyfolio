@@ -1,0 +1,22 @@
+{
+  "name": "greystone-commission-portal",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Greystone Merchant Partners commission portal — monorepo",
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "test": "pnpm -r --if-present test",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "db:generate": "pnpm --filter @greystone/db generate",
+    "db:migrate": "pnpm --filter @greystone/db migrate",
+    "db:seed": "pnpm --filter @greystone/db seed"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

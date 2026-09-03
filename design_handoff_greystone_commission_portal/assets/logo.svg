@@ -1,0 +1,7 @@
+<svg width="128" height="40" viewBox="0 0 128 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="40" height="40" rx="11" fill="#F0A935"/>
+  <path d="M11 12.5h10.5c4.5 0 7.5 2.2 7.5 6.1 0 2.5-1.2 4.3-3.3 5.3L30.2 29h-5.1l-3.7-4.3h-5.5V29H11V12.5Zm4.9 3.7v4.8h5.1c2 0 3.1-.8 3.1-2.4 0-1.6-1.1-2.4-3.1-2.4h-5.1Z" fill="#17242C"/>
+  <path d="M32.5 11.5h-3.8V29h3.8V11.5Z" fill="#087F6F"/>
+  <text x="49" y="25" fill="#17242C" font-family="Arial, sans-serif" font-size="16" font-weight="700">QuickLend</text>
+  <text x="112" y="25" fill="#087F6F" font-family="Arial, sans-serif" font-size="16" font-weight="700">X</text>
+</svg>

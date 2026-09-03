@@ -160,6 +160,14 @@ export async function commitImport(repo: Repo, csv: string, actorRepId: string):
   const partnerOf = (name: string) => settings.partners.find((p) => p.name.toLowerCase() === name.toLowerCase());
   const repId = (name: string) => repByName(reps, name)?.id ?? null;
   const rate = (v: number | null, fallback: number | null | undefined) => (v === null ? fallback ?? null : v);
+  /** The sheet lets ops overtype a role's dollars. When that disagrees with rate × gross, the typed amount wins: rate = dollars ÷ gross. */
+  const effectiveRate = (r: SheetRow, pct: number | null, dollars: number | null, fallback: number | null | undefined): number | null => {
+    const base = rate(pct, fallback);
+    if (dollars === null || !(r.gross && r.gross > 0)) return base;
+    const asRateV = base === null ? null : base > 1 ? base / 100 : base;
+    if (asRateV !== null && Math.abs(r.gross * asRateV - dollars) <= 1) return base;
+    return Math.round((dollars / r.gross) * 1e6) / 1e6;
+  };
 
   // Deals first (parents before draws), in file order.
   for (const row of preview.rows.filter((x) => x.action === 'deal')) {
@@ -167,7 +175,7 @@ export async function commitImport(repo: Repo, csv: string, actorRepId: string):
     const id = r.id && /^F\d+$/.test(r.id) && !created.some((d) => d.id === r.id) ? r.id : nextDealId(ids);
     ids = [...ids, id];
     const pr = rule(r.product);
-    const psf = parsePsfCell(r.psf);
+    const psf = r.psf ? parsePsfCell(r.psf) : { psfRate: 0, psfDollars: r.psfDollars ?? 0 };
     const deal = priceDeal(
       {
         business: r.business,
@@ -184,11 +192,11 @@ export async function commitImport(repo: Repo, csv: string, actorRepId: string):
         originationFee: 0,
         referralPartner: r.referralPartner && r.referralPartner.toLowerCase() !== 'none' ? partnerOf(r.referralPartner)!.name : null,
         openerId: repId(r.opener),
-        openerRate: rate(r.openerRate, repByName(reps, r.opener)?.openerRate),
+        openerRate: effectiveRate(r, r.openerRate, r.openerDollars, repByName(reps, r.opener)?.openerRate),
         closerId: repId(r.closer),
-        closerRate: rate(r.closerRate, repByName(reps, r.closer)?.closerRate),
+        closerRate: effectiveRate(r, r.closerRate, r.closerDollars, repByName(reps, r.closer)?.closerRate),
         overrideId: repId(r.override),
-        overrideRate: rate(r.overrideRate, repByName(reps, r.override)?.overrideRate ?? 0.05),
+        overrideRate: effectiveRate(r, r.overrideRate, r.overrideDollars, repByName(reps, r.override)?.overrideRate ?? 0.05),
         leadSource: r.leadSource || 'Sheet import',
         notes: r.notes || null,
       },

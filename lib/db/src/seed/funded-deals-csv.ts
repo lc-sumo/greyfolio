@@ -44,6 +44,13 @@ export interface SheetRow {
   frequency: string;
   commRate: number | null;
   psf: number | null;
+  /** `PSF $` (column N): typed dollars when the % cell is blank. */
+  psfDollars: number | null;
+  /** The sheet's own Gross Commission ($) and per-role dollars — when a role's dollars disagree with rate × gross, someone typed an amount by hand. */
+  gross: number | null;
+  openerDollars: number | null;
+  closerDollars: number | null;
+  overrideDollars: number | null;
   referralPartner: string;
   opener: string;
   openerRate: number | null;
@@ -138,6 +145,11 @@ export function readFundedDealsCsv(text: string): SheetRead {
       frequency: col(r, 'K') || 'Daily',
       commRate: num(col(r, 'L')),
       psf: num(col(r, 'M')),
+      psfDollars: num(col(r, 'N')),
+      gross: num(col(r, 'O')),
+      openerDollars: num(col(r, 'V')),
+      closerDollars: num(col(r, 'Y')),
+      overrideDollars: num(col(r, 'AB')),
       referralPartner: col(r, 'P') ?? '',
       opener: col(r, 'T') ?? '',
       openerRate: num(col(r, 'U')),

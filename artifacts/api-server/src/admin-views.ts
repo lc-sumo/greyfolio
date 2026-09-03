@@ -1,6 +1,8 @@
 /** Admin projections: everything, including house net, referral and every rep's name. Never served to reps. */
 import {
   clawbackWindow,
+  disbursementOf,
+  effectiveIncrements,
   type ClawbackWindow,
   clawbackSlices,
   collectedGross,
@@ -97,7 +99,8 @@ export interface AdminDealRow {
   overdueReceipts: number;
   overdueAmount: number;
   /** Incremental initial segment: lender increments received and the fewest increments paid to any assigned rep. */
-  increments: { total: number; lenderPaid: number; repPaid: number } | null;
+  /** Incremental funding progress: increments disbursed to the merchant (= lender receipts) vs the plan, and dollars out the door. */
+  increments: { total: number; lenderPaid: number; repPaid: number; disbursed: number; planned: number; perIncrement: number; stopped: boolean } | null;
 }
 
 export function adminDealRow(deal: Deal, ctx: LedgerContext, reps: Rep[], settings: Settings, today: string): AdminDealRow {
@@ -160,7 +163,8 @@ export function adminDealRow(deal: Deal, ctx: LedgerContext, reps: Rep[], settin
       if (!base.schedule) return null;
       const assigned = roleAssignments(deal).filter((r) => r.repId && r.rate > 0);
       const paid = assigned.map((r) => unitsPaid(deal, ctx.lines, r.repId!, 'base').paid);
-      return { total: base.schedule.weeks, lenderPaid: Math.min(base.schedule.received, base.schedule.weeks), repPaid: paid.length ? Math.min(...paid) : 0 };
+      const disb = disbursementOf(base.planned?.amount ?? base.amount, base.schedule)!;
+      return { total: disb.total, lenderPaid: disb.count, repPaid: paid.length ? Math.min(...paid) : 0, disbursed: disb.disbursed, planned: disb.planned, perIncrement: disb.perIncrement, stopped: disb.stopped };
     })(),
     overdueReceipts: segs.reduce((n, s) => n + scheduleEvents(s, today).filter((e) => e.overdue).length, 0),
     overdueAmount: sum(segs.flatMap((s) => scheduleEvents(s, today).filter((e) => e.overdue).map((e) => e.amount))),
@@ -199,6 +203,10 @@ export interface SegmentView {
     overdueAmount: number;
     /** Per role: increments paid to the rep vs total units. */
     paidToReps: Array<{ role: Role; repId: string; name: string | null; paid: number; total: number }>;
+    /** Funding side of the same increments: dollars disbursed to the merchant against the plan. */
+    disbursement: { planned: number; perIncrement: number; disbursed: number; final: number; count: number; total: number; stopped: boolean };
+    /** The plan as entered, when the merchant has opted out part-way. */
+    planned: Segment['planned'] | null;
   } | null;
   /** Funding terms: the deal's for the initial segment, the draw's own for draws. */
   termDays: number | null;
@@ -254,11 +262,12 @@ export function adminDealDetail(deal: Deal, ctx: LedgerContext, reps: Rep[], set
 
 function scheduleView(s: Segment, today: string, deal: Deal, ctx: LedgerContext, reps: Rep[]): NonNullable<SegmentView['schedule']> {
   const sch = s.schedule!;
-  const parts = scheduleParts(s.gross, sch);
+  // Per-increment figures are on the PLANNED gross; the increment count is what stands after any opt-out.
+  const parts = scheduleParts(s.planned?.gross ?? s.gross, sch);
   const events = scheduleEvents(s, today);
   const pending = events.filter((e) => !e.received && e.expected);
   return {
-    weeks: sch.weeks,
+    weeks: effectiveIncrements(sch),
     received: sch.received,
     startDate: sch.startDate,
     perWeek: parts.perIncrement,
@@ -273,6 +282,8 @@ function scheduleView(s: Segment, today: string, deal: Deal, ctx: LedgerContext,
     nextExpected: pending.sort((a, b) => (a.expected! < b.expected! ? -1 : 1))[0] ?? null,
     overdue: events.filter((e) => e.overdue).length,
     overdueAmount: sum(events.filter((e) => e.overdue).map((e) => e.amount)),
+    disbursement: disbursementOf(s.planned?.amount ?? s.amount, s.schedule)!,
+    planned: s.planned ?? null,
     paidToReps: roleAssignments(deal)
       .filter((r): r is { role: Role; repId: string; rate: number } => !!r.repId && r.rate > 0)
       .map((r) => {

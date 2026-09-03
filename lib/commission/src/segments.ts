@@ -1,5 +1,16 @@
-import { sum } from './money.js';
+import { disbursedRatio, incrementParts, isStopped } from './increments.js';
+import { cents, sum } from './money.js';
 import type { Deal, DealDraw, Segment } from './types.js';
+
+/** A stopped incremental plan: every planned figure scales to the increments the merchant actually took. */
+function scaled(seg: Segment): Segment {
+  const s = seg.schedule;
+  if (!s || !isStopped(s)) return seg;
+  const planned = { amount: seg.amount, gross: seg.gross, referralFee: seg.referralFee, net: seg.net, increments: s.weeks };
+  const gross = incrementParts(seg.gross, s).effectiveGross;
+  const referralFee = seg.gross > 0 ? cents(seg.referralFee * (gross / seg.gross)) : 0;
+  return { ...seg, amount: cents(seg.amount * disbursedRatio(s)), gross, referralFee, net: cents(gross - referralFee), planned };
+}
 
 /**
  * An LOC / consolidation opportunity keeps ONE deal id; every pull is a draw
@@ -22,7 +33,7 @@ export function segments(deal: Deal): Segment[] {
     schedule: deal.commSchedule,
   };
   const draws = [...(deal.draws ?? [])].sort((a, b) => a.n - b.n);
-  return [base, ...draws.map((d) => drawSegment(deal.id, d))];
+  return [scaled(base), ...draws.map((d) => scaled(drawSegment(deal.id, d)))];
 }
 
 export function drawSegment(dealId: string, d: DealDraw): Segment {

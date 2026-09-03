@@ -145,6 +145,24 @@ describe('increments paid to reps', () => {
     // the drawer and the rep's own view agree
     const deal = (await admin.get(`/api/admin/deals/${id}`)).body;
     expect(deal.segments[0].schedule.paidToReps).toEqual([{ role: 'Opener', repId: 'rep-julian-ribak', name: 'Julian Ribak', paid: 4, total: 20 }]);
+    // Funding progress rides the same increments: 100k planned in 20 × 5k, 4 out the door.
+    expect(deal.segments[0].schedule.disbursement).toEqual({ planned: 100_000, perIncrement: 5_000, disbursed: 20_000, final: 100_000, count: 4, total: 20, stopped: false });
+    // The merchant opts out after 4 → a 20k deal: funded, gross and the rep's share scale; the 4 paid units are all there is.
+    const stopped = (await admin.post(`/api/admin/deals/${id}/collection`).send({ segmentKey: 'base', stopIncrements: true })).body;
+    expect(stopped.funded).toBe(20_000);
+    expect(stopped.gross).toBe(2_000);
+    expect(stopped.increments).toMatchObject({ total: 4, lenderPaid: 4, repPaid: 4, disbursed: 20_000, planned: 100_000, stopped: true });
+    expect(stopped.segments[0].schedule.planned).toMatchObject({ amount: 100_000, gross: 10_000, increments: 20 });
+    expect(stopped.lenderPaidLabel).toBe('4/4 wks · opted out');
+    expect(stopped.commissionStatus).toBe('YES - Paid In Full');
+    const after = (await admin.get(`/api/admin/payroll/runs/run-4/reps/rep-julian-ribak`)).body;
+    expect(after.lines.find((l: { dealId: string }) => l.dealId === id)).toBeUndefined();
+    const rep = (await admin.get(`/api/me/deals/${id}`).set('X-View-As', 'rep-julian-ribak')).body;
+    expect(rep).toMatchObject({ funded: 20_000, share: 700, paid: 700, owed: 0, disbursement: { disbursed: 20_000, planned: 100_000, count: 4, total: 4, stopped: true } });
+    // reopening the plan puts the other 16 increments back
+    const reopened = (await admin.post(`/api/admin/deals/${id}/collection`).send({ segmentKey: 'base', stopIncrements: false })).body;
+    expect(reopened.funded).toBe(100_000);
+    expect(reopened.increments).toMatchObject({ total: 20, stopped: false });
     const mine = (await admin.get(`/api/me/deals/${id}`).set('X-View-As', 'rep-julian-ribak')).body;
     expect(mine.lines[0]).toMatchObject({ role: 'Opener', amount: 3_500, paidAmount: 700, paid: false, units: { paid: 4, total: 20, collected: 4 } });
     expect(mine.payments.map((p: { unit: string }) => p.unit)).toEqual(['Increment 1', 'Increment 2', 'Increment 3', 'Increment 4']);

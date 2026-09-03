@@ -9,6 +9,7 @@
  */
 import {
   clawbackWindow,
+  disbursementOf,
   type ClawbackWindow,
   type Lender,
   type ProductRule,
@@ -105,6 +106,8 @@ export interface RepDealView {
   product: string;
   /** Total funded across every segment (initial + draws). */
   funded: number;
+  /** For a consolidation funded in increments: what has gone out to the merchant against the plan. */
+  disbursement: { planned: number; perIncrement: number; disbursed: number; final: number; count: number; total: number; stopped: boolean } | null;
   drawCount: number;
   roles: Role[];
   lines: RepRoleLine[];
@@ -153,6 +156,7 @@ export function repDealView(deal: Deal, repId: string, lines: PayoutLine[], claw
     lender: deal.lender,
     product: deal.product,
     funded: totalFunded(deal),
+    disbursement: (() => { const b = segments(deal)[0]!; return disbursementOf(b.planned?.amount ?? b.amount, b.schedule); })(),
     drawCount: deal.draws.length,
     roles: [...new Set(mine.map((l) => l.role))],
     lines: [...grouped.values()].map((ls) => {

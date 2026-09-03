@@ -68,7 +68,7 @@ export function MasterDeals() {
                   <div className="td contact-cell"><Contact name={d.merchantContact} email={d.merchantEmail} phone={d.merchantPhone} /></div>
                   <div className="td ellipsis">{d.lender}</div>
                   <div className="td ellipsis">{d.product}</div>
-                  <div className="td r num">{money(d.funded)}</div>
+                  <div className="td r num">{money(d.funded)}{d.increments && <div className={`subtle ${d.increments.stopped ? 'warn' : ''}`} style={{ fontSize: 12.5, marginTop: 2 }} title={`${money(d.increments.perIncrement)} per increment`}>{d.increments.stopped ? `opted out · ${d.increments.total} of ${Math.round(d.increments.planned / d.increments.perIncrement)}` : `${money(d.increments.disbursed)} out · ${d.increments.lenderPaid}/${d.increments.total}`}</div>}</div>
                   <div className="td num">{d.factor !== null ? d.factor.toFixed(2) : d.apr !== null ? `${d.apr}%` : '—'}</div>
                   <div className="td num">{pct(d.commRate)}</div>
                   <div className="td r num">{money(d.gross)}</div>

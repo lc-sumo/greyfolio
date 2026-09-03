@@ -1,6 +1,7 @@
 export * from './types.js';
 export * from './money.js';
 export * from './commission.js';
+export * from './increments.js';
 export * from './segments.js';
 export * from './collection.js';
 export * from './splits.js';

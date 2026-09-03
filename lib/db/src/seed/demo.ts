@@ -150,6 +150,8 @@ export function buildDemo(today = iso(new Date()), seed = 20260902): DemoData {
     const age = daysBetween(cursor, today);
     const schedule = product.incremental ? scheduleFor(lender, addDays(cursor, 7)) : null;
     if (schedule) schedule.received = Math.min(schedule.weeks, Math.floor(age / 7));
+    // now and then a merchant opts out part-way: the plan stops at the increments taken
+    if (schedule && schedule.received >= 4 && schedule.received < schedule.weeks && r.next() < 0.15) schedule.stoppedAfter = schedule.received;
     const collected = schedule ? null : age > 40 ? calc.gross : age > 18 ? (r.next() > 0.45 ? calc.gross : Math.round(calc.gross * 0.5)) : 0;
     const slow = age > 30 && r.next() > 0.9;
 

@@ -27,7 +27,7 @@ export function DealDrawer({ id, onClose }: { id: string; onClose: () => void })
           <section className="card">
             <h3>Deal terms</h3>
             <dl className="kv">
-              <dt>Funded amount</dt><dd>{money(d.funded)}{d.drawCount ? ` (${d.drawCount} draw${d.drawCount > 1 ? 's' : ''})` : ''}</dd>
+              <dt>Funded amount</dt><dd>{money(d.funded)}{d.drawCount ? ` (${d.drawCount} draw${d.drawCount > 1 ? 's' : ''})` : ''}{d.disbursement && <div className="subtle" style={{ fontSize: 12.5, fontFamily: 'var(--sans)' }}>{money(d.disbursement.disbursed)} disbursed · {d.disbursement.count}/{d.disbursement.total} increments{d.disbursement.stopped ? ' · merchant opted out' : ` of ${money(d.disbursement.planned)} planned`}</div>}</dd>
               <dt>Lender</dt><dd className="mono" style={{ fontFamily: 'var(--sans)' }}>{d.lender}</dd>
               <dt>Product</dt><dd style={{ fontFamily: 'var(--sans)' }}>{d.product}</dd>
               <dt>Lender paid commission</dt><dd style={{ fontFamily: 'var(--sans)' }}><Pill tone={toneFor(d.commissionStatus)}>{d.lenderPaidLabel}</Pill></dd>

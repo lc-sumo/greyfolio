@@ -103,6 +103,13 @@ export interface WeeklySchedule {
   upfrontReceived?: boolean;
   remainder?: 'spread' | 'at-end';
   remainderReceived?: boolean;
+  /**
+   * A consolidation is FUNDED in increments too: each lender increment is a
+   * disbursement to the merchant. When the merchant opts out part-way, the
+   * increment they stopped after is recorded here and every planned figure
+   * (funded, gross, referral, net, rep shares) scales down to what was disbursed.
+   */
+  stoppedAfter?: number | null;
 }
 
 export type CommissionSchedule = WeeklySchedule;
@@ -212,6 +219,8 @@ export interface Segment {
   net: number;
   collected: number | null;
   schedule: WeeklySchedule | null;
+  /** Set when the merchant opted out of an incremental plan: the figures as entered, before scaling to what was disbursed. */
+  planned?: { amount: number; gross: number; referralFee: number; net: number; increments: number } | null;
 }
 
 /**

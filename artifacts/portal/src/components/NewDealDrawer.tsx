@@ -188,7 +188,7 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
           </select>
           <span className="subtle" style={{ fontSize: 13 }}>Only lenders set up for {f.product} (Settings › Lenders).</span>
         </Field>
-        <Field label={amountLabel}><input inputMode="decimal" value={f.amount} onChange={set('amount')} placeholder="125000" /></Field>
+        <Field label={amountLabel} hint={incremental && num(f.commIncrements) > 0 && num(f.amount) > 0 ? `Planned total — disbursed in ${num(f.commIncrements)} increments of ${money(num(f.amount) / num(f.commIncrements))}; if the merchant stops early the deal scales to what went out` : undefined}><input inputMode="decimal" value={f.amount} onChange={set('amount')} placeholder="125000" /></Field>
         {rule?.term && <Field label="Term length (business days)" hint="Mon–Fri only, excludes weekends"><input inputMode="numeric" value={f.termDays} onChange={set('termDays')} /></Field>}
         {rule?.factor ? <Field label="Factor rate"><input inputMode="decimal" value={f.factor} onChange={set('factor')} /></Field> : <Field label="Interest rate (APR %)"><input inputMode="decimal" value={f.apr} onChange={set('apr')} /></Field>}
         <Field label="Payment frequency"><select value={f.frequency} onChange={set('frequency')}>{settings.lists.frequencies.map((x) => <option key={x}>{x}</option>)}</select></Field>

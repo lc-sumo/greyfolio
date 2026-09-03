@@ -97,6 +97,11 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
                 {d.lender} pays {money(s.gross)}:{s.schedule.upfrontPct > 0 && <> <b className="num">{money(s.schedule.upfrontAmount)}</b> upfront ({Math.round(s.schedule.upfrontPct * 100)}%), then</>} {s.schedule.weeks} increments every {s.schedule.cadenceDays === 7 ? 'week' : s.schedule.cadenceDays === 14 ? 'two weeks' : `${s.schedule.cadenceDays} days`}
                 {s.schedule.remainder === 'spread' ? <> of <b className="num">{money(s.schedule.perWeek)}</b></> : <>, and <b className="num">{money(s.schedule.remainderAmount)}</b> once they are done</>}{s.schedule.startDate ? `, starting ${day(s.schedule.startDate)}` : ''}.
               </div>
+              <div className="fundprog">
+                <div className="head"><span className="label">Funding progress</span><span className="num"><b>{money(s.schedule.disbursement.disbursed)}</b> <span className="subtle">of {money(s.schedule.disbursement.stopped ? s.schedule.disbursement.final : s.schedule.disbursement.planned)} · {s.schedule.disbursement.count}/{s.schedule.disbursement.total} increments × {money(s.schedule.disbursement.perIncrement)}</span></span></div>
+                <div className="paidin wide"><i style={{ width: `${Math.round((s.schedule.disbursement.count / Math.max(1, s.schedule.disbursement.total)) * 100)}%`, background: 'var(--teal)' }} /></div>
+                {s.schedule.planned && <div className="subtle" style={{ fontSize: 12.5, marginTop: 4 }}>Merchant opted out after {s.schedule.disbursement.total} of {s.schedule.planned.increments} — entered as {money(s.schedule.planned.amount)}, now a {money(s.schedule.disbursement.final)} deal; commission {money(s.schedule.planned.gross)} → {money(s.gross)}.</div>}
+              </div>
               <div className="pips">{s.schedule.events.filter((e) => e.kind === 'increment').map((e) => <i key={e.n} className={e.received ? 'on' : e.overdue ? 'late' : ''} title={`${e.label} · ${e.expected ? fullDay(e.expected) : '—'}${e.amount ? ` · ${money(e.amount)}` : ''}${e.received ? ' · received' : e.overdue ? ' · overdue' : ''}`} />)}</div>
               <dl className="kv" style={{ marginTop: 12 }}>
                 {s.schedule.upfrontPct > 0 && <><dt>Upfront {money(s.schedule.upfrontAmount)}</dt><dd style={{ fontFamily: 'var(--sans)' }}>{s.schedule.upfrontReceived ? <span className="pos">received</span> : <button className="btn" style={{ height: 26, padding: '0 8px', fontSize: 13.5 }} onClick={() => void collect({ segmentKey: s.sk, markUpfront: true }, `${d.id} — upfront ${money(s.schedule!.upfrontAmount)} received`)}>Record upfront received</button>}</dd></>}
@@ -123,6 +128,9 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
               <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
                 <button className="btn primary" disabled={s.schedule.received >= s.schedule.weeks} onClick={() => void collect({ segmentKey: s.sk, recordWeeks: 1 }, `${d.id} — increment ${s.schedule!.received + 1} of ${s.schedule!.weeks} received`)}>Record increment received</button>
                 <button className="btn" disabled={s.schedule.received <= 0} onClick={() => void collect({ segmentKey: s.sk, recordWeeks: -1 }, `${d.id} — last increment reversed`)}>Reverse last</button>
+                {s.schedule.disbursement.stopped
+                  ? <button className="btn" onClick={() => void collect({ segmentKey: s.sk, stopIncrements: false }, `${d.id} — plan reopened to ${s.schedule!.planned?.increments ?? s.schedule!.weeks} increments`)}>Reopen full plan</button>
+                  : <button className="btn" disabled={s.schedule.received >= s.schedule.weeks} title="The merchant is not taking the rest: the deal becomes what was disbursed so far" onClick={() => void collect({ segmentKey: s.sk, stopIncrements: true }, `${d.id} — merchant opted out after ${s.schedule!.received} increments`)}>Merchant opted out</button>}
               </div>
             </section>
           ))}

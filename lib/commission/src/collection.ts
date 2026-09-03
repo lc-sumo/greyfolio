@@ -1,3 +1,4 @@
+import { effectiveIncrements, incrementParts } from './increments.js';
 import { cents, clamp, sum } from './money.js';
 import { segments } from './segments.js';
 import type { CommissionStatus, Deal, Lender, Segment, WeeklySchedule } from './types.js';
@@ -10,11 +11,13 @@ export function schedOf(seg: Pick<Segment, 'schedule'> | null | undefined): Week
 
 /** The three money parts of a scheduled segment. */
 export function scheduleParts(gross: number, s: WeeklySchedule): { upfront: number; perIncrement: number; remainder: number; rest: number } {
-  const upfrontPct = clamp(s.upfrontPct ?? 0, 0, 1);
-  const upfront = cents(gross * upfrontPct);
-  const rest = cents(gross - upfront);
-  const spread = (s.remainder ?? 'spread') === 'spread';
-  return { upfront, rest, perIncrement: spread && s.weeks > 0 ? cents(rest / s.weeks) : 0, remainder: spread ? 0 : rest };
+  const p = incrementParts(gross, s);
+  return { upfront: p.upfront, rest: p.rest, perIncrement: p.perIncrement, remainder: p.remainder };
+}
+
+/** The gross a schedule was priced on — the planned figure when the merchant has since stopped. */
+function plannedGrossOf(seg: Pick<Segment, 'gross'> & { planned?: Segment['planned'] }): number {
+  return seg.planned?.gross ?? seg.gross;
 }
 
 /**
@@ -26,10 +29,11 @@ export function scheduleParts(gross: number, s: WeeklySchedule): { upfront: numb
 export function collectedOf(seg: Pick<Segment, 'gross' | 'collected' | 'schedule'>): number {
   const s = schedOf(seg);
   if (s) {
-    const parts = scheduleParts(seg.gross, s);
+    const parts = scheduleParts(plannedGrossOf(seg), s);
+    const eff = effectiveIncrements(s);
     let got = s.upfrontReceived ? parts.upfront : 0;
-    if ((s.remainder ?? 'spread') === 'spread') got += cents(parts.rest * (clamp(s.received, 0, s.weeks) / s.weeks));
-    else if (s.remainderReceived) got += parts.rest;
+    if ((s.remainder ?? 'spread') === 'spread') got += cents(parts.rest * (clamp(s.received, 0, eff) / s.weeks));
+    else if (s.remainderReceived) got += parts.remainder;
     return cents(clamp(got, 0, seg.gross));
   }
   if (typeof seg.collected === 'number') return cents(clamp(seg.collected, 0, seg.gross));
@@ -54,11 +58,13 @@ export function segmentStatus(seg: Pick<Segment, 'gross' | 'collected' | 'schedu
 export function collectionLabel(seg: Pick<Segment, 'gross' | 'collected' | 'schedule'>): string {
   const s = schedOf(seg);
   if (s) {
-    if (collectedOf(seg) >= seg.gross && seg.gross > 0) return `${s.weeks}/${s.weeks} wks`;
+    const eff = effectiveIncrements(s);
+    const stopped = eff !== s.weeks ? ' · opted out' : '';
+    if (collectedOf(seg) >= seg.gross && seg.gross > 0) return `${eff}/${eff} wks${stopped}`;
     const unit = (s.cadenceDays ?? 7) === 7 ? 'wks' : 'incr.';
     const up = (s.upfrontPct ?? 0) > 0 ? `${s.upfrontReceived ? '' : '(no) '}${Math.round((s.upfrontPct ?? 0) * 100)}% up + ` : '';
-    const tail = (s.remainder ?? 'spread') === 'at-end' && s.received >= s.weeks && !s.remainderReceived ? ' · final due' : '';
-    return `${up}${clamp(s.received, 0, s.weeks)}/${s.weeks} ${unit}${tail}`;
+    const tail = (s.remainder ?? 'spread') === 'at-end' && s.received >= eff && !s.remainderReceived ? ' · final due' : '';
+    return `${up}${clamp(s.received, 0, eff)}/${eff} ${unit}${tail}${stopped}`;
   }
   const c = collectedOf(seg);
   if (!c) return 'Not collected';
@@ -147,19 +153,20 @@ export interface ScheduleEvent {
 export function scheduleEvents(seg: Pick<Segment, 'gross' | 'collected' | 'schedule' | 'date'>, today: string): ScheduleEvent[] {
   const s = schedOf(seg);
   if (!s) return [];
-  const parts = scheduleParts(seg.gross, s);
+  const parts = scheduleParts(plannedGrossOf(seg), s);
+  const eff = effectiveIncrements(s);
   const cadence = s.cadenceDays ?? 7;
   const start = s.startDate ?? seg.date;
   const at = (i: number) => (start ? new Date(new Date(`${start}T00:00:00Z`).getTime() + i * cadence * 86_400_000).toISOString().slice(0, 10) : null);
   const out: ScheduleEvent[] = [];
   if (parts.upfront > 0) out.push({ kind: 'upfront', n: 0, label: 'Upfront', expected: seg.date, amount: parts.upfront, received: !!s.upfrontReceived, overdue: !s.upfrontReceived && seg.date < today });
-  for (let i = 1; i <= s.weeks; i++) {
+  for (let i = 1; i <= eff; i++) {
     const expected = at(i - 1);
     const received = i <= s.received;
     out.push({ kind: 'increment', n: i, label: `Increment ${i}`, expected, amount: parts.perIncrement, received, overdue: !received && expected !== null && expected < today });
   }
   if (parts.remainder > 0) {
-    const expected = at(s.weeks);
+    const expected = at(eff);
     out.push({ kind: 'remainder', n: s.weeks + 1, label: 'Final (when increments done)', expected, amount: parts.remainder, received: !!s.remainderReceived, overdue: !s.remainderReceived && expected !== null && expected < today });
   }
   return out;
@@ -207,7 +214,18 @@ export function withStatus(
 export function recordWeek(seg: Pick<Segment, 'gross' | 'collected' | 'schedule'>, delta = 1): CollectionPatch | null {
   const s = schedOf(seg);
   if (!s) return null;
-  return { collected: null, schedule: { ...s, received: clamp((s.received || 0) + delta, 0, s.weeks) } };
+  return { collected: null, schedule: { ...s, received: clamp((s.received || 0) + delta, 0, effectiveIncrements(s)) } };
+}
+
+/**
+ * The merchant opted out of the rest of the plan: the increments received so
+ * far are the increments there will be. `false` reopens the full plan.
+ */
+export function withStopped(seg: Pick<Segment, 'gross' | 'collected' | 'schedule'>, stopped: boolean): CollectionPatch | null {
+  const s = schedOf(seg);
+  if (!s) return null;
+  if (!stopped) return { collected: null, schedule: { ...s, stoppedAfter: null } };
+  return { collected: null, schedule: { ...s, stoppedAfter: clamp(s.received || 0, 0, s.weeks) } };
 }
 
 export interface ScheduleOptions {

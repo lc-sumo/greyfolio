@@ -294,3 +294,6 @@ input.mini-input:focus { border-color: var(--teal); }
 .chip.on { background: var(--navy); border-color: var(--navy); color: #fff; }
 .chip.on.inc { background: var(--teal); border-color: var(--teal); }
 .chip:not(.on).inc { border-style: dashed; }
+.fundprog { margin: 8px 0 12px; }
+.fundprog .head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.paidin.wide { width: 100%; height: 10px; }

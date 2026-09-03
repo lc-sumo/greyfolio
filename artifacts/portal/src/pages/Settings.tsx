@@ -44,7 +44,7 @@ export function Settings() {
 
   return (
     <Shell eyebrow="Admin" title="Settings">
-      <div className="seg" style={{ alignSelf: 'flex-start' }}>{TABS.map((t) => <button key={t.key} className={tab === t.key ? 'on' : ''} onClick={() => { setTab(t.key); setErr(''); }}>{t.label}</button>)}</div>
+      <div className="seg pagetabs">{TABS.map((t) => <button key={t.key} className={tab === t.key ? 'on' : ''} onClick={() => { setTab(t.key); setErr(''); }}>{t.label}</button>)}</div>
       <div className="muted" style={{ marginTop: -6 }}>{current.hint}</div>
       {err && <div className="note" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>{err}</div>}
       {!ready ? <Loading error={settings.error ?? usage.error ?? teams.error ?? roster.error} /> : (

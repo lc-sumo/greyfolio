@@ -394,3 +394,8 @@ input.big { width: 24px; height: 24px; accent-color: var(--teal); cursor: pointe
 .palettes span { font-size: 10px; color: var(--navy-text-3); letter-spacing: .04em; }
 .table .tr.voided .td { text-decoration: line-through; opacity: .55; }
 .table .tr.voided .td .subtle { text-decoration: none; }
+
+/* Settings tab strip — the page-level one, not the small inline toggles */
+.seg.pagetabs { align-self: flex-start; border-radius: 10px; padding: 4px; gap: 4px; flex-wrap: wrap; }
+.seg.pagetabs button { font-size: 16px; font-weight: 600; padding: 9px 16px; border-radius: 8px; line-height: 1.2; }
+@media (max-width: 900px) { .seg.pagetabs button { font-size: 15px; padding: 8px 12px; } }

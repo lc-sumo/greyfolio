@@ -202,10 +202,6 @@ select.mini { height: 28px; border: 1px solid var(--border-strong); border-radiu
 .draw-math .subtle { font-size: 10.5px; }
 @media (max-width: 700px) { .draw-math { grid-template-columns: 1fr 1fr; } }
 
-/* Renewals */
-.bar { position: relative; height: 8px; background: var(--border-light-2); border-radius: 4px; overflow: visible; width: 150px; }
-.bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; }
-.bar i.mark { left: 40%; width: 2px; background: var(--ink); opacity: .45; border-radius: 1px; }
 
 input.mini-input { height: 28px; border: 1px solid var(--border-strong); border-radius: 7px; padding: 0 8px; font-family: var(--mono); font-size: 12px; width: 140px; background: #fff; outline: none; }
 input.mini-input:focus { border-color: var(--teal); }
@@ -228,3 +224,8 @@ input.mini-input:focus { border-color: var(--teal); }
 .cbar-track i { display: block; height: 100%; background: var(--red-light-2); border-radius: 5px; position: relative; }
 .cbar-track i b { display: block; height: 100%; background: var(--red); border-radius: 5px; }
 .lb .row.click:hover { background: var(--surface-alt); }
+
+/* Renewals paid-in progress */
+.paidin { position: relative; height: 8px; width: 150px; background: var(--border-light-2); border-radius: 4px; }
+.paidin i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; }
+.paidin i.mark { width: 2px; background: var(--ink); opacity: .45; border-radius: 1px; }

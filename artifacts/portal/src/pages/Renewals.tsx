@@ -48,8 +48,8 @@ export function Renewals({ admin }: { admin: boolean }) {
         </div>
         {!q.data ? <Loading error={q.error} /> : shown.length === 0 ? <Empty>{tab === 'now' ? 'Nothing is renewable right now.' : 'No renewals here.'}</Empty> : (
           <div className="scroller">
-            <div className="table renewals" style={{ ['--cols' as string]: '120px 70px 100px 130px minmax(220px,1.5fr) minmax(140px,1fr) 150px 90px 130px 150px 110px 130px 110px 120px minmax(0,1fr)', minWidth: 2040 }}>
-              <div className="tr th"><div className="td">Deal ID</div><div className="td">Sheet #</div><div className="td">Funded date</div><div className="td">Parent deal</div><div className="td">Business</div><div className="td">Lender</div><div className="td">Funded</div><div className="td">Term</div><div className="td">More capital</div><div className="td">Renewal</div><div className="td">Due</div><div className="td">Paid off</div><div className="td r">Commission</div><div className="td">{admin ? 'Who calls it' : 'My role'}</div><div className="td">Status</div></div>
+            <div className="table renewals" style={{ ['--cols' as string]: '120px 70px 100px 130px minmax(220px,1.2fr) 170px minmax(130px,.8fr) 150px 90px 130px 150px 110px 130px 110px 120px minmax(0,1fr)', minWidth: 2200 }}>
+              <div className="tr th"><div className="td">Deal ID</div><div className="td">Sheet #</div><div className="td">Funded date</div><div className="td">Parent deal</div><div className="td">Business</div><div className="td">Paid in</div><div className="td">Lender</div><div className="td">Funded</div><div className="td">Term</div><div className="td">More capital</div><div className="td">Renewal</div><div className="td">Due</div><div className="td">Paid off</div><div className="td r">Commission</div><div className="td">{admin ? 'Who calls it' : 'My role'}</div><div className="td">Status</div></div>
               {shown.map((r) => {
                 const ready = r.bucket === 'due';
                 const due = r.daysToMark === null ? '—' : ready || r.daysToMark < 0 ? `ready ${Math.abs(r.daysToMark)}d` : `in ${r.daysToMark}d`;
@@ -60,11 +60,12 @@ export function Renewals({ admin }: { admin: boolean }) {
                     <div className="td num">{day(r.date)}</div>
                     <div className="td num">{r.parentId ? r.parentId : r.isParent ? <>{r.id}<div className="subtle" style={{ fontSize: 10.5, fontFamily: 'var(--sans)' }}>parent · {r.drawCount} draw{r.drawCount === 1 ? '' : 's'}</div></> : <span className="subtle">—</span>}</div>
                     <div className="td ellipsis"><b>{r.business}</b>{'crmUrl' in r && r.crmUrl && <a href={r.crmUrl} target="_blank" rel="noopener" className="crm-mini" onClick={(e) => e.stopPropagation()}>↗</a>}<div className="subtle ellipsis" style={{ fontSize: 11 }}>{r.merchantContact || '—'}{r.merchantPhone ? ` · ${r.merchantPhone}` : ''}</div></div>
+                    <div className="td"><div className="paidin" title={`${Math.round(r.pctPaidIn * 100)}% of term paid in · renewal mark at ${Math.round(mark * 100)}%`}><i style={{ width: `${Math.round(r.pctPaidIn * 100)}%`, background: r.pctPaidIn >= mark ? 'var(--teal)' : r.pctPaidIn >= mark - 0.1 ? 'var(--amber)' : 'var(--border-strong)' }} /><i className="mark" style={{ left: `${mark * 100}%` }} /></div><div className="subtle num" style={{ fontSize: 10.5, marginTop: 3 }}>{Math.round(r.pctPaidIn * 100)}% paid in</div></div>
                     <div className="td ellipsis">{r.lender}</div>
                     <div className="td num">{money(r.funded)}{'factor' in r && r.factor ? <span className="subtle" style={{ fontSize: 11 }}> ×{r.factor}</span> : null}</div>
                     <div className="td">{termLabel(r.termDays, r.frequency)}</div>
                     <div className="td num">{r.bucket === 'refinanced' || r.bucket === 'risk' ? '—' : r.daysToProspecting <= 0 ? <><span className="pos">eligible</span><div className="subtle" style={{ fontSize: 10.5 }}>since {day(r.prospectingDate)}</div></> : <>{day(r.prospectingDate)}<div className="subtle" style={{ fontSize: 10.5 }}>in {r.daysToProspecting}d</div></>}</div>
-                    <div className="td num">{day(r.markDate)}<div className="subtle" style={{ fontSize: 10.5 }}>est. {Math.round(mark * 100)}% of term · {Math.round(r.pctPaidIn * 100)}% in</div></div>
+                    <div className="td num">{day(r.markDate)}<div className="subtle" style={{ fontSize: 10.5 }}>est. {Math.round(mark * 100)}% of term</div></div>
                     <div className="td"><Pill tone={ready ? 'teal' : r.soon ? 'amber' : 'grey'}>{due}</Pill></div>
                     <div className="td num">{day(r.maturityDate)}<div className="subtle" style={{ fontSize: 10.5 }}>est. full term</div></div>
                     <div className="td r num pos">{commissionOf(r) ? money(commissionOf(r)) : '—'}</div>

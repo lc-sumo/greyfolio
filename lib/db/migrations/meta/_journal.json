@@ -8,6 +8,13 @@
       "when": 1788405179836,
       "tag": "0000_commission_portal_phase1",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788405688712,
+      "tag": "0001_audit_log",
+      "breakpoints": true
     }
   ]
 }

@@ -294,6 +294,24 @@ export const commissionSheetsSync = pgTable('commission_sheets_sync', {
   updatedAt: updatedAt(),
 });
 
+/** Audit trail. Phase 2 writes one row per request served under admin/manager View-as. */
+export const commissionAuditLog = pgTable(
+  'commission_audit_log',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    actorRepId: text('actor_rep_id')
+      .notNull()
+      .references(() => commissionReps.id),
+    /** e.g. `view-as`, `login`, `logout` */
+    action: text('action').notNull(),
+    targetRepId: text('target_rep_id').references(() => commissionReps.id),
+    path: text('path'),
+    detail: jsonb('detail').$type<Record<string, unknown>>(),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('commission_audit_log_actor_idx').on(t.actorRepId), index('commission_audit_log_at_idx').on(t.at)],
+);
+
 /* ------------------------------------------------------------------ */
 /* Relations                                                           */
 /* ------------------------------------------------------------------ */
@@ -347,3 +365,4 @@ export type PayoutLineRow = typeof commissionPayoutLines.$inferSelect;
 export type ClawbackRow = typeof commissionClawbacks.$inferSelect;
 export type PayrollRunRow = typeof commissionPayrollRuns.$inferSelect;
 export type SettingRow = typeof commissionSettings.$inferSelect;
+export type AuditLogRow = typeof commissionAuditLog.$inferSelect;

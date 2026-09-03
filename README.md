@@ -11,7 +11,9 @@ lib/commission/   @greystone/commission — pure domain layer (no I/O). Segments
                   commission chain, collection, clawbacks, the rep ledger, payroll planning.
 lib/db/           @greystone/db — Postgres schema (Drizzle), migrations, row→domain mappers,
                   and the workbook seed (REPS / SETTINGS / PARTNERS / FUNDED DEALS column map).
-artifacts/        (Phase 2+) Express API server and React/Vite portal.
+artifacts/api-server/   @greystone/api-server — Express API: OIDC sign-in, roles, server-side rep
+                        scoping, audit-logged admin View-as.
+artifacts/portal/       (Phase 3+) React/Vite portal.
 docs/             Phase notes and review checklists.
 ```
 
@@ -19,8 +21,8 @@ docs/             Phase notes and review checklists.
 
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | Data model and money math, no UI | **Done — awaiting review** ([notes](docs/PHASE-1-REVIEW.md)) |
-| 2 | Auth (OIDC) and server-side rep scoping | Not started |
+| 1 | Data model and money math, no UI | Done ([notes](docs/PHASE-1-REVIEW.md)) |
+| 2 | Auth (OIDC) and server-side rep scoping | **Done — awaiting review** ([notes](docs/PHASE-2-REVIEW.md)) |
 | 3 | Rep portal | Not started |
 | 4 | Admin master board and deal entry | Not started |
 | 5 | Payroll | Not started |
@@ -40,6 +42,11 @@ pnpm typecheck
 cp lib/db/.env.example lib/db/.env   # set DATABASE_URL
 pnpm db:migrate                       # applies lib/db/migrations
 pnpm db:seed                          # reps + settings from the workbook
+
+# API
+cp artifacts/api-server/.env.example artifacts/api-server/.env
+pnpm --filter @greystone/api-server dev   # http://localhost:8080
+# Without an IdP: AUTH_MODE=dev, then GET /auth/dev-login?email=leor@greystoneus.com
 ```
 
 ## The one rule

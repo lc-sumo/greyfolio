@@ -175,7 +175,8 @@ export async function commitImport(repo: Repo, csv: string, actorRepId: string):
     const id = r.id && /^F\d+$/.test(r.id) && !created.some((d) => d.id === r.id) ? r.id : nextDealId(ids);
     ids = [...ids, id];
     const pr = rule(r.product);
-    const psf = r.psf ? parsePsfCell(r.psf) : { psfRate: 0, psfDollars: r.psfDollars ?? 0 };
+    // The sheet's PSF $ column is what its gross actually used; fall back to the % cell only when N is blank.
+    const psf = r.psfDollars !== null ? { psfRate: 0, psfDollars: r.psfDollars } : parsePsfCell(r.psf);
     const deal = priceDeal(
       {
         business: r.business,

@@ -3,6 +3,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, HashRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { api, DEMO } from './lib/api';
+import './lib/theme';
 import { SessionProvider, useSession } from './lib/session';
 import { Clawbacks } from './pages/Clawbacks';
 import { Dashboard } from './pages/Dashboard';

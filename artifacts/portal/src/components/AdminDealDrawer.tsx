@@ -5,7 +5,7 @@ import { num } from '../lib/math';
 import { paybackOf, paymentFor } from '@greystone/commission';
 import { day, fullDay, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
-import { Contact, Drawer, Loading, Pill, toneFor } from './ui';
+import { ClawbackBar, Contact, Drawer, Loading, Pill, toneFor } from './ui';
 
 export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: string; settings: Settings; editOptions: RepOption[]; onClose: () => void }) {
   const { notify } = useSession();
@@ -71,7 +71,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
               {d.apr !== null && <><dt>APR</dt><dd>{d.apr}%</dd></>}
               {d.termDays !== null && <><dt>Term</dt><dd>{d.termDays} business days · {d.frequency}</dd></>}
               {d.payback !== null && <><dt>Payback</dt><dd>{money(d.payback)}</dd></>}
-              <dt>Clawback</dt><dd style={{ fontFamily: 'var(--sans)' }}><Pill tone={d.clawbackWindow.cleared ? 'teal' : d.atRisk && (d.dealStatus === 'Default' || d.dealStatus === 'Slow Pay') ? 'red' : 'amber'}>{d.clawbackWindow.label}</Pill>{d.clawbackWindow.clearsOn && !d.clawbackWindow.cleared && <div className="subtle" style={{ fontSize: 13, marginTop: 3 }}>clears {fullDay(d.clawbackWindow.clearsOn)} · {d.clawbackWindow.source === 'lender' ? `${d.lender} policy` : 'default window'}</div>}</dd>
+              <dt>Clawback</dt><dd style={{ fontFamily: 'var(--sans)' }}><Pill tone={d.clawbackWindow.cleared ? 'teal' : d.atRisk && (d.dealStatus === 'Default' || d.dealStatus === 'Slow Pay') ? 'red' : 'amber'}>{d.clawbackWindow.label}</Pill>{d.clawbackWindow.clearsOn && <div style={{ display: 'grid', justifyItems: 'end', gap: 4, marginTop: 6 }}><ClawbackBar fundedDate={d.date} win={d.clawbackWindow} />{!d.clawbackWindow.cleared && <div className="subtle" style={{ fontSize: 13 }}>clears {fullDay(d.clawbackWindow.clearsOn)} · {d.clawbackWindow.source === 'lender' ? `${d.lender} policy` : 'default window'}</div>}</div>}</dd>
               {d.segments[0]?.payment != null && <><dt>Payment</dt><dd>{money(d.segments[0].payment)} <span className="subtle">/ {d.frequency.toLowerCase()}</span></dd></>}
               <dt>Commission</dt><dd>{pct(d.commRate)}{d.psfPct ? ` + PSF ${pct(d.psfPct)}` : ''}{d.originationFee ? ` + ${money(d.originationFee)} orig.` : ''}</dd>
               <dt>Referral</dt><dd>{d.referralPartner ? `${d.referralPartner} ${pct(d.referralRate)} · ${money(d.referralFee)}` : '—'}</dd>

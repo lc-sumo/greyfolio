@@ -184,7 +184,7 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
         <Field label="Lender">
           <select value={f.lender} onChange={set('lender')}>
             <option value="">— select —</option>
-            {settings.lenders.filter((l) => !l.products?.length || l.products.includes(f.product ?? '')).map((l) => <option key={l.name} value={l.name}>{l.name}{canIncrement && l.terms === 'weekly' ? ` · ${l.weeks} increments` : ''}{l.clawback ? l.clawback.basis === 'none' ? ' · no clawback' : ` · clawback ${l.clawback.count} ${l.clawback.basis}` : ''}</option>)}
+            {settings.lenders.filter((l) => !l.products?.length || l.products.includes(f.product ?? '')).map((l) => <option key={l.name} value={l.name}>{l.name}{canIncrement && l.terms === 'weekly' ? ` · ${l.weeks} increments` : ''}</option>)}
           </select>
           <span className="subtle" style={{ fontSize: 13 }}>Only lenders set up for {f.product} (Settings › Lenders).</span>
         </Field>

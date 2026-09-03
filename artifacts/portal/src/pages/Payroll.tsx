@@ -163,7 +163,7 @@ export function Payroll() {
                       <div className="table" style={{ ['--cols' as string]: COLS, minWidth: 1180 }}>
                         <div className="tr th"><div className="td">Pay</div><div className="td">Deal</div><div className="td">Line</div><div className="td">Business</div><div className="td">Merchant contact</div><div className="td">Lender</div><div className="td r">Funded</div><div className="td">Role</div><div className="td r">Rate</div><div className="td r">Payout</div><div className="td">Lender paid comm</div></div>
                         {shown.map((l) => (
-                          <div className="tr" key={l.key} style={{ background: rowSelected(l) ? '#f6faf8' : !l.collected ? '#fdfaf5' : undefined }}>
+                          <div className="tr" key={l.key} style={{ background: rowSelected(l) ? 'var(--row-selected)' : !l.collected ? 'var(--row-uncollected)' : undefined }}>
                             <div className="td"><input type="checkbox" checked={rowSelected(l)} onChange={() => toggleRow(l)} /></div>
                             <div className="td num" style={{ cursor: 'pointer' }} onClick={() => setOpen(l.dealId)}>{l.dealId}</div>
                             <div className="td"><span className={l.segmentKey === 'base' ? 'muted' : 'warn'}>{l.segmentLabel}</span>{l.units && <div className="subtle num" style={{ fontSize: 12.5 }}>Lender paid {l.units.collected}/{l.units.total} · Rep paid {l.units.paid}/{l.units.total}</div>}</div>

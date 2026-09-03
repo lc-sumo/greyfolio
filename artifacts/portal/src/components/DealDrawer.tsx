@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api, type RepDealDetail } from '../lib/api';
 import { day, fullDay, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
-import { Drawer, Loading, Pill, toneFor } from './ui';
+import { ClawbackBar, Drawer, Loading, Pill, toneFor } from './ui';
 
 export function DealDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const { viewAs } = useSession();
@@ -33,7 +33,7 @@ export function DealDrawer({ id, onClose }: { id: string; onClose: () => void })
               <dt>Lender paid commission</dt><dd style={{ fontFamily: 'var(--sans)' }}><Pill tone={toneFor(d.commissionStatus)}>{d.lenderPaidLabel}</Pill></dd>
               <dt>Commission status</dt><dd style={{ fontFamily: 'var(--sans)' }}>{d.commissionStatus}</dd>
               <dt>Deal status</dt><dd style={{ fontFamily: 'var(--sans)' }}>{d.dealStatus}</dd>
-              <dt>Clawback</dt><dd style={{ fontFamily: 'var(--sans)' }}><Pill tone={d.clawbackWindow.cleared ? 'teal' : 'amber'}>{d.clawbackWindow.label}</Pill>{d.clawbackWindow.clearsOn && !d.clawbackWindow.cleared && <div className="subtle" style={{ fontSize: 13, marginTop: 3 }}>clears {fullDay(d.clawbackWindow.clearsOn)}</div>}</dd>
+              <dt>Clawback</dt><dd style={{ fontFamily: 'var(--sans)' }}><Pill tone={d.clawbackWindow.cleared ? 'teal' : 'amber'}>{d.clawbackWindow.label}</Pill>{d.clawbackWindow.clearsOn && <div style={{ display: 'grid', justifyItems: 'end', gap: 4, marginTop: 6 }}><ClawbackBar fundedDate={d.date} win={d.clawbackWindow} />{!d.clawbackWindow.cleared && <div className="subtle" style={{ fontSize: 13 }}>clears {fullDay(d.clawbackWindow.clearsOn)}</div>}</div>}</dd>
               <dt>Rep paid</dt><dd>{d.repPaid ? fullDay(d.repPaid) : '—'}</dd>
             </dl>
           </section>

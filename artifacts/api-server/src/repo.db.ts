@@ -107,6 +107,17 @@ export function dbRepo(db: Database): Repo {
     async updateRep(id: string, patch: Partial<Omit<Rep, 'id'>>) {
       await db.update(commissionReps).set({ ...patch, updatedAt: sql`now()` }).where(eq(commissionReps.id, id));
     },
+    async getPasswordHash(repId: string) {
+      const rows = await db.select({ h: commissionReps.passwordHash }).from(commissionReps).where(eq(commissionReps.id, repId)).limit(1);
+      return rows[0]?.h ?? null;
+    },
+    async setPasswordHash(repId: string, hash: string | null) {
+      await db.update(commissionReps).set({ passwordHash: hash, updatedAt: sql`now()` }).where(eq(commissionReps.id, repId));
+    },
+    async repsWithPassword() {
+      const rows = await db.select({ id: commissionReps.id }).from(commissionReps).where(sql`${commissionReps.passwordHash} is not null`);
+      return rows.map((r) => r.id);
+    },
     async insertRun(run: PayrollRun) {
       await db.insert(commissionPayrollRuns).values({ id: run.id, label: run.label, start: run.start, end: run.end, status: run.status });
     },

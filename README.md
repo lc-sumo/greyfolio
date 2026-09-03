@@ -76,6 +76,8 @@ AUTH_MODE=dev SESSION_SECRET=local DATABASE_URL=… PORTAL_DIST=artifacts/portal
 
 Sign in with any rep's email from the roster (e.g. `leor@greystoneus.com` for admin, `julian.ribak@greystoneus.com` for a rep, `raymond.amato@greystoneus.com` for a team lead). In production set `OIDC_ISSUER` and leave `AUTH_MODE` unset.
 
+**Email + password accounts** work everywhere (set `AUTH_PASSWORD=off` to disable). An admin sets or resets a rep's password in Settings › Reps (a readable temporary one is suggested); the rep signs in with email + password and can change it from the sidebar. Passwords are scrypt-hashed in `commission_reps.password_hash` (migration `0003_rep_passwords`) and never leave the API; five failed attempts lock an email for 15 minutes.
+
 ## The one rule
 
 There is **one** definition of a rep's money: `repLedger(ctx, repId)` in `lib/commission/src/ledger.ts`. It returns `{ earned, accrued, awaitingLender, paid, cash, held, recovered, owed }`. Every screen, roster, and payroll total reads it. `paid` comes only from the payment ledger (`commission_payout_lines`), never from a deal's status. `accrued` is the rep's share on commission the lender has actually paid (each increment received, each upfront collected), and **owed = max(0, accrued − paid − held)** — recording a lender increment is what moves money from "awaiting lender" into "owed". Increment schedules exist only on consolidation products; LOCs and LOC draws are paid upfront.

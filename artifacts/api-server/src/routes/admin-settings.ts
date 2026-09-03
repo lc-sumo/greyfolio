@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { currentUser, requireRole } from '../auth/middleware.js';
 import type { Repo } from '../repo.js';
 import { createRep, createTeam, deleteTeam, saveCrm, saveLenders, savePartners, savePayroll, saveProducts, saveThresholds, updateRep, updateTeam, usage } from '../services/settings.js';
+import { setRepPassword } from '../services/passwords.js';
 
 /** Settings writes: lenders, partners, product rules, thresholds, CRM, teams, reps. Admin only. */
 export function adminSettingsRouter(repo: Repo): Router {
@@ -26,6 +27,7 @@ export function adminSettingsRouter(repo: Repo): Router {
 
   r.post('/reps', async (req, res) => res.status(201).json(await createRep(repo, req.body ?? {}, actor(req))));
   r.patch('/reps/:id', async (req, res) => res.json(await updateRep(repo, String(req.params.id), req.body ?? {}, actor(req))));
+  r.post('/reps/:id/password', async (req, res) => res.json(await setRepPassword(repo, String(req.params.id), req.body?.password === null ? null : req.body?.password, actor(req))));
 
   return r;
 }

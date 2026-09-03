@@ -328,3 +328,7 @@ input.mini-input:focus { border-color: var(--teal); }
 .theme .seg button.on { background: var(--navy-raised-3); color: #fff; }
 .gridpreview { display: flex; align-items: flex-end; gap: 2px; height: 44px; }
 .gridpreview span { flex: 1 1 0; min-width: 3px; background: var(--teal); opacity: .75; border-radius: 2px 2px 0 0; }
+.pwform { display: grid; gap: 6px; margin: 6px 0 10px; }
+.pwform input { height: 32px; border: 1px solid var(--navy-border-2); border-radius: 7px; padding: 0 8px; background: var(--navy-raised); color: #fff; font: inherit; font-size: 13px; outline: none; }
+.cleared { display: inline-flex; align-items: center; gap: 6px; color: var(--teal); font-weight: 600; font-size: 13.5px; }
+.cleared i { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--teal); color: #fff; font-style: normal; font-size: 12px; }

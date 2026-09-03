@@ -52,6 +52,8 @@ function user(): SessionUser | null {
   store.set(KEY, JSON.stringify(memoryUser));
   return memoryUser;
 }
+/** Demo only: passwords set in Settings live in memory for this tab. */
+const demoPasswords = new Map<string, string>();
 function setUser(u: SessionUser | null) {
   memoryUser = u;
   store.set(KEY, u ? JSON.stringify(u) : null);
@@ -89,10 +91,10 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
   const today = d.today;
   const settings = await repo.getSettings();
 
-  if (p === '/auth/methods') return json({ oidc: false, devAuth: true });
+  if (p === '/auth/methods') return json({ oidc: false, devAuth: true, password: true });
   if (p === '/auth/me') {
     if (!u) throw new ApiError(401, 'Sign in required');
-    return json({ user: u, canViewAs: u.role !== 'rep', oidc: false, devAuth: true });
+    return json({ user: u, canViewAs: u.role !== 'rep', oidc: false, devAuth: true, password: true });
   }
   if (p === '/auth/dev-login') {
     const email = (q.get('email') ?? '').trim().toLowerCase();
@@ -103,11 +105,30 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     setUser(su);
     return json({ ok: true, user: su });
   }
+  if (p === '/auth/password-login' && method === 'POST') {
+    const email = String(body.email ?? '').trim().toLowerCase();
+    const rep = d.reps.find((r) => r.email.toLowerCase() === email);
+    const want = rep ? demoPasswords.get(rep.id) : undefined;
+    // Demo: a rep with no password set accepts any password; one with a password must match it.
+    if (!rep || (want !== undefined && want !== String(body.password ?? ''))) throw new ApiError(401, 'That email and password do not match');
+    if (!rep.active) throw new ApiError(403, `${rep.name} is inactive — ask an admin to reactivate the account`);
+    const su: SessionUser = { repId: rep.id, email: rep.email, name: rep.name, role: rep.role };
+    setUser(su);
+    return json({ ok: true, user: su });
+  }
   if (p === '/auth/logout' && method === 'POST') {
     setUser(null);
     return json({ ok: true, redirect: null });
   }
   if (!u) throw new ApiError(401, 'Sign in required');
+  if (p === '/api/me/password' && method === 'POST') {
+    const have = demoPasswords.get(u.repId);
+    if (have !== undefined && have !== String(body.current ?? '')) throw new ApiError(400, 'Your current password is not right');
+    const nx = String(body.next ?? '');
+    if (nx.length < 10 || !/[a-zA-Z]/.test(nx) || !/[0-9]/.test(nx)) throw new ApiError(400, 'Passwords need at least 10 characters with a letter and a number');
+    demoPasswords.set(u.repId, nx);
+    return json({ ok: true });
+  }
   const me = u;
 
   let effective = me.repId;
@@ -176,7 +197,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     return json({
       reps: d.reps.map((rep) => {
         const l = repLedger(ctx, rep.id);
-        return { id: rep.id, name: rep.name, email: rep.email, role: rep.role, teamId: rep.teamId, team: rep.teamId ? teamName.get(rep.teamId) ?? null : null, openerRate: rep.openerRate, closerRate: rep.closerRate, overrideRate: rep.overrideRate, active: rep.active, earned: l.earned, paid: l.paid, held: l.held, owed: l.owed, dealCount: l.deals.length };
+        return { id: rep.id, name: rep.name, email: rep.email, role: rep.role, teamId: rep.teamId, team: rep.teamId ? teamName.get(rep.teamId) ?? null : null, openerRate: rep.openerRate, closerRate: rep.closerRate, overrideRate: rep.overrideRate, active: rep.active, hasPassword: demoPasswords.has(rep.id), earned: l.earned, paid: l.paid, held: l.held, owed: l.owed, dealCount: l.deals.length };
       }),
     });
   }
@@ -201,6 +222,15 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     if (p === '/api/admin/reps' && method === 'POST') return json(await createRep(repo, body as never, me.repId));
     const rm = p.match(/^\/api\/admin\/reps\/([^/]+)$/);
     if (rm && method === 'PATCH') return json(await updateRep(repo, decodeURIComponent(rm[1]!), body as never, me.repId));
+    const pm = p.match(/^\/api\/admin\/reps\/([^/]+)\/password$/);
+    if (pm && method === 'POST') {
+      const id = decodeURIComponent(pm[1]!);
+      if (body.password === null) { demoPasswords.delete(id); return json({ hasPassword: false }); }
+      const pw = String(body.password ?? '');
+      if (pw.length < 10 || !/[a-zA-Z]/.test(pw) || !/[0-9]/.test(pw)) throw new ApiError(400, 'Passwords need at least 10 characters with a letter and a number');
+      demoPasswords.set(id, pw);
+      return json({ hasPassword: true });
+    }
   } catch (e) {
     rethrow(e);
   }

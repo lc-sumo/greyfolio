@@ -70,6 +70,8 @@ export const commissionReps = pgTable(
     teamId: text('team_id').references(() => commissionTeams.id, { onDelete: 'set null' }),
     /** Deactivating a rep must not alter historical assignments (invariant #9). */
     active: boolean('active').notNull().default(true),
+    /** scrypt hash for email + password sign-in; null = SSO / no password set. Never leaves the API. */
+    passwordHash: text('password_hash'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

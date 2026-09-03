@@ -2,7 +2,7 @@ import { asRate, type Lender, type ProductRule, type ReferralPartner, type Rep, 
 import { HttpError } from '../http-error.js';
 import type { Repo, Settings, Thresholds } from '../repo.js';
 
-const audit = (repo: Repo, actorRepId: string, action: 'settings.update' | 'team.update' | 'rep.update', path: string, detail: Record<string, unknown>) =>
+const audit = (repo: Repo, actorRepId: string, action: 'settings.update' | 'team.update' | 'rep.update' | 'rep.password', path: string, detail: Record<string, unknown>) =>
   repo.writeAudit({ actorRepId, action, targetRepId: null, path, detail });
 
 /** How many deals reference each lender / partner / product, and how many reps sit on each team. */
@@ -294,3 +294,4 @@ export async function updateRep(repo: Repo, id: string, input: RepInput, actorRe
   await audit(repo, actorRepId, 'rep.update', `/api/admin/reps/${id}`, patch);
   return { ...rep, ...patch };
 }
+

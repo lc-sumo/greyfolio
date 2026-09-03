@@ -3,6 +3,7 @@ import * as oidc from 'openid-client';
 import type { AppConfig } from '../config.js';
 import type { Repo } from '../repo.js';
 import { HttpError, currentUser } from './middleware.js';
+import { clearLoginFailures, loginLocked, noteLoginFailure, verifyPassword } from './password.js';
 import { sessionUserFrom } from './session.js';
 
 /** Lazily discovered OIDC configuration (issuer metadata is fetched once). */
@@ -82,6 +83,27 @@ export function authRouter(config: AppConfig, repo: Repo): Router {
     });
   }
 
+  /** Email + password. The rep must be provisioned, active, and have a password set by an admin (or themselves). */
+  if (config.passwordAuth) {
+    r.post('/password-login', async (req, res) => {
+      const email = String(req.body?.email ?? '').trim().toLowerCase();
+      const password = String(req.body?.password ?? '');
+      if (!email || !password) throw new HttpError(400, 'Email and password are required');
+      const wait = loginLocked(email);
+      if (wait) throw new HttpError(429, `Too many attempts — try again in ${wait} minute${wait === 1 ? '' : 's'}`);
+      const rep = await repo.findRepByEmail(email);
+      const ok = rep ? await verifyPassword(password, await repo.getPasswordHash(rep.id)) : false;
+      if (!rep || !ok) {
+        noteLoginFailure(email);
+        await repo.writeAudit({ actorRepId: rep?.id ?? 'unknown', action: 'login.failed', targetRepId: null, path: `${req.baseUrl}${req.path}`, detail: { email } });
+        throw new HttpError(401, 'That email and password do not match');
+      }
+      clearLoginFailures(email);
+      await signIn(req, email);
+      res.json({ ok: true, user: req.session?.user });
+    });
+  }
+
   r.post('/logout', async (req, res) => {
     const u = currentUser(req);
     if (u) await repo.writeAudit({ actorRepId: u.repId, action: 'logout', targetRepId: null, path: `${req.baseUrl}${req.path}` });
@@ -100,12 +122,12 @@ export function authRouter(config: AppConfig, repo: Repo): Router {
   });
 
   /** Public: which sign-in methods the login screen should offer. */
-  r.get('/methods', (_req, res) => res.json({ oidc: !!config.oidc, devAuth: config.devAuth }));
+  r.get('/methods', (_req, res) => res.json({ oidc: !!config.oidc, devAuth: config.devAuth, password: config.passwordAuth }));
 
   r.get('/me', (req, res) => {
     const u = currentUser(req);
     if (!u) throw new HttpError(401, 'Sign in required');
-    res.json({ user: u, canViewAs: u.role === 'admin' || u.role === 'manager', oidc: !!config.oidc, devAuth: config.devAuth });
+    res.json({ user: u, canViewAs: u.role === 'admin' || u.role === 'manager', oidc: !!config.oidc, devAuth: config.devAuth, password: config.passwordAuth });
   });
 
   return r;

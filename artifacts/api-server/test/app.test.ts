@@ -51,7 +51,7 @@ describe('auth', () => {
   });
   it('advertises sign-in methods publicly', async () => {
     const { app } = harness();
-    expect((await request(app).get('/auth/methods')).body).toEqual({ oidc: false, devAuth: true });
+    expect((await request(app).get('/auth/methods')).body).toEqual({ oidc: false, devAuth: true, password: true });
   });
   it('OIDC login is unavailable when no issuer is configured', async () => {
     const { app } = harness();

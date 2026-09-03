@@ -55,18 +55,19 @@ function App() {
 }
 
 function LoginGate() {
-  const [oidc, devAuth] = [Boolean(window.__GS_OIDC__), Boolean(window.__GS_DEV__)];
-  return <Login oidc={oidc} devAuth={devAuth} />;
+  const [oidc, devAuth, password] = [Boolean(window.__GS_OIDC__), Boolean(window.__GS_DEV__), window.__GS_PW__ !== false];
+  return <Login oidc={oidc} devAuth={devAuth} password={password} />;
 }
 
 declare global {
-  interface Window { __GS_OIDC__?: boolean; __GS_DEV__?: boolean }
+  interface Window { __GS_OIDC__?: boolean; __GS_DEV__?: boolean; __GS_PW__?: boolean }
 }
 
 // Ask the API which sign-in methods exist before rendering the login screen.
-api<{ oidc: boolean; devAuth: boolean }>('/auth/methods').catch(() => ({ oidc: false, devAuth: false })).then((m) => {
+api<{ oidc: boolean; devAuth: boolean; password?: boolean }>('/auth/methods').catch(() => ({ oidc: false, devAuth: false, password: false })).then((m) => {
   window.__GS_OIDC__ = m.oidc;
   window.__GS_DEV__ = m.devAuth;
+  window.__GS_PW__ = m.password !== false;
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <QueryClientProvider client={qc}>

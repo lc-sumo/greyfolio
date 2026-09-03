@@ -8,8 +8,9 @@ export function adminRouter(repo: Repo): Router {
   const r = Router();
 
   r.get('/reps', requireRole('admin'), async (_req, res) => {
-    const [ctx, reps, teams] = await Promise.all([repo.loadContext(), repo.listReps(), repo.listTeams()]);
+    const [ctx, reps, teams, withPw] = await Promise.all([repo.loadContext(), repo.listReps(), repo.listTeams(), repo.repsWithPassword()]);
     const teamName = new Map(teams.map((t) => [t.id, t.name]));
+    const hasPw = new Set(withPw);
     res.json({
       reps: reps.map((rep) => {
         const l = repLedger(ctx, rep.id);
@@ -24,6 +25,7 @@ export function adminRouter(repo: Repo): Router {
           closerRate: rep.closerRate,
           overrideRate: rep.overrideRate,
           active: rep.active,
+          hasPassword: hasPw.has(rep.id),
           earned: l.earned,
           paid: l.paid,
           held: l.held,

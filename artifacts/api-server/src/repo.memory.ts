@@ -15,9 +15,20 @@ export interface MemoryData {
 export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data: MemoryData } {
   const audit: AuditEntry[] = [];
   const ctx: LedgerContext = data;
+  const passwords = new Map<string, string>();
   return {
     audit,
     data,
+    async getPasswordHash(repId) {
+      return passwords.get(repId) ?? null;
+    },
+    async setPasswordHash(repId, hash) {
+      if (hash) passwords.set(repId, hash);
+      else passwords.delete(repId);
+    },
+    async repsWithPassword() {
+      return [...passwords.keys()];
+    },
     async findRepByEmail(email) {
       return data.reps.find((r) => r.email.toLowerCase() === email.trim().toLowerCase()) ?? null;
     },

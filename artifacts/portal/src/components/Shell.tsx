@@ -2,7 +2,7 @@ import { applyTheme, readTheme, type Theme } from '../lib/theme';
 import { useQuery } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { api, type MeInfo } from '../lib/api';
+import { api, post, type MeInfo } from '../lib/api';
 import { initials, type Period } from '../lib/format';
 import { useSession } from '../lib/session';
 
@@ -82,6 +82,7 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
               <span>{user.role === 'admin' ? 'Master' : user.role === 'manager' ? 'Team lead' : 'Rep'}</span>
             </div>
           </div>
+          {!viewAs && <ChangePassword />}
           <button className="linkish" onClick={() => void logout()}>Sign out</button>
         </div>
       </aside>
@@ -113,5 +114,25 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
       </div>
       {toast && <div className="toast">{toast}</div>}
     </div>
+  );
+}
+
+/** Change my own password from the sidebar. Hidden under View as. */
+function ChangePassword() {
+  const { notify } = useSession();
+  const [open, setOpen] = useState(false);
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [busy, setBusy] = useState(false);
+  if (!open) return <button className="linkish" onClick={() => setOpen(true)}>Change password</button>;
+  return (
+    <form className="pwform" onSubmit={async (e) => { e.preventDefault(); setBusy(true); try { await post('/api/me/password', { current, next }); notify('Password changed'); setOpen(false); setCurrent(''); setNext(''); } catch (x) { notify(x instanceof Error ? x.message : 'Could not change password'); } finally { setBusy(false); } }}>
+      <input type="password" placeholder="Current password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" />
+      <input type="password" placeholder="New password (10+ chars)" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" />
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button className="btn primary" style={{ height: 30, padding: '0 10px' }} disabled={busy || next.length < 10}>Save</button>
+        <button type="button" className="btn" style={{ height: 30, padding: '0 10px' }} onClick={() => setOpen(false)}>Cancel</button>
+      </div>
+    </form>
   );
 }

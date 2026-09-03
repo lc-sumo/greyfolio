@@ -1,0 +1,1 @@
+ALTER TABLE "commission_reps" ADD COLUMN "password_hash" text;

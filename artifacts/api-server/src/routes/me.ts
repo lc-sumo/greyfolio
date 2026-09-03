@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { repDeals } from '@greystone/commission';
 import { HttpError, requireAuth, resolveScope, scopeOf } from '../auth/middleware.js';
 import type { Repo } from '../repo.js';
+import { changeOwnPassword } from '../services/passwords.js';
 import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repPayHistory, repRenewals, repStatements, repWallet } from '../scope.js';
 
 /**
@@ -21,6 +22,14 @@ export function meRouter(repo: Repo): Router {
       viewAs: s.viewAs,
       actor: s.viewAs ? { id: s.actor.repId, name: s.actor.name, role: s.actor.role } : null,
     });
+  });
+
+  /** Change my own password — never under View as. */
+  r.post('/password', async (req, res) => {
+    const scope = scopeOf(req);
+    if (scope.viewAs) throw new HttpError(403, 'Passwords can only be changed by the account holder');
+    await changeOwnPassword(repo, scope.actor.repId, req.body?.current, req.body?.next);
+    res.json({ ok: true });
   });
 
   r.get('/wallet', async (req, res) => {

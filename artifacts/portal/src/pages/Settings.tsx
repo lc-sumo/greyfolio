@@ -270,7 +270,8 @@ function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Tea
   const toDraft = (r: RosterRep): Draft => ({ name: r.name, email: r.email, teamId: r.teamId ?? '', openerRate: pctIn(r.openerRate), closerRate: pctIn(r.closerRate), overrideRate: pctIn(r.overrideRate), role: r.role });
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [adding, setAdding] = useState<Draft | null>(null);
-  const cols = 'minmax(150px,1.1fr) minmax(190px,1.2fr) 150px 70px 70px 70px 100px 100px 120px 90px 150px';
+  const cols = 'minmax(150px,1.1fr) minmax(190px,1.2fr) 150px 70px 70px 70px 100px 100px 120px 90px 210px 150px';
+  const [pw, setPw] = useState<{ id: string; value: string } | null>(null);
   const label = (role: string) => (role === 'admin' ? 'Master' : role === 'manager' ? 'Team lead' : 'Rep');
   const Editor = ({ v, onChange }: { v: Draft; onChange: (v: Draft) => void }) => (
     <>
@@ -286,8 +287,8 @@ function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Tea
   return (
     <Card title="Reps" extra={`${reps.length} · ${reps.filter((r) => r.active).length} active`}>
       <div className="scroller">
-        <div style={{ minWidth: 1340 }}>
-          <Head cols={cols}><span>Name</span><span>Email</span><span>Team</span><span>Opener %</span><span>Closer %</span><span>Override %</span><span>Earned</span><span>Owed</span><span>Access</span><span>Active</span><span /></Head>
+        <div style={{ minWidth: 1560 }}>
+          <Head cols={cols}><span>Name</span><span>Email</span><span>Team</span><span>Opener %</span><span>Closer %</span><span>Override %</span><span>Earned</span><span>Owed</span><span>Access</span><span>Active</span><span>Sign-in</span><span /></Head>
           {reps.map((r) => {
             const v = drafts[r.id] ?? toDraft(r);
             const dirty = !!drafts[r.id];
@@ -298,6 +299,21 @@ function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Tea
                 <span className={`num ${r.owed ? 'warn' : ''}`}>{compact(r.owed)}</span>
                 <select value={v.role} onChange={(e) => setDrafts({ ...drafts, [r.id]: { ...v, role: e.target.value } })}><option value="rep">Rep</option><option value="manager">Team lead</option><option value="admin">Master</option></select>
                 <button type="button" className={`tog ${r.active ? 'on' : ''}`} aria-pressed={r.active} title={r.active ? 'Deactivate — history stays' : 'Reactivate'} onClick={() => run(`${r.name} ${r.active ? 'deactivated' : 'reactivated'}`, () => post(`/api/admin/reps/${r.id}`, { active: !r.active }, 'PATCH'))}><i /></button>
+                <span style={{ display: 'grid', gap: 4 }}>
+                  {pw?.id === r.id ? (
+                    <span style={{ display: 'flex', gap: 4 }}>
+                      <input value={pw.value} onChange={(e) => setPw({ id: r.id, value: e.target.value })} placeholder="10+ chars, letter + number" style={{ fontFamily: 'var(--mono)' }} autoFocus />
+                      <button className="btn primary" style={{ height: 32, padding: '0 8px' }} disabled={pw.value.length < 10} onClick={() => run(`${r.name} — password set; hand it over securely`, async () => { await post(`/api/admin/reps/${r.id}/password`, { password: pw.value }); setPw(null); })}>Save</button>
+                      <button className="btn" style={{ height: 32, padding: '0 8px' }} onClick={() => setPw(null)}>✕</button>
+                    </span>
+                  ) : (
+                    <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <Pill tone={r.hasPassword ? 'teal' : 'grey'}>{r.hasPassword ? 'Password set' : 'No password'}</Pill>
+                      <button className="btn" style={{ height: 30, padding: '0 8px' }} title="Set or reset the password this rep signs in with" onClick={() => setPw({ id: r.id, value: tempPassword() })}>{r.hasPassword ? 'Reset' : 'Set password'}</button>
+                      {r.hasPassword && <button className="btn" style={{ height: 30, padding: '0 8px' }} title="Remove the password — SSO only" onClick={() => run(`${r.name} — password removed`, () => post(`/api/admin/reps/${r.id}/password`, { password: null }))}>✕</button>}
+                    </span>
+                  )}
+                </span>
                 <span style={{ display: 'flex', gap: 6 }}>
                   <button className="btn primary" disabled={!dirty} style={{ height: 30, padding: '0 10px' }} onClick={() => run(`${v.name} saved`, async () => { await post(`/api/admin/reps/${r.id}`, body(v), 'PATCH'); setDrafts((s) => { const n = { ...s }; delete n[r.id]; return n; }); })}>Save</button>
                   <button className="btn" style={{ height: 30, padding: '0 10px' }} onClick={() => onViewAs(r.id)}>View as</button>
@@ -311,6 +327,7 @@ function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Tea
               <span /><span />
               <select value={adding.role} onChange={(e) => setAdding({ ...adding, role: e.target.value })}><option value="rep">Rep</option><option value="manager">Team lead</option><option value="admin">Master</option></select>
               <Pill tone="teal">new</Pill>
+              <span className="subtle" style={{ fontSize: 13 }}>set a password after adding</span>
               <span style={{ display: 'flex', gap: 6 }}>
                 <button className="btn primary" style={{ height: 30, padding: '0 10px' }} onClick={() => run(`${adding.name} added`, async () => { await post('/api/admin/reps', body(adding)); setAdding(null); })}>Add</button>
                 <button className="btn" style={{ height: 30, padding: '0 10px' }} onClick={() => setAdding(null)}>Cancel</button>
@@ -321,7 +338,7 @@ function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Tea
       </div>
       <div className="toolbar" style={{ marginTop: 12 }}>
         <button className="btn" disabled={!!adding} onClick={() => setAdding({ name: '', email: '', teamId: '', openerRate: '20', closerRate: '20', overrideRate: '', role: 'rep' })}>+ Add rep</button>
-        <span className="count">Access: Rep sees their own portal · Team lead can View as their team · Master runs everything. The label reads {label('manager')} for managers.</span>
+        <span className="count">Access: Rep sees their own portal · Team lead can View as their team · Master runs everything. Sign-in: SSO when configured, or the email + password you set here (reps can change theirs from the sidebar).</span>
       </div>
     </Card>
   );
@@ -360,3 +377,10 @@ function CrmTab({ settings, run }: { settings: SettingsData; run: Run }) {
 }
 
 export { money };
+
+/** A readable starting password the admin can hand over: `Word-Word-1234`. */
+function tempPassword(): string {
+  const words = ['Harbor', 'Cedar', 'Summit', 'Granite', 'Willow', 'Copper', 'Meadow', 'Falcon', 'Timber', 'Anchor', 'Beacon', 'Ridge'];
+  const pick = () => words[Math.floor(Math.random() * words.length)]!;
+  return `${pick()}-${pick()}-${1000 + Math.floor(Math.random() * 9000)}`;
+}

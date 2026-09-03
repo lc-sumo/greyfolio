@@ -2,7 +2,7 @@ import type { Clawback, Deal, DealDraw, Lender, LedgerContext, PayoutLine, Payro
 
 export interface AuditEntry {
   actorRepId: string;
-  action: 'login' | 'logout' | 'view-as' | 'deal.create' | 'deal.update' | 'deal.draw' | 'deal.collection' | 'payroll.run' | 'payroll.pay' | 'settings.update' | 'team.update' | 'rep.update';
+  action: 'login' | 'logout' | 'view-as' | 'deal.create' | 'deal.update' | 'deal.draw' | 'deal.collection' | 'payroll.run' | 'payroll.pay' | 'settings.update' | 'team.update' | 'rep.update' | 'rep.password' | 'login.failed';
   targetRepId: string | null;
   path: string | null;
   detail?: Record<string, unknown>;
@@ -62,6 +62,10 @@ export interface Repo {
   deleteTeam(id: string): Promise<void>;
   insertRep(rep: Rep): Promise<void>;
   updateRep(id: string, patch: Partial<Omit<Rep, 'id'>>): Promise<void>;
+  // Password sign-in. Hashes never travel on Rep — only these three calls see them.
+  getPasswordHash(repId: string): Promise<string | null>;
+  setPasswordHash(repId: string, hash: string | null): Promise<void>;
+  repsWithPassword(): Promise<string[]>;
 }
 
 export interface PayoutCommit {

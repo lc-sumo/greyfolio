@@ -13,7 +13,7 @@ lib/db/           @greystone/db — Postgres schema (Drizzle), migrations, row�
                   and the workbook seed (REPS / SETTINGS / PARTNERS / FUNDED DEALS column map).
 artifacts/api-server/   @greystone/api-server — Express API: OIDC sign-in, roles, server-side rep
                         scoping, audit-logged admin View-as.
-artifacts/portal/       (Phase 3+) React/Vite portal.
+artifacts/portal/       @greystone/portal — React/Vite portal (rep screens; admin screens arrive in Phases 4–7).
 docs/             Phase notes and review checklists.
 ```
 
@@ -22,8 +22,8 @@ docs/             Phase notes and review checklists.
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | Data model and money math, no UI | Done ([notes](docs/PHASE-1-REVIEW.md)) |
-| 2 | Auth (OIDC) and server-side rep scoping | **Done — awaiting review** ([notes](docs/PHASE-2-REVIEW.md)) |
-| 3 | Rep portal | Not started |
+| 2 | Auth (OIDC) and server-side rep scoping | Done ([notes](docs/PHASE-2-REVIEW.md)) |
+| 3 | Rep portal | **Done — awaiting review** ([notes](docs/PHASE-3-REVIEW.md)) |
 | 4 | Admin master board and deal entry | Not started |
 | 5 | Payroll | Not started |
 | 6 | Renewals, merchants, analytics | Not started |
@@ -42,12 +42,18 @@ pnpm typecheck
 cp lib/db/.env.example lib/db/.env   # set DATABASE_URL
 pnpm db:migrate                       # applies lib/db/migrations
 pnpm db:seed                          # reps + settings from the workbook
+pnpm db:seed:demo                     # + a realistic demo board (wipes deal data)
 
-# API
-cp artifacts/api-server/.env.example artifacts/api-server/.env
-pnpm --filter @greystone/api-server dev   # http://localhost:8080
-# Without an IdP: AUTH_MODE=dev, then GET /auth/dev-login?email=leor@greystoneus.com
+# Run it (two terminals, or see "One process" below)
+AUTH_MODE=dev SESSION_SECRET=local DATABASE_URL=… pnpm api:dev      # http://localhost:8080
+pnpm portal:dev                                                   # http://localhost:5173 (proxies /api and /auth)
+
+# One process: build the portal and let the API serve it
+pnpm portal:build
+AUTH_MODE=dev SESSION_SECRET=local DATABASE_URL=… PORTAL_DIST=artifacts/portal/dist pnpm api:dev
 ```
+
+Sign in with any rep's email from the roster (e.g. `leor@greystoneus.com` for admin, `julian.ribak@greystoneus.com` for a rep, `raymond.amato@greystoneus.com` for a team lead). In production set `OIDC_ISSUER` and leave `AUTH_MODE` unset.
 
 ## The one rule
 

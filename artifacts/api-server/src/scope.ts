@@ -14,6 +14,7 @@ import {
   monthlySeries,
   paidFigures,
   repClawback,
+  repDeals,
   repLedger,
   repLines,
   repShare,
@@ -245,4 +246,66 @@ export function repStatements(ctx: LedgerContext, runs: PayrollRun[], repId: str
 
 export function repMonthly(ctx: LedgerContext, repId: string, months: string[]) {
   return monthlySeries(ctx, repId, months);
+}
+
+export interface RepDashboard {
+  wallet: RepWallet;
+  nextPayout: { date: string | null; runLabel: string | null; cycle: string };
+  period: { from: string; to: string; earned: number; paid: number; recovered: number; owed: number; funded: number; dealCount: number; rank: number | null; repCount: number };
+  /** Earned by funded month, paid by cleared month — two axes, labelled as such. */
+  monthly: Array<{ month: string; earned: number; paid: number }>;
+  leaderboard: LeaderboardRow[];
+  owedToMe: RepDealView[];
+}
+
+function monthsEnding(to: string, count: number): string[] {
+  const [y, m] = to.split('-').map(Number) as [number, number];
+  const out: string[] = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const d = new Date(Date.UTC(y, m - 1 - i, 1));
+    out.push(d.toISOString().slice(0, 7));
+  }
+  return out;
+}
+
+export function repDashboard(ctx: LedgerContext, reps: Rep[], runs: PayrollRun[], repId: string, from: string, to: string, cycle = 'Twice monthly'): RepDashboard {
+  const wallet = repWallet(ctx, repId);
+  const mine = repDeals(ctx.deals, repId);
+  const inPeriod = (d: Deal) => d.date >= from && d.date <= to;
+  const periodDeals = mine.filter(inPeriod);
+  const periodLines = ctx.lines.filter((l) => l.repId === repId && l.paidAt >= from && l.paidAt <= to);
+  const f = paidFigures(periodLines);
+  const periodEarned = (id: string) => sum(repDeals(ctx.deals, id).filter(inPeriod).map((d) => repShare(d, id)));
+  const ranked = reps
+    .filter((r) => r.active || r.id === repId)
+    .map((r) => ({ id: r.id, earned: periodEarned(r.id) }))
+    .sort((a, b) => b.earned - a.earned || a.id.localeCompare(b.id));
+  const rankIdx = ranked.findIndex((r) => r.id === repId);
+  // Next payout: the first unpaid run still open as of `to`; otherwise the most recent unpaid run (approved, paying soon).
+  const unpaid = [...runs].filter((r) => r.status !== 'paid').sort((a, b) => a.end.localeCompare(b.end));
+  const next = unpaid.find((r) => r.end >= to) ?? unpaid.at(-1) ?? null;
+  const owedToMe = mine
+    .map((d) => repDealView(d, repId, ctx.lines, ctx.clawbacks))
+    .filter((v) => v.owed > 0)
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 5);
+  return {
+    wallet,
+    nextPayout: { date: next?.end ?? null, runLabel: next?.label ?? null, cycle },
+    period: {
+      from,
+      to,
+      earned: sum(periodDeals.map((d) => repShare(d, repId))),
+      paid: f.gross,
+      recovered: f.recovered,
+      owed: wallet.owed,
+      funded: sum(periodDeals.map(totalFunded)),
+      dealCount: periodDeals.length,
+      rank: rankIdx >= 0 ? rankIdx + 1 : null,
+      repCount: ranked.length,
+    },
+    monthly: monthlySeries(ctx, repId, monthsEnding(to, 7)),
+    leaderboard: leaderboard(ctx, reps, repId),
+    owedToMe,
+  };
 }

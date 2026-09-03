@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { repDeals } from '@greystone/commission';
 import { HttpError, requireAuth, resolveScope, scopeOf } from '../auth/middleware.js';
 import type { Repo } from '../repo.js';
-import { leaderboard, repClawbackViews, repDealView, repMonthly, repStatements, repWallet } from '../scope.js';
+import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repStatements, repWallet } from '../scope.js';
 
 /**
  * The rep portal. Every handler reads `scopeOf(req).effectiveRepId` — the
@@ -26,6 +26,15 @@ export function meRouter(repo: Repo): Router {
   r.get('/wallet', async (req, res) => {
     const ctx = await repo.loadContext();
     res.json(repWallet(ctx, scopeOf(req).effectiveRepId));
+  });
+
+  r.get('/dashboard', async (req, res) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const to = typeof req.query.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.to) ? req.query.to : today;
+    const from = typeof req.query.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.from) ? req.query.from : `${to.slice(0, 4)}-01-01`;
+    if (from > to) throw new HttpError(400, 'from must not be after to');
+    const [ctx, reps, runs, payroll] = await Promise.all([repo.loadContext(), repo.listReps(), repo.listRuns(), repo.getSetting<{ cycle: string }>('payroll')]);
+    res.json(repDashboard(ctx, reps, runs, scopeOf(req).effectiveRepId, from, to, payroll?.cycle ?? 'Twice monthly'));
   });
 
   r.get('/deals', async (req, res) => {

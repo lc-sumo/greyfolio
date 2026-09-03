@@ -8,6 +8,7 @@ import {
   commissionPayoutLines,
   commissionPayrollRuns,
   commissionReps,
+  commissionSettings,
   commissionTeams,
   toClawback,
   toDeal,
@@ -50,6 +51,10 @@ export function dbRepo(db: Database): Repo {
         db.select().from(commissionClawbacks),
       ]);
       return { deals: deals.map((d) => toDeal(d, draws)), lines: lines.map(toPayoutLine), clawbacks: clawbacks.map(toClawback) };
+    },
+    async getSetting<T>(key: string): Promise<T | null> {
+      const rows = await db.select().from(commissionSettings).where(eq(commissionSettings.key, key)).limit(1);
+      return rows[0] ? (rows[0].value as T) : null;
     },
     async writeAudit(entry: AuditEntry) {
       await db.insert(commissionAuditLog).values({

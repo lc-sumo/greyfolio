@@ -49,6 +49,10 @@ describe('auth', () => {
     expect((await request(app).get('/auth/dev-login').query({ email: 'leor@greystoneus.com' })).status).toBe(404);
     expect(() => configFromEnv({ NODE_ENV: 'production', AUTH_MODE: 'dev', SESSION_SECRET: 'x'.repeat(40), OIDC_ISSUER: 'https://idp' })).toThrow(/not allowed in production/);
   });
+  it('advertises sign-in methods publicly', async () => {
+    const { app } = harness();
+    expect((await request(app).get('/auth/methods')).body).toEqual({ oidc: false, devAuth: true });
+  });
   it('OIDC login is unavailable when no issuer is configured', async () => {
     const { app } = harness();
     expect((await request(app).get('/auth/login')).status).toBe(503);
@@ -63,12 +67,17 @@ describe('rep scoping is server-side', () => {
     expect(res.status).toBe(200);
     expect(res.body.deals.map((d: { id: string }) => d.id)).toEqual(['F1', 'F2']);
     assertRepSafe(res.body);
-    for (const path of ['/api/me', '/api/me/wallet', '/api/me/clawbacks', '/api/me/statements', '/api/me/leaderboard', '/api/me/deals/F1', '/api/me/monthly?months=2026-06,2026-07']) {
+    for (const path of ['/api/me', '/api/me/dashboard?from=2026-01-01&to=2026-09-02', '/api/me/wallet', '/api/me/clawbacks', '/api/me/statements', '/api/me/leaderboard', '/api/me/deals/F1', '/api/me/monthly?months=2026-06,2026-07']) {
       const r = await agent.get(path);
       expect(r.status, path).toBe(200);
       assertRepSafe(r.body);
       expect(JSON.stringify(r.body), path).not.toMatch(/Zach Sanders|Raymond Amato|Leor/);
     }
+  });
+  it('dashboard rejects a reversed range', async () => {
+    const { login } = harness();
+    const { agent } = await login('julian.ribak@greystoneus.com');
+    expect((await agent.get('/api/me/dashboard?from=2026-09-02&to=2026-01-01')).status).toBe(400);
   });
   it('a deal the rep is not on is a 404, not a leak', async () => {
     const { login } = harness();

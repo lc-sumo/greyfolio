@@ -20,6 +20,7 @@ export interface Repo {
   listTeams(): Promise<Team[]>;
   listRuns(): Promise<PayrollRun[]>;
   loadContext(): Promise<LedgerContext>;
+  getSetting<T>(key: string): Promise<T | null>;
   writeAudit(entry: AuditEntry): Promise<void>;
   listAudit(limit?: number): Promise<AuditEntry[]>;
 }

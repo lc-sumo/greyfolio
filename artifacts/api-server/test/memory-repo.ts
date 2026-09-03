@@ -101,6 +101,9 @@ export function memoryRepo(): Repo & { audit: AuditEntry[] } {
     async loadContext() {
       return ctx;
     },
+    async getSetting<T>(key: string): Promise<T | null> {
+      return key === 'payroll' ? ({ cycle: 'Twice monthly' } as T) : null;
+    },
     async writeAudit(e) {
       audit.push({ ...e, at: new Date().toISOString() });
     },

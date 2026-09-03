@@ -9,14 +9,16 @@
   "exports": {
     ".": "./src/index.ts",
     "./schema": "./src/schema/commission.ts",
-    "./seed": "./src/seed/workbook.ts"
+    "./seed": "./src/seed/workbook.ts",
+    "./seed/demo": "./src/seed/demo.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate",
     "migrate": "drizzle-kit migrate",
     "seed": "tsx src/seed/run.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "seed:demo": "tsx src/seed/run-demo.ts"
   },
   "dependencies": {
     "@greystone/commission": "workspace:*",

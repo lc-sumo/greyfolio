@@ -1,3 +1,4 @@
+import path from 'node:path';
 import cookieSession from 'cookie-session';
 import express, { type ErrorRequestHandler } from 'express';
 import { authRouter } from './auth/oidc.js';
@@ -28,6 +29,12 @@ export function createApp(config: AppConfig, repo: Repo): express.Express {
   app.use('/auth', authRouter(config, repo));
   app.use('/api/me', meRouter(repo));
   app.use('/api/admin', adminRouter(repo));
+
+  if (config.portalDist) {
+    const dist = path.resolve(config.portalDist);
+    app.use(express.static(dist, { index: 'index.html', maxAge: '1h' }));
+    app.get(/^(?!\/(api|auth)\/).*/, (_req, res) => res.sendFile(path.join(dist, 'index.html')));
+  }
 
   app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 

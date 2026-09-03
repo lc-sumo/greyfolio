@@ -1,0 +1,80 @@
+import { useQuery } from '@tanstack/react-query';
+import { api, type RepDealDetail } from '../lib/api';
+import { day, fullDay, money, pct } from '../lib/format';
+import { useSession } from '../lib/session';
+import { Drawer, Loading, Pill, toneFor } from './ui';
+
+export function DealDrawer({ id, onClose }: { id: string; onClose: () => void }) {
+  const { viewAs } = useSession();
+  const q = useQuery({ queryKey: ['deal', id, viewAs], queryFn: () => api<RepDealDetail>(`/api/me/deals/${encodeURIComponent(id)}`) });
+  const d = q.data;
+  return (
+    <Drawer title={d ? <>{d.id} <span className="muted" style={{ fontWeight: 500 }}>· {d.business}</span></> : id} sub={d && `${d.lender} · ${d.product} · funded ${fullDay(d.date)}`} onClose={onClose}>
+      {!d ? (
+        <Loading error={q.error} />
+      ) : (
+        <>
+          <div className="share">
+            <div className="label" style={{ color: 'var(--navy-text-3)' }}>My share of this deal</div>
+            <div className="big">{money(d.share)}</div>
+            <div style={{ color: 'var(--navy-text-2)', fontSize: 12.5 }}>
+              {d.lines.map((l) => `${l.role} ${pct(l.rate)}${l.segment !== 'Initial' ? ` · ${l.segment}` : ''}`).join(' + ')}
+              {' · '}
+              <b style={{ color: d.owed ? 'var(--amber-bright)' : 'var(--teal-bright)' }}>{d.owed ? `${money(d.owed)} still owed to me` : 'paid in full'}</b>
+            </div>
+          </div>
+
+          <section className="card">
+            <h3>Deal terms</h3>
+            <dl className="kv">
+              <dt>Funded amount</dt><dd>{money(d.funded)}{d.drawCount ? ` (${d.drawCount} draw${d.drawCount > 1 ? 's' : ''})` : ''}</dd>
+              <dt>Lender</dt><dd className="mono" style={{ fontFamily: 'var(--sans)' }}>{d.lender}</dd>
+              <dt>Product</dt><dd style={{ fontFamily: 'var(--sans)' }}>{d.product}</dd>
+              <dt>Lender paid commission</dt><dd style={{ fontFamily: 'var(--sans)' }}><Pill tone={toneFor(d.commissionStatus)}>{d.lenderPaidLabel}</Pill></dd>
+              <dt>Commission status</dt><dd style={{ fontFamily: 'var(--sans)' }}>{d.commissionStatus}</dd>
+              <dt>Deal status</dt><dd style={{ fontFamily: 'var(--sans)' }}>{d.dealStatus}</dd>
+              <dt>Rep paid</dt><dd>{d.repPaid ? fullDay(d.repPaid) : '—'}</dd>
+            </dl>
+          </section>
+
+          <section className="card">
+            <h3>My lines <small>one per role per segment</small></h3>
+            <div className="pl">
+              {d.lines.map((l) => (
+                <div className="row" key={`${l.role}|${l.segmentKey}`}>
+                  <span>{l.segment} · {l.role} <span className="subtle num">{pct(l.rate)}</span></span>
+                  <span className="num">{money(l.amount)}</span>
+                  <Pill tone={l.paid ? 'teal' : 'amber'}>{l.paid ? 'Paid' : 'Owed'}</Pill>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="card">
+            <h3>Payment history</h3>
+            {d.payments.length === 0 ? (
+              <div className="muted">Nothing paid on this deal yet.</div>
+            ) : (
+              <div className="pl">
+                {d.payments.map((p, i) => (
+                  <div className="row" key={i}>
+                    <span className={p.amount < 0 ? 'neg' : ''}>{p.role}{p.segmentKey && p.segmentKey !== 'base' ? ` · ${p.segmentKey}` : ''}</span>
+                    <span className={`num ${p.amount < 0 ? 'neg' : 'pos'}`}>{money(p.amount)}</span>
+                    <span className="subtle num">{day(p.paidAt)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {d.clawback && (
+            <div className="note" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>
+              Clawback on this deal: <b>{money(d.clawback.amount)}</b> charged to you
+              {d.clawback.status === 'open' ? <> — <b>{money(d.clawback.remaining)}</b> still nets against your next payout.</> : ' — fully recovered.'}
+            </div>
+          )}
+        </>
+      )}
+    </Drawer>
+  );
+}

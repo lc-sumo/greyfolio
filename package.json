@@ -9,7 +9,11 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "db:generate": "pnpm --filter @greystone/db generate",
     "db:migrate": "pnpm --filter @greystone/db migrate",
-    "db:seed": "pnpm --filter @greystone/db seed"
+    "db:seed": "pnpm --filter @greystone/db seed",
+    "db:seed:demo": "pnpm --filter @greystone/db seed:demo",
+    "api:dev": "pnpm --filter @greystone/api-server dev",
+    "portal:dev": "pnpm --filter @greystone/portal dev",
+    "portal:build": "pnpm --filter @greystone/portal build"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

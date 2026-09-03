@@ -15,6 +15,8 @@ export interface AppConfig {
   oidc: OidcConfig | null;
   /** Dev-only email login. Hard-refused in production. */
   devAuth: boolean;
+  /** Built portal directory to serve (SPA fallback). Optional. */
+  portalDist: string | null;
 }
 
 export function configFromEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -42,5 +44,6 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
     secureCookies: production,
     oidc,
     devAuth,
+    portalDist: env.PORTAL_DIST || null,
   };
 }

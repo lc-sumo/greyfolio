@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assertRepSafe, leaderboard, repClawbackViews, repDealView, repStatements, repWallet } from '../src/scope.js';
+import { assertRepSafe, leaderboard, repClawbackViews, repDashboard, repDealView, repStatements, repWallet } from '../src/scope.js';
 import { clawbacks, deals, lines, reps, runs } from './memory-repo.js';
 
 const ctx = { deals, lines, clawbacks };
@@ -78,5 +78,22 @@ describe('repStatements', () => {
   it('lists only periods where the rep had lines, with gross − clawbacks = net', () => {
     expect(repStatements(ctx, runs, JULIAN)).toEqual([{ runId: 'run-3', period: 'Aug 16 – Aug 31, 2026', status: 'paid', dealCount: 1, grossPaid: 350, clawbacks: 100, netPaid: 250 }]);
     expect(repStatements(ctx, runs, 'rep-zach-sanders')).toEqual([]);
+  });
+});
+
+describe('repDashboard', () => {
+  it('buckets earned by funded date and paid by cleared date, ranks within the period, and lists what is owed', () => {
+    const d = repDashboard(ctx, reps, runs, JULIAN, '2026-07-01', '2026-09-02');
+    assertRepSafe(d);
+    expect(d.period).toMatchObject({ earned: 630, paid: 350, recovered: 100, owed: 380, funded: 20_000, dealCount: 1, rank: 2, repCount: 4 });
+    expect(d.nextPayout).toEqual({ date: '2026-09-15', runLabel: 'Sep 1 – Sep 15, 2026', cycle: 'Twice monthly' });
+    expect(d.monthly.map((m) => m.month)).toEqual(['2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08', '2026-09']);
+    expect(d.monthly.find((m) => m.month === '2026-06')).toEqual({ month: '2026-06', earned: 350, paid: 0 });
+    expect(d.monthly.find((m) => m.month === '2026-08')).toEqual({ month: '2026-08', earned: 0, paid: 350 });
+    expect(d.owedToMe.map((v) => v.id)).toEqual(['F2']);
+    expect(d.wallet.owed).toBe(380);
+  });
+  it('YTD includes June', () => {
+    expect(repDashboard(ctx, reps, runs, JULIAN, '2026-01-01', '2026-09-02').period.earned).toBe(980);
   });
 });

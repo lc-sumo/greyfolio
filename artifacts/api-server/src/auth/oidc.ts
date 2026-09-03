@@ -98,6 +98,9 @@ export function authRouter(config: AppConfig, repo: Repo): Router {
     res.json({ ok: true, redirect: config.appOrigin });
   });
 
+  /** Public: which sign-in methods the login screen should offer. */
+  r.get('/methods', (_req, res) => res.json({ oidc: !!config.oidc, devAuth: config.devAuth }));
+
   r.get('/me', (req, res) => {
     const u = currentUser(req);
     if (!u) throw new HttpError(401, 'Sign in required');

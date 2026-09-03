@@ -7,7 +7,7 @@ export interface SessionUser { repId: string; email: string; name: string; role:
 export interface AuthMe { user: SessionUser; canViewAs: boolean; oidc: boolean; devAuth: boolean }
 export interface RepRoleLine { role: Role; rate: number; amount: number; segment: string; segmentKey: string; paid: boolean }
 export interface RepDealView {
-  id: string; date: string; business: string; lender: string; product: string; funded: number; drawCount: number;
+  id: string; crmId: string | null; date: string; business: string; lender: string; product: string; funded: number; drawCount: number;
   roles: Role[]; lines: RepRoleLine[]; share: number; paid: number; owed: number; payoutStatus: PayoutStatus;
   commissionStatus: CommissionStatus; lenderPaidLabel: string; dealStatus: string; repPaid: string | null;
   clawback: { amount: number; remaining: number; status: 'open' | 'recovered' } | null;
@@ -76,7 +76,7 @@ export interface AdminDealRow {
   funded: number; factor: number | null; apr: number | null; termDays: number | null; frequency: string; payback: number | null;
   commRate: number; psfPct: number; originationFee: number; gross: number; referralPartner: string | null; referralRate: number; referralFee: number; net: number;
   roles: RoleView[]; totalRepPayout: number; houseNet: number; collected: number; outstanding: number; lenderPaidLabel: string;
-  commissionStatus: string; dealStatus: string; storedDealStatus: string; atRisk: boolean; repPaid: string | null; lenderPaid: string | null; crmUrl: string;
+  commissionStatus: string; dealStatus: string; storedDealStatus: string; atRisk: boolean; repPaid: string | null; lenderPaid: string | null; crmId: string | null; crmUrl: string;
   creditLine: number | null; drawSubsequentPct: number | null; hasClawback: boolean;
 }
 export interface SegmentView { sk: string; label: string; n: number; date: string; amount: number; commRate: number; gross: number; referralFee: number; net: number; collected: number; outstanding: number; status: string; lenderPaidLabel: string; schedule: { weeks: number; received: number; startDate: string | null; perWeek: number } | null; termDays: number | null; factor: number | null; payback: number | null; payment: number | null }
@@ -112,7 +112,7 @@ export interface PayResult { repId: string; runId: string; gross: number; withhe
 
 /* ---- Renewals + pay history (Phase 6) ---- */
 export type RenewalBucket = 'due' | 'prospecting' | 'building' | 'risk' | 'refinanced';
-export interface RenewalBase { id: string; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string; lender: string; product: string; date: string; funded: number; payback: number | null; termDays: number | null; frequency: string; factor: number | null; parentId: string | null; isParent: boolean; drawCount: number; pctPaidIn: number; markDate: string | null; maturityDate: string | null; daysToMark: number | null; bucket: RenewalBucket; bucketLabel: string; soon: boolean; prospectingDate: string; daysToProspecting: number; effectiveStatus: string; dealStatus: string }
+export interface RenewalBase { id: string; crmId: string | null; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string; lender: string; product: string; date: string; funded: number; payback: number | null; termDays: number | null; frequency: string; factor: number | null; parentId: string | null; isParent: boolean; drawCount: number; pctPaidIn: number; markDate: string | null; maturityDate: string | null; daysToMark: number | null; bucket: RenewalBucket; bucketLabel: string; soon: boolean; prospectingDate: string; daysToProspecting: number; effectiveStatus: string; dealStatus: string }
 export interface RepRenewalView extends RenewalBase { roles: Role[]; whoCalls: 'You' | 'Closer' | 'Opener'; estRenewalShare: number }
 export interface AdminRenewalRow extends RenewalBase { whoCalls: string; estRenewalGross: number; crmUrl: string }
 export interface PayHistoryRow { key: string; paidAt: string; dealId: string; business: string; role: string; segmentKey: string | null; segmentLabel: string; amount: number; runId: string | null; runLabel: string | null }

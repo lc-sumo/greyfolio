@@ -8,7 +8,7 @@ import { DEAL_STATUS_OPTIONS, api, post, qs, type MasterBoard, type Settings } f
 import { compact, day, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 
-const COLS = '96px 84px minmax(190px,1.3fr) minmax(190px,1.2fr) 130px minmax(170px,1fr) 110px 70px 70px 100px 100px 100px minmax(150px,1fr) minmax(150px,1fr) minmax(150px,1fr) 110px 110px 150px 170px minmax(0,1fr)';
+const COLS = '120px 70px 84px minmax(190px,1.3fr) minmax(190px,1.2fr) 130px minmax(170px,1fr) 110px 70px 70px 100px 100px 100px minmax(150px,1fr) minmax(150px,1fr) minmax(150px,1fr) 110px 110px 150px 170px minmax(0,1fr)';
 
 export function MasterDeals() {
   const { notify } = useSession();
@@ -21,7 +21,7 @@ export function MasterDeals() {
   const board = useQuery({ queryKey: ['master', rep, status], queryFn: () => api<MasterBoard>(`/api/admin/deals${qs({ rep, status })}`) });
   const rows = useMemo(() => {
     const s = search.trim().toLowerCase();
-    return (board.data?.deals ?? []).filter((d) => !s || `${d.id} ${d.business} ${d.merchantContact} ${d.merchantEmail} ${d.merchantPhone} ${d.lender} ${d.product}`.toLowerCase().includes(s));
+    return (board.data?.deals ?? []).filter((d) => !s || `${d.id} ${d.crmId ?? ''} ${d.business} ${d.merchantContact} ${d.merchantEmail} ${d.merchantPhone} ${d.lender} ${d.product}`.toLowerCase().includes(s));
   }, [board.data, search]);
   const totals = rows.reduce((t, d) => ({ funded: t.funded + d.funded, gross: t.gross + d.gross, net: t.net + d.net, payout: t.payout + d.totalRepPayout, house: t.house + d.houseNet }), { funded: 0, gross: 0, net: 0, payout: 0, house: 0 });
   const collect = async (id: string, body: Record<string, unknown>, label: string) => {
@@ -53,15 +53,16 @@ export function MasterDeals() {
         </div>
         {!board.data ? <Loading error={board.error} /> : rows.length === 0 ? <Empty>No deals match.</Empty> : (
           <div className="scroller">
-            <div className="table" style={{ ['--cols' as string]: COLS, minWidth: 2360 }}>
+            <div className="table" style={{ ['--cols' as string]: COLS, minWidth: 2450 }}>
               <div className="tr th">
-                {['Deal', 'Date', 'Business', 'Merchant contact', 'Lender', 'Product', 'Funded', 'Factor / APR', 'Comm %', 'Gross', 'Referral', 'Net', 'Opener', 'Closer', 'Override', 'Rep payout', 'House net', 'Lender paid comm', 'Commission status', 'Deal status'].map((h, i) => (
-                  <div className={`td ${[6, 9, 10, 11, 15, 16].includes(i) ? 'r' : ''}`} key={h}>{h}</div>
+                {['Deal ID', 'Sheet #', 'Date', 'Business', 'Merchant contact', 'Lender', 'Product', 'Funded', 'Factor / APR', 'Comm %', 'Gross', 'Referral', 'Net', 'Opener', 'Closer', 'Override', 'Rep payout', 'House net', 'Lender paid comm', 'Commission status', 'Deal status'].map((h, i) => (
+                  <div className={`td ${[7, 10, 11, 12, 16, 17].includes(i) ? 'r' : ''}`} key={h}>{h}</div>
                 ))}
               </div>
               {rows.map((d) => (
                 <div className={`tr ${d.atRisk ? 'tint' : ''}`} key={d.id}>
-                  <div className="td num" style={{ cursor: 'pointer' }} onClick={() => setOpen(d.id)}>{d.id}{d.crmUrl && <a href={d.crmUrl} target="_blank" rel="noopener" className="crm-mini" onClick={(e) => e.stopPropagation()} title="Open in CRM">↗</a>}{d.hasClawback && <span className="neg" title="Clawback"> ●</span>}</div>
+                  <div className="td num" style={{ cursor: 'pointer' }} onClick={() => setOpen(d.id)}>{d.crmId ?? <span className="subtle">—</span>}{d.crmUrl && <a href={d.crmUrl} target="_blank" rel="noopener" className="crm-mini" onClick={(e) => e.stopPropagation()} title="Open in CRM">↗</a>}{d.hasClawback && <span className="neg" title="Clawback"> ●</span>}</div>
+                  <div className="td num subtle" style={{ cursor: 'pointer' }} onClick={() => setOpen(d.id)}>{d.id}</div>
                   <div className="td num">{day(d.date)}</div>
                   <div className="td ellipsis" style={{ cursor: 'pointer' }} onClick={() => setOpen(d.id)}><b>{d.business}</b>{d.drawCount > 0 && <span className="subtle"> · {d.drawCount} draw{d.drawCount > 1 ? 's' : ''}</span>}</div>
                   <div className="td ellipsis"><div className="ellipsis">{d.merchantContact || '—'}</div><div className="subtle ellipsis" style={{ fontSize: 11 }}>{[d.merchantEmail, d.merchantPhone].filter(Boolean).join(' · ')}</div></div>
@@ -84,7 +85,7 @@ export function MasterDeals() {
                 </div>
               ))}
               <div className="tr total">
-                <div className="td" style={{ gridColumn: '1 / 7' }}>{rows.length} opportunities · {rows.reduce((s, d) => s + d.drawCount, 0)} draw lines</div>
+                <div className="td" style={{ gridColumn: '1 / 8' }}>{rows.length} opportunities · {rows.reduce((s, d) => s + d.drawCount, 0)} draw lines</div>
                 <div className="td r num">{compact(totals.funded)}</div><div className="td" /><div className="td" />
                 <div className="td r num">{money(totals.gross)}</div><div className="td" /><div className="td r num">{money(totals.net)}</div>
                 <div className="td" /><div className="td" /><div className="td" />

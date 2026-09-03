@@ -190,7 +190,7 @@ export function buildDemo(today = iso(new Date()), seed = 20260902): DemoData {
       dealStatus: slow ? r.pick(['Slow Pay', 'Default']) : age > 150 ? r.pick(['Refinanced', 'Refi Ready', 'Performing']) : 'Performing',
       repPaid: null,
       lenderPaid: (schedule ? schedule.received > 0 : (collected ?? 0) > 0) ? addDays(cursor, 6) : null,
-      crmId: null,
+      crmId: `OPP-${String(48000 + n * 37 + r.int(0, 8)).padStart(5, '0')}`,
       draws: [],
     };
 

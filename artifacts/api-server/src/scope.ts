@@ -85,6 +85,8 @@ export type PayoutStatus = 'Paid' | 'Partially paid' | 'Owed';
 
 export interface RepDealView {
   id: string;
+  /** The CRM's deal ID; `id` is the sheet row (F-series). */
+  crmId: string | null;
   date: string;
   business: string;
   lender: string;
@@ -121,6 +123,7 @@ export function repDealView(deal: Deal, repId: string, lines: PayoutLine[], claw
   const slice = cb ? repClawback(cb, deal, repId, lines) : null;
   return {
     id: deal.id,
+    crmId: deal.crmId,
     date: deal.date,
     business: deal.business,
     lender: deal.lender,
@@ -318,6 +321,7 @@ export function repDashboard(ctx: LedgerContext, reps: Rep[], runs: PayrollRun[]
 
 export interface RepRenewalView {
   id: string;
+  crmId: string | null;
   business: string;
   /** The rep needs these to follow up — they are the merchant's, not another rep's. */
   merchantContact: string;
@@ -363,6 +367,7 @@ export function repRenewals(ctx: LedgerContext, repId: string, settings: Renewal
       const whoCalls: RepRenewalView['whoCalls'] = d.closerId === repId ? 'You' : d.closerId ? 'Closer' : d.openerId === repId ? 'You' : 'Opener';
       return {
         id: d.id,
+        crmId: d.crmId,
         business: d.business,
         merchantContact: d.merchantContact,
         merchantEmail: d.merchantEmail,

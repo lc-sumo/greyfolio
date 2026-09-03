@@ -7,7 +7,7 @@ import { api, type RepDealView } from '../lib/api';
 import { day, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 
-const COLS = '90px 84px minmax(170px,1.2fr) 130px minmax(150px,1fr) 110px 150px 70px 110px minmax(0,1fr)';
+const COLS = '120px 70px 84px minmax(170px,1.2fr) 130px minmax(150px,1fr) 110px 150px 70px 110px minmax(0,1fr)';
 
 export function Deals() {
   const { viewAs } = useSession();
@@ -19,7 +19,7 @@ export function Deals() {
   const rows = useMemo(() => {
     const all = q.data?.deals ?? [];
     const s = search.trim().toLowerCase();
-    return all.filter((d) => (!s || `${d.id} ${d.business} ${d.lender} ${d.product}`.toLowerCase().includes(s)) && (status === 'all' || d.payoutStatus === status));
+    return all.filter((d) => (!s || `${d.id} ${d.crmId ?? ''} ${d.business} ${d.lender} ${d.product}`.toLowerCase().includes(s)) && (status === 'all' || d.payoutStatus === status));
   }, [q.data, search, status]);
   const totals = rows.reduce((t, d) => ({ funded: t.funded + d.funded, share: t.share + d.share, paid: t.paid + d.paid }), { funded: 0, share: 0, paid: 0 });
 
@@ -27,7 +27,7 @@ export function Deals() {
     <Shell eyebrow="Rep portal" title="My deals">
       <Card>
         <div className="toolbar" style={{ marginBottom: 12 }}>
-          <input className="search" placeholder="Search deal, business, lender, product" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input className="search" placeholder="Search deal ID, business, lender, product" value={search} onChange={(e) => setSearch(e.target.value)} />
           <select className="filter" value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="all">All payout statuses</option>
             <option value="Owed">Owed</option>
@@ -44,12 +44,13 @@ export function Deals() {
           <div className="scroller">
             <div className="table" style={{ ['--cols' as string]: COLS }}>
               <div className="tr th">
-                <div className="td">Deal</div><div className="td">Date</div><div className="td">Business</div><div className="td">Lender</div><div className="td">Product</div>
+                <div className="td">Deal ID</div><div className="td">Sheet #</div><div className="td">Date</div><div className="td">Business</div><div className="td">Lender</div><div className="td">Product</div>
                 <div className="td r">Funded</div><div className="td">My role</div><div className="td r">Rate</div><div className="td r">My share</div><div className="td">Status</div>
               </div>
               {rows.map((d) => (
                 <div className="tr click" key={d.id} onClick={() => setOpen(d.id)}>
-                  <div className="td num">{d.id}{d.clawback && <span className="neg" title="Clawback on this deal"> ●</span>}</div>
+                  <div className="td num">{d.crmId ?? <span className="subtle">—</span>}{d.clawback && <span className="neg" title="Clawback on this deal"> ●</span>}</div>
+                  <div className="td num subtle">{d.id}</div>
                   <div className="td num">{day(d.date)}</div>
                   <div className="td ellipsis">{d.business}{d.drawCount > 0 && <span className="subtle"> · {d.drawCount} draw{d.drawCount > 1 ? 's' : ''}</span>}</div>
                   <div className="td ellipsis">{d.lender}</div>
@@ -62,7 +63,7 @@ export function Deals() {
                 </div>
               ))}
               <div className="tr total">
-                <div className="td" style={{ gridColumn: '1 / 6' }}>{rows.length} deals</div>
+                <div className="td" style={{ gridColumn: '1 / 7' }}>{rows.length} deals</div>
                 <div className="td r num">{money(totals.funded)}</div>
                 <div className="td" /><div className="td" />
                 <div className="td r num">{money(totals.share)}</div>

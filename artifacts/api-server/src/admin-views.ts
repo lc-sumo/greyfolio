@@ -79,6 +79,7 @@ export interface AdminDealRow {
   atRisk: boolean;
   repPaid: string | null;
   lenderPaid: string | null;
+  crmId: string | null;
   crmUrl: string;
   creditLine: number | null;
   drawSubsequentPct: number | null;
@@ -133,6 +134,7 @@ export function adminDealRow(deal: Deal, ctx: LedgerContext, reps: Rep[], settin
     atRisk: atRisk(deal, settings.thresholds.clawbackWindowDays, today),
     repPaid: deal.repPaid,
     lenderPaid: deal.lenderPaid,
+    crmId: deal.crmId,
     crmUrl: crmUrl(settings.crm.urlTemplate, deal),
     creditLine: deal.creditLine,
     drawSubsequentPct: deal.drawSubsequentPct,
@@ -213,6 +215,7 @@ const BUCKET_ORDER: Record<RenewalBucket, number> = { due: 0, prospecting: 1, bu
 
 export interface AdminRenewalRow {
   id: string;
+  crmId: string | null;
   business: string;
   merchantContact: string;
   merchantEmail: string;
@@ -253,6 +256,7 @@ export function adminRenewals(ctx: LedgerContext, reps: Rep[], settings: Setting
       const r = renewalOf(d, settings.thresholds, today);
       return {
         id: d.id,
+        crmId: d.crmId,
         business: d.business,
         merchantContact: d.merchantContact,
         merchantEmail: d.merchantEmail,

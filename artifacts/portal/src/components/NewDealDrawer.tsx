@@ -26,7 +26,7 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
   const teams = useQuery({ queryKey: ['teams'], queryFn: () => api<{ teams: Array<{ id: string; leaderRepId: string | null; overrideRate: number }> }>('/api/admin/teams').catch(() => ({ teams: [] })) });
   const first = settings.products[0];
   const [f, setF] = useState<F>({
-    business: '', merchantContact: '', merchantEmail: '', merchantPhone: '', fundedDate: todayIso(), lender: '', product: first?.name ?? 'MCA', parentId: '',
+    business: '', crmId: '', merchantContact: '', merchantEmail: '', merchantPhone: '', fundedDate: todayIso(), lender: '', product: first?.name ?? 'MCA', parentId: '',
     amount: '', termDays: '120', factor: '1.35', apr: '', frequency: 'Daily', commRate: String((first?.comm ?? 0.12) * 100), psfPct: '0', originationFee: '0',
     referralPartner: 'None', referralRate: '0', creditLine: '', drawInitialPct: '', drawSubsequentPct: '',
     openerId: '', openerRate: '', closerId: '', closerRate: '', overrideId: '', overrideRate: '',
@@ -81,7 +81,7 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
     setBusy(true);
     try {
       const saved = await post<AdminDealDetail>('/api/admin/deals', {
-        business: f.business, merchantContact: f.merchantContact, merchantEmail: f.merchantEmail, merchantPhone: f.merchantPhone, fundedDate: f.fundedDate, lender: f.lender, product: f.product,
+        business: f.business, crmId: f.crmId || null, merchantContact: f.merchantContact, merchantEmail: f.merchantEmail, merchantPhone: f.merchantPhone, fundedDate: f.fundedDate, lender: f.lender, product: f.product,
         parentId: f.parentId || null, amount: num(f.amount), termDays: rule?.term ? num(f.termDays) || null : null, factor: rule?.factor ? num(f.factor) || null : null, apr: rule && !rule.factor ? num(f.apr) || null : null,
         frequency: f.frequency, commRate: num(f.commRate), psfPct: num(f.psfPct), originationFee: num(f.originationFee), referralPartner: f.referralPartner === 'None' ? null : f.referralPartner, referralRate: num(f.referralRate),
         creditLine: rule?.multiDraw ? num(f.creditLine) || null : null, drawInitialPct: rule?.multiDraw ? num(f.drawInitialPct) : null, drawSubsequentPct: rule?.multiDraw ? num(f.drawSubsequentPct) : null,
@@ -114,7 +114,8 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
             </select>
           </Field>
         )}
-        <Field label="Business name" span><input value={f.business} onChange={set('business')} placeholder="Northstar Dental Group" /></Field>
+        <Field label="Business name"><input value={f.business} onChange={set('business')} placeholder="Northstar Dental Group" /></Field>
+        <Field label="Deal ID (CRM)" hint="The sheet row number is assigned automatically"><input value={f.crmId} onChange={set('crmId')} placeholder="OPP-48213" /></Field>
         <Field label="Merchant contact"><input value={f.merchantContact} onChange={set('merchantContact')} /></Field>
         <Field label="Merchant phone"><input value={f.merchantPhone} onChange={set('merchantPhone')} /></Field>
         <Field label="Merchant email" span hint={priorDeals.length ? `Existing merchant — ${priorDeals.length} prior deal(s) totalling ${compact(priorDeals.reduce((s, d) => s + d.funded, 0))} funded. This deal files under the same merchant record.` : 'All deals group by merchant email.'}>

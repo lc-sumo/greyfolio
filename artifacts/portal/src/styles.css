@@ -206,3 +206,6 @@ select.mini { height: 28px; border: 1px solid var(--border-strong); border-radiu
 .bar { position: relative; height: 8px; background: var(--border-light-2); border-radius: 4px; overflow: visible; width: 150px; }
 .bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; }
 .bar i.mark { left: 40%; width: 2px; background: var(--ink); opacity: .45; border-radius: 1px; }
+
+input.mini-input { height: 28px; border: 1px solid var(--border-strong); border-radius: 7px; padding: 0 8px; font-family: var(--mono); font-size: 12px; width: 140px; background: #fff; outline: none; }
+input.mini-input:focus { border-color: var(--teal); }

@@ -3,7 +3,7 @@ import { repOptions } from '@greystone/commission';
 import { HttpError, currentUser, requireRole } from '../auth/middleware.js';
 import { adminDealDetail, adminDealRow, adminRenewals } from '../admin-views.js';
 import type { Repo } from '../repo.js';
-import { addDraw, createDeal, setCollection, setDealStatus, updateSplits } from '../services/deals.js';
+import { addDraw, createDeal, setCollection, setCrmId, setDealStatus, updateSplits } from '../services/deals.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -68,6 +68,10 @@ export function adminDealsRouter(repo: Repo): Router {
   });
   r.patch('/deals/:id/status', async (req, res) => {
     await setDealStatus(repo, String(req.params.id), String(req.body?.dealStatus ?? ''), currentUser(req)!.repId);
+    res.json(await detailOf(String(req.params.id)));
+  });
+  r.patch('/deals/:id/crm', async (req, res) => {
+    await setCrmId(repo, String(req.params.id), req.body?.crmId === null ? null : String(req.body?.crmId ?? ''), currentUser(req)!.repId);
     res.json(await detailOf(String(req.params.id)));
   });
   r.post('/deals/:id/draws', async (req, res) => {

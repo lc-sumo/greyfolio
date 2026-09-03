@@ -79,6 +79,14 @@ describe('deal edits', () => {
     const cleared = await admin.patch('/api/admin/deals/F1/splits').send({ overrideId: null });
     expect(cleared.body.roles[2]).toMatchObject({ repId: null, rate: 0, amount: 0 });
   });
+  it('the CRM deal ID is editable and drives the CRM link', async () => {
+    const { admin, rep } = await harness();
+    const res = await admin.patch('/api/admin/deals/F1/crm').send({ crmId: 'OPP-88213' });
+    expect(res.body).toMatchObject({ crmId: 'OPP-88213', crmUrl: 'https://crm.test/o/OPP-88213' });
+    expect((await admin.patch('/api/admin/deals/F1/crm').send({ crmId: '  ' })).body.crmId).toBeNull();
+    expect((await rep.patch('/api/admin/deals/F1/crm').send({ crmId: 'x' })).status).toBe(403);
+    expect((await rep.get('/api/me/deals/F1')).body.crmId).toBeNull();
+  });
   it('deal status is validated against settings', async () => {
     const { admin } = await harness();
     expect((await admin.patch('/api/admin/deals/F1/status').send({ dealStatus: 'Refinanced' })).body.dealStatus).toBe('Refinanced');

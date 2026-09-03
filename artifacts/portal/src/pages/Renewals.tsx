@@ -48,14 +48,15 @@ export function Renewals({ admin }: { admin: boolean }) {
         </div>
         {!q.data ? <Loading error={q.error} /> : shown.length === 0 ? <Empty>{tab === 'now' ? 'Nothing is renewable right now.' : 'No renewals here.'}</Empty> : (
           <div className="scroller">
-            <div className="table renewals" style={{ ['--cols' as string]: '80px 100px 130px minmax(220px,1.5fr) minmax(140px,1fr) 150px 90px 130px 150px 110px 130px 110px 120px minmax(0,1fr)', minWidth: 1950 }}>
-              <div className="tr th"><div className="td">Deal</div><div className="td">Funded date</div><div className="td">Parent deal</div><div className="td">Business</div><div className="td">Lender</div><div className="td">Funded</div><div className="td">Term</div><div className="td">More capital</div><div className="td">Renewal</div><div className="td">Due</div><div className="td">Paid off</div><div className="td r">Commission</div><div className="td">{admin ? 'Who calls it' : 'My role'}</div><div className="td">Status</div></div>
+            <div className="table renewals" style={{ ['--cols' as string]: '120px 70px 100px 130px minmax(220px,1.5fr) minmax(140px,1fr) 150px 90px 130px 150px 110px 130px 110px 120px minmax(0,1fr)', minWidth: 2040 }}>
+              <div className="tr th"><div className="td">Deal ID</div><div className="td">Sheet #</div><div className="td">Funded date</div><div className="td">Parent deal</div><div className="td">Business</div><div className="td">Lender</div><div className="td">Funded</div><div className="td">Term</div><div className="td">More capital</div><div className="td">Renewal</div><div className="td">Due</div><div className="td">Paid off</div><div className="td r">Commission</div><div className="td">{admin ? 'Who calls it' : 'My role'}</div><div className="td">Status</div></div>
               {shown.map((r) => {
                 const ready = r.bucket === 'due';
                 const due = r.daysToMark === null ? '—' : ready || r.daysToMark < 0 ? `ready ${Math.abs(r.daysToMark)}d` : `in ${r.daysToMark}d`;
                 return (
                   <div className="tr click" key={r.id} onClick={() => setOpen(r.id)}>
-                    <div className="td num">{r.id}</div>
+                    <div className="td num">{r.crmId ?? <span className="subtle">—</span>}</div>
+                    <div className="td num subtle">{r.id}</div>
                     <div className="td num">{day(r.date)}</div>
                     <div className="td num">{r.parentId ? r.parentId : r.isParent ? <>{r.id}<div className="subtle" style={{ fontSize: 10.5, fontFamily: 'var(--sans)' }}>parent · {r.drawCount} draw{r.drawCount === 1 ? '' : 's'}</div></> : <span className="subtle">—</span>}</div>
                     <div className="td ellipsis"><b>{r.business}</b>{'crmUrl' in r && r.crmUrl && <a href={r.crmUrl} target="_blank" rel="noopener" className="crm-mini" onClick={(e) => e.stopPropagation()}>↗</a>}<div className="subtle ellipsis" style={{ fontSize: 11 }}>{r.merchantContact || '—'}{r.merchantPhone ? ` · ${r.merchantPhone}` : ''}</div></div>

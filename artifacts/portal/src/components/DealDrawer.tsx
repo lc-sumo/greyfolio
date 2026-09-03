@@ -9,7 +9,7 @@ export function DealDrawer({ id, onClose }: { id: string; onClose: () => void })
   const q = useQuery({ queryKey: ['deal', id, viewAs], queryFn: () => api<RepDealDetail>(`/api/me/deals/${encodeURIComponent(id)}`) });
   const d = q.data;
   return (
-    <Drawer title={d ? <>{d.id} <span className="muted" style={{ fontWeight: 500 }}>· {d.business}</span></> : id} sub={d && `${d.lender} · ${d.product} · funded ${fullDay(d.date)}`} onClose={onClose}>
+    <Drawer title={d ? <>{d.crmId ?? d.id} <span className="muted" style={{ fontWeight: 500 }}>· {d.business}</span></> : id} sub={d && `Sheet ${d.id} · ${d.lender} · ${d.product} · funded ${fullDay(d.date)}`} onClose={onClose}>
       {!d ? (
         <Loading error={q.error} />
       ) : (

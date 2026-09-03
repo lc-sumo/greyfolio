@@ -11,7 +11,7 @@ import { LENDERS, LISTS, PARTNERS, PRODUCTS, THRESHOLDS } from '@greystone/db/se
 import { adminDealDetail, adminDealRow, adminRenewals } from '../../../api-server/src/admin-views';
 import { memoryRepo } from '../../../api-server/src/repo.memory';
 import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repPayHistory, repRenewals, repStatements, repWallet } from '../../../api-server/src/scope';
-import { addDraw, createDeal, setCollection, setDealStatus, updateSplits } from '../../../api-server/src/services/deals';
+import { addDraw, createDeal, setCollection, setCrmId, setDealStatus, updateSplits } from '../../../api-server/src/services/deals';
 import { advanceRun, createRun, paySelected } from '../../../api-server/src/services/payroll';
 import { payrollRepDetail, payrollReps, preview, runSummary } from '../../../api-server/src/payroll-views';
 import { ApiError, type SessionUser } from './api';
@@ -222,13 +222,14 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
       const deal = await createDeal(repo, body as never, me.repId);
       return json(await detail(deal.id));
     }
-    const m = p.match(/^\/api\/admin\/deals\/([^/]+)(?:\/(splits|status|draws|collection))?$/);
+    const m = p.match(/^\/api\/admin\/deals\/([^/]+)(?:\/(splits|status|draws|collection|crm))?$/);
     if (m) {
       const id = decodeURIComponent(m[1]!);
       const sub = m[2];
       if (!sub) return json(await detail(id));
       if (sub === 'splits') await updateSplits(repo, id, body as never, me.repId);
       if (sub === 'status') await setDealStatus(repo, id, String(body.dealStatus ?? ''), me.repId);
+      if (sub === 'crm') await setCrmId(repo, id, body.crmId === null ? null : String(body.crmId ?? ''), me.repId);
       if (sub === 'draws') await addDraw(repo, id, body as never, me.repId);
       if (sub === 'collection') await setCollection(repo, id, body as never, me.repId);
       return json(await detail(id));

@@ -160,3 +160,12 @@ export async function setCollection(repo: Repo, id: string, input: CollectionInp
   await repo.writeAudit({ actorRepId, action: 'deal.collection', targetRepId: null, path: `/api/admin/deals/${id}/collection`, detail: { segmentKey: seg.sk, collected } });
   return requireDeal(repo, id);
 }
+
+/** The CRM's deal ID (the F-number is only the sheet row). */
+export async function setCrmId(repo: Repo, id: string, crmId: string | null, actorRepId: string): Promise<Deal> {
+  const deal = await requireDeal(repo, id);
+  const value = crmId?.trim() || null;
+  await repo.updateDeal(id, { crmId: value });
+  await repo.writeAudit({ actorRepId, action: 'deal.update', targetRepId: null, path: `/api/admin/deals/${id}/crm`, detail: { crmId: value } });
+  return { ...deal, crmId: value };
+}

@@ -15,6 +15,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
   const [drawAmount, setDrawAmount] = useState('');
   const [drawTerm, setDrawTerm] = useState('');
   const [drawFactor, setDrawFactor] = useState('');
+  const [crm, setCrm] = useState<string | null>(null);
   const [splits, setSplits] = useState<Record<string, string>>({});
   const [err, setErr] = useState('');
   useEffect(() => {
@@ -35,7 +36,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
 
   return (
     <Drawer
-      title={d ? <>{d.id} <span className="muted" style={{ fontWeight: 500 }}>· {d.business}</span>{d.crmUrl && <a className="crm" href={d.crmUrl} target="_blank" rel="noopener">Open in CRM ↗</a>}</> : id}
+      title={d ? <>{d.crmId ?? d.id} <span className="muted" style={{ fontWeight: 500 }}>· {d.business}</span>{d.crmUrl && <a className="crm" href={d.crmUrl} target="_blank" rel="noopener">Open in CRM ↗</a>}</> : id}
       sub={d && `${d.lender} · ${d.product} · funded ${fullDay(d.date)} · ${d.merchantContact}${d.merchantEmail ? ` · ${d.merchantEmail}` : ''}${d.merchantPhone ? ` · ${d.merchantPhone}` : ''}`}
       onClose={onClose}
     >
@@ -57,6 +58,13 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
           <section className="card">
             <h3>Deal terms</h3>
             <dl className="kv">
+              <dt>Deal ID (CRM)</dt><dd style={{ fontFamily: 'var(--sans)' }}>
+                <span style={{ display: 'inline-flex', gap: 6 }}>
+                  <input className="mini-input" placeholder="—" value={crm ?? d.crmId ?? ''} onChange={(e) => setCrm(e.target.value)} />
+                  {crm !== null && crm !== (d.crmId ?? '') && <button className="btn" style={{ height: 28, padding: '0 10px' }} onClick={() => run(`${d.id} — CRM deal ID saved`, async () => { await post(`/api/admin/deals/${id}/crm`, { crmId: crm }, 'PATCH'); setCrm(null); })}>Save</button>}
+                </span>
+              </dd>
+              <dt>Sheet #</dt><dd>{d.id}</dd>
               <dt>Funded amount</dt><dd>{money(d.funded)}{d.drawCount ? ` (${d.drawCount} draw${d.drawCount > 1 ? 's' : ''})` : ''}</dd>
               {d.creditLine !== null && <><dt>Credit line</dt><dd>{money(d.creditLine)}</dd></>}
               {d.factor !== null && <><dt>Factor rate</dt><dd>{d.factor.toFixed(2)}</dd></>}

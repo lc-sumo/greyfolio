@@ -78,6 +78,14 @@ Sign in with any rep's email from the roster (e.g. `leor@greystoneus.com` for ad
 
 **Email + password accounts** work everywhere (set `AUTH_PASSWORD=off` to disable). An admin sets or resets a rep's password in Settings › Reps (a readable temporary one is suggested); the rep signs in with email + password and can change it from the sidebar. Passwords are scrypt-hashed in `commission_reps.password_hash` (migration `0003_rep_passwords`) and never leave the API; five failed attempts lock an email for 15 minutes.
 
+## Launch checklist
+
+1. **Postgres + host.** Set `DATABASE_URL`, `SESSION_SECRET` (32+ chars), `BASE_URL`/`APP_ORIGIN`, then `pnpm db:migrate && pnpm db:seed` (reps, lenders, products and partners from the tracker's tabs). Production needs SSO (`OIDC_ISSUER`…) or password sign-in (on by default; `AUTH_PASSWORD=off` disables).
+2. **Bring the tracker in.** Google Sheets → File → Download → CSV of the FUNDED DEALS tab, then Settings › Import from sheet (preview, fix any red rows in the sheet, import) or `pnpm --filter @greystone/api-server import:sheet funded-deals.csv --commit`. Rows with a Rep Paid Date become paid ledger lines in a run called "Imported from sheet".
+3. **Passwords.** Settings › Reps › Set password for each rep who signs in without SSO.
+4. **Confirm the assumptions** in Settings › Lenders (which products each lender funds, increments, clawback policy) and the CRM link template.
+5. **CI** runs typecheck, tests, both portal builds and the Docker image on every push (`.github/workflows/ci.yml`). The API adds security headers, per-IP rate limits and JSON request logs; the Audit log page shows every login, edit, payout, void and password change.
+
 ## The one rule
 
 There is **one** definition of a rep's money: `repLedger(ctx, repId)` in `lib/commission/src/ledger.ts`. It returns `{ earned, accrued, awaitingLender, paid, cash, held, recovered, owed }`. Every screen, roster, and payroll total reads it. `paid` comes only from the payment ledger (`commission_payout_lines`), never from a deal's status. `accrued` is the rep's share on commission the lender has actually paid (each increment received, each upfront collected), and **owed = max(0, accrued − paid − held)** — recording a lender increment is what moves money from "awaiting lender" into "owed". Increment schedules exist only on consolidation products; LOCs and LOC draws are paid upfront.

@@ -29,7 +29,7 @@ export function Login({ oidc, devAuth, password: passwordAuth = true }: { oidc: 
     <div className="login">
       <div className="left">
         <img src="/greystone-wordmark.png" alt="Greystone Merchant Partners" style={{ filter: 'brightness(0) invert(1)' }} />
-        <h1>Every deal.<br />Every dollar.<br />No guessing.</h1>
+        <h1>Every deal.<br />Every <em>dollar</em>.<br />No guessing.</h1>
         <div className="steps">
           <div><b>Reconcile</b><span>One ledger for every rep, every segment, every payout.</span></div>
           <div><b>Prepare</b><span>Payroll from the lines you pick, clawbacks netted once.</span></div>

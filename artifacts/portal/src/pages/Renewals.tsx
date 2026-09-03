@@ -52,7 +52,10 @@ export function Renewals({ admin }: { admin: boolean }) {
               <div className="tr th"><div className="td">Deal ID</div><div className="td">Sheet #</div><div className="td">Funded date</div><div className="td">Parent deal</div><div className="td">Business</div><div className="td">Paid in</div><div className="td">Lender</div><div className="td">Funded</div><div className="td">Term</div><div className="td">More capital</div><div className="td">Renewal</div><div className="td">Due</div><div className="td">Paid off</div><div className="td r">Commission</div><div className="td">{admin ? 'Who calls it' : 'My role'}</div><div className="td">Status</div></div>
               {shown.map((r) => {
                 const ready = r.bucket === 'due';
-                const due = r.daysToMark === null ? '—' : ready || r.daysToMark < 0 ? `ready ${Math.abs(r.daysToMark)}d` : `in ${r.daysToMark}d`;
+                // "ready for 136d" = the deal passed the renewal mark 136 days ago and has been renewable since; stale after 30 days.
+                const readyFor = r.daysToMark !== null && r.daysToMark <= 0 ? Math.abs(r.daysToMark) : null;
+                const stale = ready && readyFor !== null && readyFor > 30;
+                const due = r.daysToMark === null ? '—' : ready || r.daysToMark < 0 ? (readyFor ? `ready for ${readyFor}d` : 'ready today') : `in ${r.daysToMark}d`;
                 return (
                   <div className="tr click" key={r.id} onClick={() => setOpen(r.id)}>
                     <div className="td num">{r.crmId ?? <span className="subtle">—</span>}</div>
@@ -66,7 +69,7 @@ export function Renewals({ admin }: { admin: boolean }) {
                     <div className="td">{termLabel(r.termDays, r.frequency)}</div>
                     <div className="td num">{r.bucket === 'refinanced' || r.bucket === 'risk' ? '—' : r.daysToProspecting <= 0 ? <><span className="pos">eligible</span><div className="subtle" style={{ fontSize: 12.5 }}>since {day(r.prospectingDate)}</div></> : <>{day(r.prospectingDate)}<div className="subtle" style={{ fontSize: 12.5 }}>in {r.daysToProspecting}d</div></>}</div>
                     <div className="td num">{day(r.markDate)}<div className="subtle" style={{ fontSize: 12.5 }}>est. {Math.round(mark * 100)}% of term</div></div>
-                    <div className="td"><Pill tone={ready ? 'teal' : r.soon ? 'amber' : 'grey'}>{due}</Pill></div>
+                    <div className="td"><Pill tone={stale ? 'red' : ready ? 'teal' : r.soon ? 'amber' : 'grey'}>{due}</Pill>{stale && <div className="subtle" style={{ fontSize: 12.5, marginTop: 3 }}>follow up overdue</div>}</div>
                     <div className="td num">{day(r.maturityDate)}<div className="subtle" style={{ fontSize: 12.5 }}>est. full term</div></div>
                     <div className="td r num pos">{commissionOf(r) ? money(commissionOf(r)) : '—'}</div>
                     <div className="td">{r.whoCalls === 'You' ? <Pill tone="teal">You</Pill> : 'roles' in r ? `${r.whoCalls} calls · you ${r.roles.join('+').toLowerCase()}` : r.whoCalls}</div>

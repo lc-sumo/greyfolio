@@ -20,7 +20,7 @@ import {
   type PayoutLine,
   type Rep,
 } from '@greystone/commission';
-import { collectedFromSheetStatus, parsePsfCell } from '@greystone/db/seed/columns';
+import { collectedFromSheetStatus } from '@greystone/db/seed/columns';
 import { readFundedDealsCsv, type SheetRow } from '@greystone/db/seed/csv';
 import { HttpError } from '../http-error.js';
 import type { Repo, Settings } from '../repo.js';
@@ -175,8 +175,8 @@ export async function commitImport(repo: Repo, csv: string, actorRepId: string):
     const id = r.id && /^F\d+$/.test(r.id) && !created.some((d) => d.id === r.id) ? r.id : nextDealId(ids);
     ids = [...ids, id];
     const pr = rule(r.product);
-    // The sheet's PSF $ column is what its gross actually used; fall back to the % cell only when N is blank.
-    const psf = r.psfDollars !== null ? { psfRate: 0, psfDollars: r.psfDollars } : parsePsfCell(r.psf);
+    // The sheet's gross is G × L + N (PSF $). The PSF % cell is a note the sheet never adds in, so only N counts here.
+    const psf = { psfRate: 0, psfDollars: r.psfDollars ?? 0 };
     const deal = priceDeal(
       {
         business: r.business,

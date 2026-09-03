@@ -62,6 +62,10 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
     async insertDeal(deal) {
       data.deals.unshift({ ...deal, draws: [...deal.draws] });
     },
+    async deleteDeal(id) {
+      const i = data.deals.findIndex((d) => d.id === id);
+      if (i >= 0) data.deals.splice(i, 1);
+    },
     async updateDeal(id, patch: DealPatch) {
       const i = data.deals.findIndex((d) => d.id === id);
       if (i < 0) throw new Error(`No deal ${id}`);

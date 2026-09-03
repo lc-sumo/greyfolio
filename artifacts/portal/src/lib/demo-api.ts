@@ -12,7 +12,7 @@ import { adminDealDetail, adminDealRow, adminRenewals } from '../../../api-serve
 import { adminMerchants, adminOverview } from '../../../api-server/src/analytics-views';
 import { memoryRepo } from '../../../api-server/src/repo.memory';
 import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repPayHistory, repRenewals, repStatements, repWallet } from '../../../api-server/src/scope';
-import { addDraw, createDeal, setCollection, setCrmId, setDealStatus, updateSplits } from '../../../api-server/src/services/deals';
+import { addDraw, createDeal, deleteDeal, setCollection, setCrmId, setDealStatus, updateSplits, updateTerms } from '../../../api-server/src/services/deals';
 import { advanceRun, createRun, paySelected } from '../../../api-server/src/services/payroll';
 import { createRep, createTeam, deleteTeam, saveCrm, saveLenders, savePartners, savePayroll, saveProducts, saveThresholds, updateRep, updateTeam, usage } from '../../../api-server/src/services/settings';
 import { payrollRepDetail, payrollReps, preview, runSummary } from '../../../api-server/src/payroll-views';
@@ -283,11 +283,13 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
       const deal = await createDeal(repo, body as never, me.repId);
       return json(await detail(deal.id));
     }
-    const m = p.match(/^\/api\/admin\/deals\/([^/]+)(?:\/(splits|status|draws|collection|crm))?$/);
+    const m = p.match(/^\/api\/admin\/deals\/([^/]+)(?:\/(splits|status|draws|collection|crm|terms))?$/);
     if (m) {
       const id = decodeURIComponent(m[1]!);
       const sub = m[2];
+      if (!sub && method === 'DELETE') { await deleteDeal(repo, id, me.repId); return json(null); }
       if (!sub) return json(await detail(id));
+      if (sub === 'terms') await updateTerms(repo, id, body as never, me.repId);
       if (sub === 'splits') await updateSplits(repo, id, body as never, me.repId);
       if (sub === 'status') await setDealStatus(repo, id, String(body.dealStatus ?? ''), me.repId);
       if (sub === 'crm') await setCrmId(repo, id, body.crmId === null ? null : String(body.crmId ?? ''), me.repId);

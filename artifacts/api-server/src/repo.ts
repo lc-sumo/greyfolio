@@ -2,7 +2,7 @@ import type { Clawback, Deal, DealDraw, Lender, LedgerContext, PayoutLine, Payro
 
 export interface AuditEntry {
   actorRepId: string;
-  action: 'login' | 'logout' | 'view-as' | 'deal.create' | 'deal.update' | 'deal.draw' | 'deal.collection' | 'payroll.run' | 'payroll.pay' | 'settings.update' | 'team.update' | 'rep.update' | 'rep.password' | 'login.failed';
+  action: 'login' | 'logout' | 'view-as' | 'deal.create' | 'deal.update' | 'deal.draw' | 'deal.collection' | 'payroll.run' | 'payroll.pay' | 'settings.update' | 'team.update' | 'rep.update' | 'rep.password' | 'login.failed' | 'deal.delete' | 'payroll.void' | 'deal.import';
   targetRepId: string | null;
   path: string | null;
   detail?: Record<string, unknown>;
@@ -48,6 +48,8 @@ export interface Repo {
   // Deal writes (admin only — enforced by the routes)
   insertDeal(deal: Deal): Promise<void>;
   updateDeal(id: string, patch: DealPatch): Promise<void>;
+  /** Removes the deal and its draws. Callers must first prove nothing in the ledger references it. */
+  deleteDeal(id: string): Promise<void>;
   insertDraw(dealId: string, draw: DealDraw): Promise<void>;
   updateDraw(dealId: string, ref: string, patch: { collected: number | null; schedule: WeeklySchedule | null }): Promise<void>;
   // Payroll (admin only — enforced by the routes)

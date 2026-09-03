@@ -81,6 +81,87 @@ export interface SplitsInput {
 }
 
 /** Editing an EXISTING deal may reference inactive reps — history must not move (invariant #9). */
+/**
+ * Correct a deal's core terms after entry. The deal is re-priced through the
+ * same chain as creation; splits, collection progress, draws, status and CRM
+ * fields carry over. Refused once anything for the deal is in the ledger —
+ * void those payouts first, so "paid" never drifts from what was earned.
+ */
+export async function updateTerms(repo: Repo, id: string, input: Partial<NewDealDraft>, actorRepId: string): Promise<Deal> {
+  const deal = await requireDeal(repo, id);
+  const [settings, ctx] = await Promise.all([repo.getSettings(), repo.loadContext()]);
+  if (ctx.lines.some((l) => l.dealId === id)) throw new HttpError(400, `${id} has payouts in the ledger — void them before changing its terms`);
+  const s = deal.commSchedule;
+  const draft: NewDealDraft = {
+    business: input.business ?? deal.business,
+    merchantContact: input.merchantContact ?? deal.merchantContact,
+    merchantEmail: input.merchantEmail ?? deal.merchantEmail,
+    merchantPhone: input.merchantPhone ?? deal.merchantPhone,
+    fundedDate: input.fundedDate ?? deal.date,
+    lender: input.lender ?? deal.lender,
+    product: input.product ?? deal.product,
+    parentId: input.parentId === undefined ? deal.parentId : input.parentId,
+    amount: input.amount ?? deal.funded,
+    termDays: input.termDays === undefined ? deal.termDays : input.termDays,
+    factor: input.factor === undefined ? deal.factor : input.factor,
+    apr: input.apr === undefined ? deal.apr : input.apr,
+    frequency: input.frequency ?? deal.frequency,
+    commRate: input.commRate === undefined ? deal.commRate : input.commRate,
+    psfPct: input.psfPct === undefined ? deal.psfPct : input.psfPct,
+    originationFee: input.originationFee === undefined ? deal.originationFee : input.originationFee,
+    referralPartner: input.referralPartner === undefined ? deal.referralPartner : input.referralPartner,
+    creditLine: input.creditLine === undefined ? deal.creditLine : input.creditLine,
+    drawInitialPct: input.drawInitialPct === undefined ? deal.drawInitialPct : input.drawInitialPct,
+    drawSubsequentPct: input.drawSubsequentPct === undefined ? deal.drawSubsequentPct : input.drawSubsequentPct,
+    openerId: deal.openerId, openerRate: deal.openerRate, closerId: deal.closerId, closerRate: deal.closerRate, overrideId: deal.overrideId, overrideRate: deal.overrideRate,
+    commIncrements: input.commIncrements === undefined ? s?.weeks ?? null : input.commIncrements,
+    commUpfrontPct: input.commUpfrontPct === undefined ? (s?.upfrontPct ?? null) : input.commUpfrontPct,
+    commRemainder: input.commRemainder === undefined ? (s?.remainder ?? null) : input.commRemainder,
+    commCadenceDays: input.commCadenceDays === undefined ? (s?.cadenceDays ?? null) : input.commCadenceDays,
+    commStartDate: input.commStartDate === undefined ? (s?.startDate ?? null) : input.commStartDate,
+    commAmounts: input.commAmounts === undefined ? (s?.amounts ?? null) : input.commAmounts,
+  };
+  if (draft.parentId && draft.parentId !== deal.parentId && !ctx.deals.some((d) => d.id === draft.parentId)) throw new HttpError(400, `Parent deal ${draft.parentId} does not exist`);
+  let priced: Deal;
+  try {
+    priced = priceDeal(draft, {
+      id,
+      today: today(),
+      rule: settings.products.find((p) => p.name === draft.product),
+      lender: settings.lenders.find((l) => l.name === draft.lender),
+      partner: settings.partners.find((p) => p.name === draft.referralPartner),
+      referralPaidThisMonth: referralPaidInMonth(ctx.deals.filter((d) => d.id !== id), draft.referralPartner, draft.fundedDate),
+    });
+  } catch (e) {
+    bad(e);
+  }
+  // Carry collection progress across the re-price.
+  let commSchedule = priced.commSchedule;
+  let commCollected = priced.commCollected;
+  if (commSchedule && s) {
+    commSchedule = { ...commSchedule, received: Math.min(s.received, commSchedule.weeks), upfrontReceived: commSchedule.upfrontPct ? !!s.upfrontReceived : undefined, remainderReceived: commSchedule.remainder === 'at-end' ? !!s.remainderReceived : undefined, stoppedAfter: s.stoppedAfter === null || s.stoppedAfter === undefined ? s.stoppedAfter : Math.min(s.stoppedAfter, commSchedule.weeks) };
+  } else if (!commSchedule && typeof deal.commCollected === 'number') {
+    commCollected = Math.min(deal.commCollected, priced.gross);
+  }
+  const { id: _id, draws: _draws, opportunityId: _opp, dealStatus: _st, repPaid: _rp, lenderPaid: _lp, crmId: _crm, ...pricedFields } = priced as Deal & { crmId?: string | null };
+  const patch = { ...pricedFields, commSchedule, commCollected, parentId: draft.parentId || null, opportunityId: draft.parentId || id };
+  await repo.updateDeal(id, patch);
+  await repo.writeAudit({ actorRepId, action: 'deal.update', targetRepId: null, path: `/api/admin/deals/${id}/terms`, detail: { funded: priced.funded, lender: priced.lender, product: priced.product, date: priced.date, gross: priced.gross } });
+  return requireDeal(repo, id);
+}
+
+/** Remove a mistyped deal. Refused once the ledger, a clawback or another deal (as parent) references it. */
+export async function deleteDeal(repo: Repo, id: string, actorRepId: string): Promise<void> {
+  const deal = await requireDeal(repo, id);
+  const ctx = await repo.loadContext();
+  if (ctx.lines.some((l) => l.dealId === id)) throw new HttpError(400, `${id} has payouts in the ledger — void them first`);
+  if (ctx.clawbacks.some((c) => c.dealId === id)) throw new HttpError(400, `${id} has a clawback on record and cannot be deleted`);
+  const children = ctx.deals.filter((d) => d.parentId === id);
+  if (children.length) throw new HttpError(400, `${id} is the parent of ${children.map((d) => d.id).join(', ')} — re-parent or delete those first`);
+  await repo.deleteDeal(id);
+  await repo.writeAudit({ actorRepId, action: 'deal.delete', targetRepId: null, path: `/api/admin/deals/${id}`, detail: { business: deal.business, funded: deal.funded, lender: deal.lender } });
+}
+
 export async function updateSplits(repo: Repo, id: string, input: SplitsInput, actorRepId: string): Promise<Deal> {
   const deal = await requireDeal(repo, id);
   const reps = await repo.listReps();

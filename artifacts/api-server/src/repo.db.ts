@@ -70,6 +70,12 @@ export function dbRepo(db: Database): Repo {
         payroll: map.payroll ?? { cycle: 'Twice monthly' },
       };
     },
+    async deleteDeal(id: string) {
+      await db.transaction(async (tx) => {
+        await tx.delete(commissionDealDraws).where(eq(commissionDealDraws.dealId, id));
+        await tx.delete(commissionDeals).where(eq(commissionDeals.id, id));
+      });
+    },
     async insertDeal(deal: Deal) {
       const { draws, ...row } = deal;
       await db.transaction(async (tx) => {

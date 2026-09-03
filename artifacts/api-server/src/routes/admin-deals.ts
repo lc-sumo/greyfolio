@@ -4,7 +4,7 @@ import { HttpError, currentUser, requireRole } from '../auth/middleware.js';
 import { adminDealDetail, adminDealRow, adminRenewals } from '../admin-views.js';
 import { adminMerchants, adminOverview } from '../analytics-views.js';
 import type { Repo } from '../repo.js';
-import { addDraw, createDeal, setCollection, setCrmId, setDealStatus, updateSplits } from '../services/deals.js';
+import { addDraw, createDeal, deleteDeal, setCollection, setCrmId, setDealStatus, updateSplits, updateTerms } from '../services/deals.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -77,6 +77,14 @@ export function adminDealsRouter(repo: Repo): Router {
     return adminDealDetail(deal, ctx, reps, settings, today());
   };
 
+  r.patch('/deals/:id/terms', async (req, res) => {
+    await updateTerms(repo, String(req.params.id), req.body ?? {}, currentUser(req)!.repId);
+    res.json(await detailOf(String(req.params.id)));
+  });
+  r.delete('/deals/:id', async (req, res) => {
+    await deleteDeal(repo, String(req.params.id), currentUser(req)!.repId);
+    res.status(204).end();
+  });
   r.patch('/deals/:id/splits', async (req, res) => {
     await updateSplits(repo, String(req.params.id), req.body, currentUser(req)!.repId);
     res.json(await detailOf(String(req.params.id)));

@@ -150,6 +150,25 @@ describe('deal edits', () => {
     expect(exempt.body.clawbackWindow).toMatchObject({ basis: 'none', source: 'product', cleared: true });
     expect(fresh.body.atRisk).toBe(true);
   });
+  it('terms can be corrected until the deal is in the ledger; a mistyped deal can be deleted', async () => {
+    const { admin } = await harness();
+    // F2 has no payouts: re-price it at 25k on a different lender, keeping its splits
+    const before = (await admin.get('/api/admin/deals/F2')).body;
+    const res = await admin.patch('/api/admin/deals/F2/terms').send({ amount: 25_000, lender: 'ACE FUNDING', factor: 1.4 });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ funded: 25_000, lender: 'ACE FUNDING', factor: 1.4, gross: 2_500 });
+    expect(res.body.roles.map((r: { repId: string | null }) => r.repId)).toEqual(before.roles.map((r: { repId: string | null }) => r.repId));
+    // F1 has been paid: locked
+    const locked = await admin.patch('/api/admin/deals/F1/terms').send({ amount: 1 });
+    expect(locked.status).toBe(400);
+    expect(locked.body.error).toMatch(/void them/);
+    expect((await admin.delete('/api/admin/deals/F1')).status).toBe(400);
+    // a fresh mistyped deal goes away entirely
+    const created = await admin.post('/api/admin/deals').send({ ...draft, business: 'Typo Co' });
+    expect((await admin.delete(`/api/admin/deals/${created.body.id}`)).status).toBe(204);
+    expect((await admin.get(`/api/admin/deals/${created.body.id}`)).status).toBe(404);
+    expect((await admin.get('/api/admin/audit')).body.entries[0]).toMatchObject({ action: 'deal.delete' });
+  });
   it('deal status is validated against settings', async () => {
     const { admin } = await harness();
     expect((await admin.patch('/api/admin/deals/F1/status').send({ dealStatus: 'Refinanced' })).body.dealStatus).toBe('Refinanced');

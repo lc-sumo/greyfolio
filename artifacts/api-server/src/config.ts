@@ -17,6 +17,8 @@ export interface AppConfig {
   devAuth: boolean;
   /** Email + password sign-in (on unless AUTH_PASSWORD=off). */
   passwordAuth: boolean;
+  /** One JSON log line per request (off in tests). */
+  requestLog: boolean;
   /** Built portal directory to serve (SPA fallback). Optional. */
   portalDist: string | null;
 }
@@ -37,7 +39,8 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
         scope: env.OIDC_SCOPE ?? 'openid email profile',
       }
     : null;
-  if (production && !oidc) throw new Error('OIDC_ISSUER is required in production');
+  const passwordAuth = env.AUTH_PASSWORD !== 'off';
+  if (production && !oidc && !passwordAuth) throw new Error('Production needs a sign-in method: set OIDC_ISSUER, or leave AUTH_PASSWORD on');
   return {
     port: Number(env.PORT ?? 8080),
     baseUrl,
@@ -46,7 +49,8 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
     secureCookies: production,
     oidc,
     devAuth,
-    passwordAuth: env.AUTH_PASSWORD !== 'off',
+    passwordAuth,
+    requestLog: env.REQUEST_LOG !== 'off' && env.NODE_ENV !== 'test' && !env.VITEST && !process.env.VITEST,
     portalDist: env.PORTAL_DIST || null,
   };
 }

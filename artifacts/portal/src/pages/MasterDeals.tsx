@@ -48,7 +48,6 @@ export function MasterDeals() {
             {['Waiting for payment', 'Partially Paid', 'YES - Paid In Full', 'Performing', 'Prospecting', 'Refi Ready', 'Refinanced', 'Default', 'Slow Pay', 'Paid In Full'].map((s) => <option key={s}>{s}</option>)}
           </select>
           <span className="count">{rows.length} of {board.data?.count ?? 0} deals</span>
-          <button className="btn" onClick={() => notify('Push to Sheets arrives in Phase 8 — the portal is master, the sheet mirrors it')}>Push to Sheets</button>
           <button className="btn primary" onClick={() => setCreating(true)} disabled={!settings.data || !board.data}>+ New deal</button>
         </div>
         {!board.data ? <Loading error={board.error} /> : rows.length === 0 ? <Empty>No deals match.</Empty> : (

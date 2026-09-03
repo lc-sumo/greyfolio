@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api, post, type AdminDealDetail, type MasterBoard, type RepOption, type Settings } from '../lib/api';
 import { compact, day, fullDay, money, pct, todayIso } from '../lib/format';
 import { addBusinessDays, liveMath, num } from '../lib/math';
@@ -20,13 +20,29 @@ function Field({ label, hint, children, span }: { label: React.ReactNode; hint?:
   );
 }
 
-export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings: Settings; board: MasterBoard; onClose: () => void; onSaved: (d: AdminDealDetail) => void }) {
+/** One form for two jobs: enter a funded deal, or (with `existing`) correct a deal's terms. Splits are edited on the deal itself. */
+export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: { settings: Settings; board: MasterBoard; existing?: AdminDealDetail; onClose: () => void; onSaved: (d: AdminDealDetail) => void }) {
+  const editing = !!existing;
   const { notify } = useSession();
   const qc = useQueryClient();
   const roster = useQuery({ queryKey: ['roster-reps'], queryFn: () => api<{ reps: Array<{ id: string; name: string; teamId: string | null; openerRate: number; closerRate: number; overrideRate: number | null; active: boolean }> }>('/api/admin/reps') });
   const teams = useQuery({ queryKey: ['teams'], queryFn: () => api<{ teams: Array<{ id: string; leaderRepId: string | null; overrideRate: number }> }>('/api/admin/teams').catch(() => ({ teams: [] })) });
   const first = settings.products[0];
-  const [f, setF] = useState<F>({
+  const seed = (): F | null => {
+    if (!existing) return null;
+    const base = existing.segments[0];
+    const sch = base?.schedule;
+    const amount = sch?.planned?.amount ?? base?.amount ?? existing.funded;
+    const pctStr = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(Math.round(v * 10000) / 100));
+    return {
+      business: existing.business, crmId: existing.crmId ?? '', merchantContact: existing.merchantContact, merchantEmail: existing.merchantEmail, merchantPhone: existing.merchantPhone, fundedDate: existing.date, lender: existing.lender, product: existing.product, parentId: existing.parentId ?? '',
+      amount: String(amount), termDays: existing.termDays === null ? '' : String(existing.termDays), factor: existing.factor === null ? '' : String(existing.factor), apr: existing.apr === null ? '' : String(existing.apr), frequency: existing.frequency, commRate: pctStr(existing.commRate), psfPct: pctStr(existing.psfPct), psfMode: '%', psfDollars: '', originationFee: String(existing.originationFee),
+      referralPartner: existing.referralPartner ?? 'None', referralRate: pctStr(existing.referralRate), creditLine: existing.creditLine === null ? '' : String(existing.creditLine), drawInitialPct: pctStr(existing.commRate), drawSubsequentPct: pctStr(existing.drawSubsequentPct),
+      openerId: existing.roles.find((r) => r.role === 'Opener')?.repId ?? '', openerRate: pctStr(existing.roles.find((r) => r.role === 'Opener')?.rate), closerId: existing.roles.find((r) => r.role === 'Closer')?.repId ?? '', closerRate: pctStr(existing.roles.find((r) => r.role === 'Closer')?.rate), overrideId: existing.roles.find((r) => r.role === 'Override')?.repId ?? '', overrideRate: pctStr(existing.roles.find((r) => r.role === 'Override')?.rate),
+      payout: sch ? 'increments' : 'upfront', commIncrements: sch ? String(sch.planned?.increments ?? sch.weeks) : '', commUpfrontPct: sch?.upfrontPct ? String(Math.round(sch.upfrontPct * 100)) : '', commRemainder: sch?.remainder ?? 'spread', commCadenceDays: String(sch?.cadenceDays ?? 7), commStartDate: sch?.startDate ?? '', commGrid: sch?.amounts ? sch.amounts.join('\n') : '',
+    };
+  };
+  const [f, setF] = useState<F>(seed() ?? {
     business: '', crmId: '', merchantContact: '', merchantEmail: '', merchantPhone: '', fundedDate: todayIso(), lender: '', product: first?.name ?? 'MCA', parentId: '',
     amount: '', termDays: '120', factor: '1.35', apr: '', frequency: 'Daily', commRate: String((first?.comm ?? 0.12) * 100), psfPct: '0', psfMode: '%', psfDollars: '', originationFee: '0',
     referralPartner: 'None', referralRate: '0', creditLine: '', drawInitialPct: '', drawSubsequentPct: '',
@@ -46,20 +62,26 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
   const reps = roster.data?.reps ?? [];
   const assign: RepOption[] = board.repOptions.assign;
 
+  const skipDefaults = useRef(editing);
   // Product change → default rates and draw settings from the rule.
   useEffect(() => {
     if (!rule) return;
+    if (skipDefaults.current) return;
     setF((s) => ({ ...s, commRate: String((rule.multiDraw ? rule.drawInitial ?? rule.comm : rule.comm) * 100), drawInitialPct: rule.drawInitial ? String(rule.drawInitial * 100) : '', drawSubsequentPct: rule.drawSubsequent ? String(rule.drawSubsequent * 100) : '' }));
   }, [rule?.name]); // eslint-disable-line react-hooks/exhaustive-deps
   // Lender change → seed the payout structure from the lender's defaults.
   useEffect(() => {
     if (!lender) return;
+    if (skipDefaults.current) return;
     setF((s) => ({ ...s, commIncrements: lender.terms === 'weekly' ? String(lender.weeks) : s.commIncrements ?? '', commUpfrontPct: lender.upfrontPct ? String(lender.upfrontPct * 100) : s.payout === 'lender' ? '' : s.commUpfrontPct ?? '', commRemainder: lender.remainder ?? 'spread', commCadenceDays: String(lender.cadenceDays ?? 7) }));
   }, [lender?.name]); // eslint-disable-line react-hooks/exhaustive-deps
   // Partner change → prefill its rate.
   useEffect(() => { setF((s) => ({ ...s, referralRate: partner ? String(partner.pct * 100) : '0' })); }, [partner?.name]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Edit mode: the first render keeps the deal's own values; later changes take the defaults as usual.
+  useEffect(() => { const t = setTimeout(() => { skipDefaults.current = false; }, 0); return () => clearTimeout(t); }, []);
   // Opener / closer → rates from profiles; override defaults from the opener's team leader.
   useEffect(() => {
+    if (editing) return;
     const o = reps.find((r) => r.id === f.openerId);
     const c = reps.find((r) => r.id === f.closerId);
     const team = teams.data?.teams.find((t) => t.id === o?.teamId);
@@ -118,7 +140,7 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
     setErr('');
     setBusy(true);
     try {
-      const saved = await post<AdminDealDetail>('/api/admin/deals', {
+      const saved = await post<AdminDealDetail>(editing ? `/api/admin/deals/${existing!.id}/terms` : '/api/admin/deals', {
         business: f.business, crmId: f.crmId || null, merchantContact: f.merchantContact, merchantEmail: f.merchantEmail, merchantPhone: f.merchantPhone, fundedDate: f.fundedDate, lender: f.lender, product: f.product,
         parentId: f.parentId || null, amount: num(f.amount), termDays: rule?.term ? num(f.termDays) || null : null, factor: rule?.factor ? num(f.factor) || null : null, apr: rule && !rule.factor ? num(f.apr) || null : null,
         frequency: f.frequency, commRate: num(f.commRate), psfPct: m.psfRate * 100, originationFee: num(f.originationFee), referralPartner: f.referralPartner === 'None' ? null : f.referralPartner,
@@ -131,9 +153,9 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
         commCadenceDays: incremental ? num(f.commCadenceDays) || 7 : null,
         commStartDate: incremental && f.commStartDate ? f.commStartDate : null,
         commAmounts: incremental && grid.length ? grid : null,
-      });
+      }, editing ? 'PATCH' : 'POST');
       await qc.invalidateQueries();
-      notify(`${saved.id} saved — ${saved.roles.filter((r) => r.repId).length} rep portal(s) updated`);
+      notify(editing ? `${saved.id} — terms updated and re-priced` : `${saved.id} saved — ${saved.roles.filter((r) => r.repId).length} rep portal(s) updated`);
       onSaved(saved);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not save');
@@ -144,7 +166,7 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
 
   const amountLabel = rule?.multiDraw ? 'Initial draw amount' : rule?.basis === 'draw' ? 'Draw amount' : 'Funded amount';
   return (
-    <Drawer title="New deal" sub="Funded deals only — the funded date cannot be in the future." onClose={onClose}>
+    <Drawer title={editing ? `Edit ${existing!.id} · ${existing!.business}` : 'New deal'} sub={editing ? 'Correct the terms as entered. The deal re-prices through the same math; splits, draws and collection progress carry over.' : 'Funded deals only — the funded date cannot be in the future.'} onClose={onClose}>
       <div className="drawer-cols">
       <div className="form">
         <Field label="Product" span>
@@ -254,8 +276,8 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
         <Field label={`Payment (${f.frequency || 'Daily'})`} hint={m.payment === null ? 'needs amount, rate and term' : `payback ÷ ${f.frequency === 'Weekly' ? 'weeks' : f.frequency === 'Bi-Weekly' ? 'two-week periods' : f.frequency === 'Monthly' ? 'months' : 'business days'} in the term`}><input readOnly className="ro" value={m.payment === null ? '—' : money(m.payment)} /></Field>
         <Field label="Est. renewal date" hint="computed"><input readOnly className="ro" value={renewal ? fullDay(renewal) : 'Not renewal tracked'} /></Field>
 
-        <div className="label" style={{ gridColumn: '1 / -1', marginTop: 6 }}>Splits · active reps only</div>
-        {(['opener', 'closer', 'override'] as const).map((role) => (
+        {!editing && <div className="label" style={{ gridColumn: '1 / -1', marginTop: 6 }}>Splits · active reps only</div>}
+        {!editing && (['opener', 'closer', 'override'] as const).map((role) => (
           <div key={role} className="split-row">
             <Field label={role === 'override' ? 'Override rep' : role[0]!.toUpperCase() + role.slice(1)}>
               <select value={f[`${role}Id`]} onChange={set(`${role}Id`)}>
@@ -306,7 +328,7 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
       </div>
       {err && <div className="note" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>{err}</div>}
       <div style={{ display: 'flex', gap: 9 }}>
-        <button className="btn primary big" disabled={busy || gridMismatch} title={gridMismatch ? 'The increment grid must total the funded amount' : undefined} onClick={() => void save()}>{busy ? 'Saving…' : 'Save deal & push to Sheets'}</button>
+        <button className="btn primary big" disabled={busy || gridMismatch} title={gridMismatch ? 'The increment grid must total the funded amount' : undefined} onClick={() => void save()}>{busy ? 'Saving…' : editing ? 'Save terms' : 'Save deal'}</button>
         <button className="btn big" onClick={onClose}>Cancel</button>
       </div>
       <div className="subtle" style={{ fontSize: 13 }}>Rates: {pct(0.2)} means 20 — type either.</div>

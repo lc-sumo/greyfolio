@@ -1,11 +1,12 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { DEAL_STATUS_OPTIONS, api, post, type AdminDealDetail, type RepOption, type Settings } from '../lib/api';
+import { DEAL_STATUS_OPTIONS, api, post, type AdminDealDetail, type MasterBoard, type RepOption, type Settings } from '../lib/api';
 import { num } from '../lib/math';
 import { parseIncrementGrid, paybackOf, paymentFor } from '@greystone/commission';
 import { day, fullDay, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 import { ClawbackBar, Contact, Drawer, Loading, Pill, toneFor } from './ui';
+import { NewDealDrawer } from './NewDealDrawer';
 
 export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: string; settings: Settings; editOptions: RepOption[]; onClose: () => void }) {
   const { notify } = useSession();
@@ -33,8 +34,23 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
     }
   }
   const collect = (body: Record<string, unknown>, label: string) => run(label, () => post(`/api/admin/deals/${id}/collection`, body));
+  const [editing, setEditing] = useState(false);
+  const board = useQuery({ queryKey: ['deals-board-for-edit'], queryFn: () => api<MasterBoard>('/api/admin/deals'), enabled: editing });
+  async function remove() {
+    if (!d) return;
+    if (!window.confirm(`Delete ${d.id} · ${d.business}? This removes the deal and its draws. It is refused if anything was ever paid on it.`)) return;
+    try {
+      await post(`/api/admin/deals/${id}`, {}, 'DELETE');
+      await qc.invalidateQueries();
+      notify(`${d.id} deleted`);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not delete');
+    }
+  }
 
   return (
+    <>
     <Drawer
       title={d ? <>{d.crmId ?? d.id} <span className="muted" style={{ fontWeight: 500 }}>· {d.business}</span>{d.crmUrl && <a className="crm" href={d.crmUrl} target="_blank" rel="noopener">Open in CRM ↗</a>}</> : id}
       sub={d && <>{d.lender} · {d.product} · funded {fullDay(d.date)}{(d.merchantContact || d.merchantEmail || d.merchantPhone) && <Contact name={d.merchantContact} email={d.merchantEmail} phone={d.merchantPhone} size="inline" />}</>}
@@ -55,6 +71,10 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
             </div>
           </section>
 
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn" onClick={() => setEditing(true)} title="Correct amount, lender, product, dates, rates — the deal re-prices">Edit terms</button>
+            <button className="btn" style={{ color: 'var(--red)' }} onClick={() => void remove()} title="Only a deal nothing was paid on can be deleted">Delete deal</button>
+          </div>
           <section className="card">
             <h3>Deal terms</h3>
             <dl className="kv">
@@ -223,6 +243,8 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
         </>
       )}
     </Drawer>
+    {editing && d && board.data && <NewDealDrawer settings={settings} board={board.data} existing={d} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); void q.refetch(); }} />}
+    </>
   );
 }
 

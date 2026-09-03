@@ -1,4 +1,4 @@
-import { applyTheme, readTheme, type Theme } from '../lib/theme';
+import { PALETTES, applyPalette, applyTheme, readPalette, readTheme, type Palette, type Theme } from '../lib/theme';
 import { useQuery } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
@@ -11,6 +11,7 @@ const PERIODS: Period[] = ['7d', '30d', 'QTD', 'YTD'];
 export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: string; title: string; showPeriod?: boolean; children: ReactNode }) {
   const { auth, viewAs, setViewAs: setViewAsRaw, period, setPeriod, logout, toast } = useSession();
   const [theme, setTheme] = useState<Theme>(() => readTheme());
+  const [palette, setPalette] = useState<Palette>(() => readPalette());
   const navigate = useNavigate();
   // Changing whose portal is rendered always starts from that portal's home.
   const setViewAs = (id: string | null) => { setViewAsRaw(id); navigate('/'); };
@@ -74,6 +75,9 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
             <span className="label" style={{ color: 'var(--navy-text-3)' }}>Appearance</span>
             <div className="seg" role="group" aria-label="Theme">
               {(['light', 'dark', 'auto'] as Theme[]).map((t) => <button key={t} type="button" className={theme === t ? 'on' : ''} onClick={() => { setTheme(t); applyTheme(t); }}>{t === 'auto' ? 'System' : t[0]!.toUpperCase() + t.slice(1)}</button>)}
+            </div>
+            <div className="palettes" role="group" aria-label="Palette">
+              {PALETTES.map((p) => <button key={p.id} type="button" className={palette === p.id ? 'on' : ''} title={p.label} onClick={() => { setPalette(p.id); applyPalette(p.id); }}><span className="sw">{p.swatch.map((c, i) => <i key={i} style={{ background: c }} />)}</span><span>{p.label}</span></button>)}
             </div>
           </div>
           <div className="who">

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { commissionFor, paybackOf, referralFeeFor } from '../src/commission.js';
+import { commissionFor, paybackOf, paymentFor, referralFeeFor } from '../src/commission.js';
 
 describe('paybackOf', () => {
   it('uses funded × factor for factor-rate products', () => {
@@ -83,5 +83,18 @@ describe('commissionFor', () => {
     expect(r.gross).toBe(0);
     expect(r.net).toBe(0);
     expect(r.houseNet).toBe(0);
+  });
+});
+
+describe('paymentFor', () => {
+  it('spreads payback over the payments the term holds at each frequency', () => {
+    expect(paymentFor({ payback: 130_000, termDays: 100, frequency: 'Daily' })).toBe(1_300);
+    expect(paymentFor({ payback: 130_000, termDays: 100, frequency: 'Weekly' })).toBe(6_500);
+    expect(paymentFor({ payback: 130_000, termDays: 100, frequency: 'Bi-Weekly' })).toBe(13_000);
+    expect(paymentFor({ payback: 130_000, termDays: 126, frequency: 'Monthly' })).toBe(21_666.67);
+  });
+  it('is null without payback or term', () => {
+    expect(paymentFor({ payback: null, termDays: 100, frequency: 'Daily' })).toBeNull();
+    expect(paymentFor({ payback: 1000, termDays: 0, frequency: 'Daily' })).toBeNull();
   });
 });

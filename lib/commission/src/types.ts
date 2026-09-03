@@ -98,6 +98,13 @@ export interface DealDraw {
   /** Dollars received from the lender (non-scheduled draws). */
   collected: number | null;
   schedule: WeeklySchedule | null;
+  /** Optional funding terms on the draw itself (a draw may carry its own term and factor). */
+  termDays?: number | null;
+  factor?: number | null;
+  /** amount × factor when a factor is given. */
+  payback?: number | null;
+  /** The merchant's payment per `frequency` period over the term. */
+  payment?: number | null;
 }
 
 export interface Deal {

@@ -168,6 +168,11 @@ export const commissionDealDraws = pgTable(
     /** Dollars collected (non-scheduled). Status is derived, never stored. */
     collected: money('collected'),
     schedule: jsonb('schedule').$type<WeeklySchedule>(),
+    /** Optional funding terms on the draw itself; payback and payment are computed at write time. */
+    termDays: integer('term_days'),
+    factor: numeric('factor', { precision: 8, scale: 4, mode: 'number' }),
+    payback: money('payback'),
+    payment: money('payment'),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex('commission_deal_draws_deal_n_idx').on(t.dealId, t.n), uniqueIndex('commission_deal_draws_deal_ref_idx').on(t.dealId, t.ref)],

@@ -79,7 +79,7 @@ export interface AdminDealRow {
   commissionStatus: string; dealStatus: string; atRisk: boolean; repPaid: string | null; lenderPaid: string | null; crmUrl: string;
   creditLine: number | null; drawSubsequentPct: number | null; hasClawback: boolean;
 }
-export interface SegmentView { sk: string; label: string; n: number; date: string; amount: number; commRate: number; gross: number; referralFee: number; net: number; collected: number; outstanding: number; status: string; lenderPaidLabel: string; schedule: { weeks: number; received: number; startDate: string | null; perWeek: number } | null }
+export interface SegmentView { sk: string; label: string; n: number; date: string; amount: number; commRate: number; gross: number; referralFee: number; net: number; collected: number; outstanding: number; status: string; lenderPaidLabel: string; schedule: { weeks: number; received: number; startDate: string | null; perWeek: number } | null; termDays: number | null; factor: number | null; payback: number | null; payment: number | null }
 export interface AdminDealDetail extends AdminDealRow {
   segments: SegmentView[];
   payments: Array<{ role: string; segmentKey: string | null; repId: string; repName: string; amount: number; paidAt: string; runId: string | null }>;

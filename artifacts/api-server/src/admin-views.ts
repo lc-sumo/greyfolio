@@ -11,6 +11,7 @@ import {
   houseNet,
   outstandingGross,
   outstandingOf,
+  paymentFor,
   segmentStatus,
   segments,
   sum,
@@ -147,12 +148,22 @@ export interface SegmentView {
   status: string;
   lenderPaidLabel: string;
   schedule: { weeks: number; received: number; startDate: string | null; perWeek: number } | null;
+  /** Funding terms: the deal's for the initial segment, the draw's own for draws. */
+  termDays: number | null;
+  factor: number | null;
+  payback: number | null;
+  payment: number | null;
 }
 
 export interface AdminDealDetail extends AdminDealRow {
   segments: SegmentView[];
   payments: Array<{ role: string; segmentKey: string | null; repId: string; repName: string; amount: number; paidAt: string; runId: string | null }>;
   clawbacks: Array<Clawback & { slices: Array<{ repId: string; name: string; share: number; recovered: number; remaining: number }> }>;
+}
+
+function termsOfDraw(deal: Deal, sk: string): { termDays: number | null; factor: number | null; payback: number | null; payment: number | null } {
+  const x = deal.draws.find((d) => d.ref === sk);
+  return { termDays: x?.termDays ?? null, factor: x?.factor ?? null, payback: x?.payback ?? null, payment: x?.payment ?? null };
 }
 
 export function adminDealDetail(deal: Deal, ctx: LedgerContext, reps: Rep[], settings: Settings, today: string): AdminDealDetail {
@@ -175,6 +186,9 @@ export function adminDealDetail(deal: Deal, ctx: LedgerContext, reps: Rep[], set
       status: segmentStatus(s),
       lenderPaidLabel: collectionLabel(s),
       schedule: s.schedule ? { weeks: s.schedule.weeks, received: s.schedule.received, startDate: s.schedule.startDate, perWeek: sum([s.gross / s.schedule.weeks]) } : null,
+      ...(s.sk === 'base'
+        ? { termDays: deal.termDays, factor: deal.factor, payback: deal.payback, payment: paymentFor({ payback: deal.payback, termDays: deal.termDays, frequency: deal.frequency }) }
+        : termsOfDraw(deal, s.sk)),
     })),
     payments: ctx.lines
       .filter((l) => l.dealId === deal.id)

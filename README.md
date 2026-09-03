@@ -31,6 +31,8 @@ docs/             Phase notes and review checklists.
 | 8 | Google Sheets | Not started |
 | 9 | QuickBooks | Not started |
 
+Review asks and where they land: [docs/BACKLOG.md](docs/BACKLOG.md).
+
 ## Getting started
 
 ### Zero-setup preview

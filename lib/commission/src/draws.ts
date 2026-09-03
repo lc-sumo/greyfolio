@@ -1,4 +1,4 @@
-import { commissionFor } from './commission.js';
+import { commissionFor, paybackOf, paymentFor } from './commission.js';
 import type { Deal, DealDraw, ReferralPartner, SegmentKey, WeeklySchedule } from './types.js';
 
 export interface NewDrawInput {
@@ -11,6 +11,11 @@ export interface NewDrawInput {
   referralPaidThisMonth?: number;
   /** A weekly schedule when the lender pays in increments (see README open question #2). */
   schedule?: WeeklySchedule | null;
+  /** Optional funding terms for this draw — payback and the merchant's payment are computed from them. */
+  termDays?: number | null;
+  factor?: number | null;
+  /** Remittance frequency for the payment calculation; defaults to the deal's. */
+  frequency?: string | null;
 }
 
 /**
@@ -31,6 +36,9 @@ export function newDraw(deal: Deal, input: NewDrawInput): DealDraw {
     referralCap: input.partner ? input.partner.monthlyCap : null,
     referralPaidThisMonth: input.referralPaidThisMonth,
   });
+  const termDays = input.termDays && input.termDays > 0 ? Math.round(input.termDays) : null;
+  const factor = input.factor && input.factor > 0 ? input.factor : null;
+  const payback = factor ? paybackOf({ amount: input.amount, factor }) : null;
   return {
     n,
     ref: `D${n}` as SegmentKey,
@@ -42,5 +50,9 @@ export function newDraw(deal: Deal, input: NewDrawInput): DealDraw {
     net: calc.net,
     collected: input.schedule ? null : 0,
     schedule: input.schedule ?? null,
+    termDays,
+    factor,
+    payback,
+    payment: paymentFor({ payback, termDays, frequency: input.frequency ?? deal.frequency }),
   };
 }

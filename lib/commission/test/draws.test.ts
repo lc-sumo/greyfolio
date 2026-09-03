@@ -34,6 +34,18 @@ describe('newDraw', () => {
     expect(d.schedule?.weeks).toBe(12);
   });
 
+  it('carries optional term and factor, and computes payback and the merchant payment', () => {
+    const d = newDraw(loc, { amount: 25_000, date: '2026-09-01', termDays: 100, factor: 1.3 });
+    expect(d).toMatchObject({ termDays: 100, factor: 1.3, payback: 32_500, payment: 325 }); // Daily: 100 payments
+    const weekly = newDraw({ ...loc, frequency: 'Weekly' }, { amount: 25_000, date: '2026-09-01', termDays: 100, factor: 1.3 });
+    expect(weekly.payment).toBe(1_625); // 20 weekly payments
+    expect(newDraw(loc, { amount: 25_000, date: '2026-09-01', termDays: 100, factor: 1.3, frequency: 'Monthly' }).payment).toBe(6_825); // 100/21 ≈ 4.76 payments
+  });
+  it('leaves terms null when not given — a payment is never guessed', () => {
+    const d = newDraw(loc, { amount: 25_000, date: '2026-09-01', termDays: 100 });
+    expect(d).toMatchObject({ termDays: 100, factor: null, payback: null, payment: null });
+    expect(newDraw(loc, { amount: 25_000, date: '2026-09-01' })).toMatchObject({ termDays: null, factor: null, payback: null, payment: null });
+  });
   it('rejects a missing amount or rate', () => {
     expect(() => newDraw(loc, { amount: 0, date: '2026-09-01' })).toThrow(/draw amount/);
     expect(() => newDraw(makeDeal({ id: 'F1' }), { amount: 100, date: '2026-09-01' })).toThrow(/subsequent draw rate/);

@@ -193,3 +193,11 @@ select.mini { height: 28px; border: 1px solid var(--border-strong); border-radiu
 .payfoot { margin-top: 14px; background: var(--navy); color: var(--navy-text); border-radius: 12px; padding: 14px 18px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 14px; align-items: center; }
 .payfoot .label { color: var(--navy-text-3); display: block; } .payfoot b { display: block; font-family: var(--mono); font-size: 17px; color: #fff; margin-top: 4px; letter-spacing: -.02em; }
 @media (max-width: 900px) { .payfoot { grid-template-columns: 1fr 1fr; } }
+
+/* Add draw */
+.add-draw { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-light); display: grid; gap: 12px; }
+.draw-math { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 12px; align-items: end; }
+.draw-math > div { background: var(--sunken); border-radius: 9px; padding: 10px 12px; display: grid; gap: 2px; }
+.draw-math b { font-size: 15px; letter-spacing: -.02em; }
+.draw-math .subtle { font-size: 10.5px; }
+@media (max-width: 700px) { .draw-math { grid-template-columns: 1fr 1fr; } }

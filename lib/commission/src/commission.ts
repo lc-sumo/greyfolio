@@ -25,6 +25,34 @@ export function paybackOf(input: PaybackInput): number {
   return cents(amount);
 }
 
+/** Payments per business-day term for each remittance frequency (Mon–Fri only). */
+export const PAYMENTS_PER_TERM: Record<string, (termDays: number) => number> = {
+  Daily: (t) => t,
+  Weekly: (t) => t / 5,
+  'Bi-Weekly': (t) => t / 10,
+  Monthly: (t) => t / 21,
+};
+
+export interface PaymentInput {
+  payback: number | null | undefined;
+  termDays: number | null | undefined;
+  frequency: string | null | undefined;
+}
+
+/**
+ * The merchant's remittance per period: payback spread evenly over the
+ * number of payments the term holds at that frequency. Null when any input
+ * is missing — a payment is never guessed.
+ */
+export function paymentFor(input: PaymentInput): number | null {
+  const { payback, termDays } = input;
+  if (!payback || !termDays || termDays <= 0) return null;
+  const per = PAYMENTS_PER_TERM[input.frequency ?? 'Daily'] ?? PAYMENTS_PER_TERM.Daily!;
+  const count = per(termDays);
+  if (!(count > 0)) return null;
+  return cents(payback / count);
+}
+
 export interface ReferralFeeInput {
   gross: number;
   /** Fraction. */

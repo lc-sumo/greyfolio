@@ -36,6 +36,10 @@ export function toDraw(d: DealDrawRow): DealDraw {
     net: d.net,
     collected: d.collected,
     schedule: d.schedule ?? null,
+    termDays: d.termDays,
+    factor: d.factor,
+    payback: d.payback,
+    payment: d.payment,
   };
 }
 

@@ -93,6 +93,10 @@ describe('deal edits', () => {
     expect(res.body.outstanding).toBe(11_500);
     expect(res.body.lenderPaidLabel).toBe('0/2 segments');
     expect((await admin.post('/api/admin/deals/F1/draws').send({ amount: 100 })).body.error).toMatch(/subsequent draw rate/);
+    // Optional term + factor on a draw → payback and the merchant's payment (deal frequency: Daily).
+    const withTerms = await admin.post('/api/admin/deals/F4/draws').send({ amount: 10_000, termDays: 80, factor: 1.2 });
+    expect(withTerms.body.segments[2]).toMatchObject({ sk: 'D2', termDays: 80, factor: 1.2, payback: 12_000, payment: 150 });
+    expect(withTerms.body.segments[0]).toMatchObject({ sk: 'base', termDays: 120, factor: null, payment: null });
   });
 });
 

@@ -100,7 +100,7 @@ export async function setDealStatus(repo: Repo, id: string, dealStatus: string, 
   return { ...deal, dealStatus };
 }
 
-export async function addDraw(repo: Repo, id: string, input: { amount: number; date?: string }, actorRepId: string): Promise<Deal> {
+export async function addDraw(repo: Repo, id: string, input: { amount: number; date?: string; termDays?: number | null; factor?: number | null }, actorRepId: string): Promise<Deal> {
   const deal = await requireDeal(repo, id);
   const settings = await repo.getSettings();
   const date = input.date ?? today();
@@ -109,7 +109,14 @@ export async function addDraw(repo: Repo, id: string, input: { amount: number; d
   const partner = settings.partners.find((p) => p.name === deal.referralPartner) ?? null;
   let draw;
   try {
-    draw = newDraw(deal, { amount: Number(input.amount), date, partner, schedule: lender?.terms === 'weekly' ? { mode: 'weekly', weeks: lender.weeks, received: 0, startDate: date } : null });
+    draw = newDraw(deal, {
+      amount: Number(input.amount),
+      date,
+      partner,
+      termDays: input.termDays ? Number(input.termDays) : null,
+      factor: input.factor ? Number(input.factor) : null,
+      schedule: lender?.terms === 'weekly' ? { mode: 'weekly', weeks: lender.weeks, received: 0, startDate: date } : null,
+    });
   } catch (e) {
     bad(e);
   }

@@ -1,6 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { api, post, type AdminDealDetail, type RepOption, type Settings } from '../lib/api';
+import { num } from '../lib/math';
+import { paybackOf, paymentFor } from '@greystone/commission';
 import { day, fullDay, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 import { Drawer, Loading, Pill, toneFor } from './ui';
@@ -11,6 +13,8 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
   const q = useQuery({ queryKey: ['admin-deal', id], queryFn: () => api<AdminDealDetail>(`/api/admin/deals/${encodeURIComponent(id)}`) });
   const d = q.data;
   const [drawAmount, setDrawAmount] = useState('');
+  const [drawTerm, setDrawTerm] = useState('');
+  const [drawFactor, setDrawFactor] = useState('');
   const [splits, setSplits] = useState<Record<string, string>>({});
   const [err, setErr] = useState('');
   useEffect(() => {
@@ -59,6 +63,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
               {d.apr !== null && <><dt>APR</dt><dd>{d.apr}%</dd></>}
               {d.termDays !== null && <><dt>Term</dt><dd>{d.termDays} business days · {d.frequency}</dd></>}
               {d.payback !== null && <><dt>Payback</dt><dd>{money(d.payback)}</dd></>}
+              {d.segments[0]?.payment != null && <><dt>Payment</dt><dd>{money(d.segments[0].payment)} <span className="subtle">/ {d.frequency.toLowerCase()}</span></dd></>}
               <dt>Commission</dt><dd>{pct(d.commRate)}{d.psfPct ? ` + PSF ${pct(d.psfPct)}` : ''}{d.originationFee ? ` + ${money(d.originationFee)} orig.` : ''}</dd>
               <dt>Referral</dt><dd>{d.referralPartner ? `${d.referralPartner} ${pct(d.referralRate)} · ${money(d.referralFee)}` : '—'}</dd>
               <dt>Commission status</dt><dd style={{ fontFamily: 'var(--sans)' }}>
@@ -99,7 +104,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
               <div className="pl">
                 {d.segments.map((s) => (
                   <div className="row draw" key={s.sk}>
-                    <span><b>{s.label}</b> <span className="subtle num">{day(s.date)}</span></span>
+                    <span><b>{s.label}</b> <span className="subtle num">{day(s.date)}</span>{s.payment != null && <div className="subtle" style={{ fontSize: 11 }}>{s.termDays} days · {s.factor?.toFixed(2)} · {money(s.payback ?? 0)} payback · <b className="num">{money(s.payment)}</b> / {d.frequency.toLowerCase()}</div>}</span>
                     <span className="num">{money(s.amount)}</span>
                     <span className="num subtle">{pct(s.commRate)}</span>
                     <span className="num">{money(s.net)}</span>
@@ -108,12 +113,28 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
                 ))}
                 <div className="row draw total"><span>Total</span><span className="num">{money(d.funded)}</span><span /><span className="num">{money(d.net)}</span><span className="subtle">{money(d.outstanding)} outstanding</span></div>
               </div>
-              {d.drawSubsequentPct && (
-                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                  <input className="search" style={{ minWidth: 0, flex: 1 }} placeholder="Draw amount" inputMode="decimal" value={drawAmount} onChange={(e) => setDrawAmount(e.target.value)} />
-                  <button className="btn primary" onClick={() => run(`Draw added to ${d.id}`, async () => { await post(`/api/admin/deals/${id}/draws`, { amount: Number(drawAmount.replace(/[^0-9.]/g, '')) }); setDrawAmount(''); })}>Add draw at {pct(d.drawSubsequentPct)}</button>
-                </div>
-              )}
+              {d.drawSubsequentPct && (() => {
+                const amt = num(drawAmount);
+                const term = num(drawTerm) || null;
+                const factor = num(drawFactor) || null;
+                const payback = amt && factor ? paybackOf({ amount: amt, factor }) : null;
+                const payment = paymentFor({ payback, termDays: term, frequency: d.frequency });
+                return (
+                  <div className="add-draw">
+                    <div className="form" style={{ gridTemplateColumns: '1.4fr 1fr 1fr' }}>
+                      <label className="field"><span className="label">Draw amount</span><input inputMode="decimal" placeholder="25000" value={drawAmount} onChange={(e) => setDrawAmount(e.target.value)} /></label>
+                      <label className="field"><span className="label">Term (bus. days) · optional</span><input inputMode="numeric" placeholder={d.termDays ? String(d.termDays) : '—'} value={drawTerm} onChange={(e) => setDrawTerm(e.target.value)} /></label>
+                      <label className="field"><span className="label">Factor rate · optional</span><input inputMode="decimal" placeholder={d.factor ? d.factor.toFixed(2) : '—'} value={drawFactor} onChange={(e) => setDrawFactor(e.target.value)} /></label>
+                    </div>
+                    <div className="draw-math">
+                      <div><span className="label">Commission</span><b className="num">{money(amt * d.drawSubsequentPct)}</b><span className="subtle">at {pct(d.drawSubsequentPct)}</span></div>
+                      <div><span className="label">Payback</span><b className="num">{payback === null ? '—' : money(payback)}</b><span className="subtle">{factor ? `${money(amt)} × ${factor}` : 'needs a factor rate'}</span></div>
+                      <div><span className="label">Payment</span><b className="num">{payment === null ? '—' : money(payment)}</b><span className="subtle">{payment === null ? 'needs term + factor' : `per ${d.frequency.toLowerCase()} · ${term} bus. days`}</span></div>
+                      <button className="btn primary" disabled={!amt} onClick={() => run(`Draw added to ${d.id}`, async () => { await post(`/api/admin/deals/${id}/draws`, { amount: amt, termDays: term, factor }); setDrawAmount(''); setDrawTerm(''); setDrawFactor(''); })}>Add draw at {pct(d.drawSubsequentPct)}</button>
+                    </div>
+                  </div>
+                );
+              })()}
             </section>
           )}
 

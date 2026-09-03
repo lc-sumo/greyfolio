@@ -80,8 +80,8 @@ export function meRouter(repo: Repo): Router {
 
   /** The rep's own renewals, so they know when to follow up. Merchant contact included; other reps' names are not. */
   r.get('/renewals', async (req, res) => {
-    const [ctx, thresholds] = await Promise.all([repo.loadContext(), repo.getSetting<{ renewalMark: number }>('thresholds')]);
-    res.json({ renewals: repRenewals(ctx, scopeOf(req).effectiveRepId, { renewalMark: thresholds?.renewalMark ?? 0.4 }, new Date().toISOString().slice(0, 10)) });
+    const [ctx, thresholds] = await Promise.all([repo.loadContext(), repo.getSetting<{ renewalMark: number; additionalCapitalAfterDays: number }>('thresholds')]);
+    res.json({ renewals: repRenewals(ctx, scopeOf(req).effectiveRepId, { renewalMark: thresholds?.renewalMark ?? 0.4, additionalCapitalAfterDays: thresholds?.additionalCapitalAfterDays ?? 30 }, new Date().toISOString().slice(0, 10)) });
   });
 
   r.get('/leaderboard', async (req, res) => {

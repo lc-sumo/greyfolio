@@ -337,6 +337,10 @@ export interface RepRenewalView {
   daysToMark: number | null;
   bucket: RenewalBucket;
   bucketLabel: string;
+  soon: boolean;
+  prospectingDate: string;
+  daysToProspecting: number;
+  effectiveStatus: string;
   roles: Role[];
   /** "You" when this rep is the closer; otherwise the role that calls it, never a name. */
   whoCalls: 'You' | 'Closer' | 'Opener';
@@ -373,17 +377,21 @@ export function repRenewals(ctx: LedgerContext, repId: string, settings: Renewal
         daysToMark: r.daysToMark,
         bucket: r.bucket,
         bucketLabel: RENEWAL_BUCKET_LABEL[r.bucket],
+        soon: r.soon,
+        prospectingDate: r.prospectingDate,
+        daysToProspecting: r.daysToProspecting,
+        effectiveStatus: r.effectiveStatus,
         roles,
         whoCalls,
         estRenewalShare: sum([r.estRenewalGross * rate]),
-        dealStatus: d.dealStatus,
+        dealStatus: r.effectiveStatus,
       };
     })
     .sort((a, b) => order(a.bucket) - order(b.bucket) || (a.daysToMark ?? 9e9) - (b.daysToMark ?? 9e9));
 }
 
 function order(b: RenewalBucket): number {
-  return { due: 0, soon: 1, building: 2, risk: 3, refinanced: 4 }[b];
+  return { due: 0, prospecting: 1, building: 2, risk: 3, refinanced: 4 }[b];
 }
 
 /* ---------- pay history (rep-scoped) ---------- */

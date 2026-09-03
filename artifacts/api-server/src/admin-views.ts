@@ -12,6 +12,7 @@ import {
   outstandingGross,
   outstandingOf,
   paymentFor,
+  effectiveDealStatus,
   renewalOf,
   RENEWAL_BUCKET_LABEL,
   segmentStatus,
@@ -72,7 +73,9 @@ export interface AdminDealRow {
   outstanding: number;
   lenderPaidLabel: string;
   commissionStatus: string;
+  /** Effective: manual statuses as stored, otherwise Performing / Prospecting / Refi Ready from the dates. */
   dealStatus: string;
+  storedDealStatus: string;
   atRisk: boolean;
   repPaid: string | null;
   lenderPaid: string | null;
@@ -125,7 +128,8 @@ export function adminDealRow(deal: Deal, ctx: LedgerContext, reps: Rep[], settin
     outstanding: outstandingGross(deal),
     lenderPaidLabel: segs.length === 1 ? collectionLabel(segs[0]!) : `${full}/${segs.length} segments`,
     commissionStatus: dealCommissionStatus(deal),
-    dealStatus: deal.dealStatus,
+    dealStatus: effectiveDealStatus(deal, settings.thresholds, today),
+    storedDealStatus: deal.dealStatus,
     atRisk: atRisk(deal, settings.thresholds.clawbackWindowDays, today),
     repPaid: deal.repPaid,
     lenderPaid: deal.lenderPaid,
@@ -205,7 +209,7 @@ export function adminDealDetail(deal: Deal, ctx: LedgerContext, reps: Rep[], set
 
 /* ---------- renewals (admin) ---------- */
 
-const BUCKET_ORDER: Record<RenewalBucket, number> = { due: 0, soon: 1, building: 2, risk: 3, refinanced: 4 };
+const BUCKET_ORDER: Record<RenewalBucket, number> = { due: 0, prospecting: 1, building: 2, risk: 3, refinanced: 4 };
 
 export interface AdminRenewalRow {
   id: string;
@@ -227,6 +231,10 @@ export interface AdminRenewalRow {
   daysToMark: number | null;
   bucket: RenewalBucket;
   bucketLabel: string;
+  soon: boolean;
+  prospectingDate: string;
+  daysToProspecting: number;
+  effectiveStatus: string;
   /** Closer first name, else opener first name. */
   whoCalls: string;
   estRenewalGross: number;
@@ -238,7 +246,7 @@ export function adminRenewals(ctx: LedgerContext, reps: Rep[], settings: Setting
   const first = (id: string | null) => (id ? (reps.find((r) => r.id === id)?.name ?? id).split(' ')[0]! : '—');
   return ctx.deals
     .map((d) => {
-      const r = renewalOf(d, { renewalMark: settings.thresholds.renewalMark }, today);
+      const r = renewalOf(d, settings.thresholds, today);
       return {
         id: d.id,
         business: d.business,
@@ -259,9 +267,13 @@ export function adminRenewals(ctx: LedgerContext, reps: Rep[], settings: Setting
         daysToMark: r.daysToMark,
         bucket: r.bucket,
         bucketLabel: RENEWAL_BUCKET_LABEL[r.bucket],
+        soon: r.soon,
+        prospectingDate: r.prospectingDate,
+        daysToProspecting: r.daysToProspecting,
+        effectiveStatus: r.effectiveStatus,
         whoCalls: d.closerId ? first(d.closerId) : first(d.openerId),
         estRenewalGross: r.estRenewalGross,
-        dealStatus: d.dealStatus,
+        dealStatus: r.effectiveStatus,
         crmUrl: crmUrl(settings.crm.urlTemplate, d),
       };
     })

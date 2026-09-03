@@ -4,7 +4,7 @@ import { AdminDealDrawer } from '../components/AdminDealDrawer';
 import { NewDealDrawer } from '../components/NewDealDrawer';
 import { Shell } from '../components/Shell';
 import { Card, Empty, Loading, toneFor } from '../components/ui';
-import { api, post, qs, type MasterBoard, type Settings } from '../lib/api';
+import { DEAL_STATUS_OPTIONS, api, post, qs, type MasterBoard, type Settings } from '../lib/api';
 import { compact, day, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 
@@ -45,7 +45,7 @@ export function MasterDeals() {
           </select>
           <select className="filter" value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="">All statuses</option>
-            {['Waiting for payment', 'Partially Paid', 'YES - Paid In Full', ...(settings.data?.lists.dealStatuses ?? [])].map((s) => <option key={s}>{s}</option>)}
+            {['Waiting for payment', 'Partially Paid', 'YES - Paid In Full', 'Performing', 'Prospecting', 'Refi Ready', 'Refinanced', 'Default', 'Slow Pay', 'Paid In Full'].map((s) => <option key={s}>{s}</option>)}
           </select>
           <span className="count">{rows.length} of {board.data?.count ?? 0} deals</span>
           <button className="btn" onClick={() => notify('Push to Sheets arrives in Phase 8 — the portal is master, the sheet mirrors it')}>Push to Sheets</button>
@@ -80,7 +80,7 @@ export function MasterDeals() {
                   <div className="td r num pos">{money(d.houseNet)}</div>
                   <div className="td"><button className={`pill ${toneFor(d.lenderPaidLabel === 'Collected' ? 'Paid' : d.commissionStatus)}`} style={{ cursor: 'pointer' }} onClick={() => void collect(d.id, { segmentKey: 'base', toggle: true }, `${d.id} — collection updated`)}>{d.lenderPaidLabel}</button></div>
                   <div className="td"><select className="mini" value={d.commissionStatus} onChange={(e) => void collect(d.id, { segmentKey: 'base', status: e.target.value }, `${d.id} — commission ${e.target.value.toLowerCase()}`)}>{['Waiting for payment', 'Partially Paid', 'YES - Paid In Full'].map((s) => <option key={s}>{s}</option>)}</select></div>
-                  <div className="td"><select className="mini" value={d.dealStatus} onChange={async (e) => { try { await post(`/api/admin/deals/${d.id}/status`, { dealStatus: e.target.value }, 'PATCH'); await board.refetch(); notify(`${d.id} — ${e.target.value}`); } catch (x) { notify(x instanceof Error ? x.message : 'Could not update'); } }}>{[...(settings.data?.lists.dealStatuses ?? []), 'Slow Pay'].map((s) => <option key={s}>{s}</option>)}</select></div>
+                  <div className="td"><select className="mini" value={d.storedDealStatus === 'Performing' || d.storedDealStatus === 'Prospecting' || d.storedDealStatus === 'Refi Ready' ? 'Performing' : d.storedDealStatus} title={`Showing ${d.dealStatus}`} onChange={async (e) => { try { await post(`/api/admin/deals/${d.id}/status`, { dealStatus: e.target.value }, 'PATCH'); await board.refetch(); notify(`${d.id} — ${e.target.value}`); } catch (x) { notify(x instanceof Error ? x.message : 'Could not update'); } }}>{DEAL_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.value === 'Performing' ? `Auto · ${d.dealStatus}` : o.label}</option>)}</select></div>
                 </div>
               ))}
               <div className="tr total">
@@ -94,7 +94,7 @@ export function MasterDeals() {
             </div>
           </div>
         )}
-        <div className="subtle" style={{ marginTop: 10, fontSize: 11.5 }}>Rows tinted red are inside the {settings.data?.thresholds.clawbackWindowDays ?? 30}-day clawback window or flagged slow-pay. Click the lender-paid pill to record a week (weekly lenders) or toggle collected (upfront). The status select writes collection — it never sets a status on its own.</div>
+        <div className="subtle" style={{ marginTop: 10, fontSize: 11.5 }}>Rows tinted red are inside the {settings.data?.thresholds.clawbackWindowDays ?? 30}-day clawback window or flagged slow-pay. Deal status follows the dates (Performing → Prospecting at {settings.data?.thresholds.additionalCapitalAfterDays ?? 30} days → Refi Ready at {Math.round((settings.data?.thresholds.renewalMark ?? 0.4) * 100)}% paid in) unless set by hand. Click the lender-paid pill to record a week (weekly lenders) or toggle collected (upfront). The status select writes collection — it never sets a status on its own.</div>
       </Card>
       {open && settings.data && board.data && <AdminDealDrawer id={open} settings={settings.data} editOptions={board.data.repOptions.edit} onClose={() => setOpen(null)} />}
       {creating && settings.data && board.data && <NewDealDrawer settings={settings.data} board={board.data} onClose={() => setCreating(false)} onSaved={(d) => { setCreating(false); setOpen(d.id); }} />}

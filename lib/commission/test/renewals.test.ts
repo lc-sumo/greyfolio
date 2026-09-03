@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addBusinessDays, addMonths, businessDaysBetween, renewalOf } from '../src/renewals.js';
+import { addBusinessDays, addMonths, businessDaysBetween, effectiveDealStatus, renewalOf } from '../src/renewals.js';
 import { makeDeal } from './fixtures.js';
 
 describe('business-day calendar', () => {
@@ -29,16 +29,27 @@ describe('renewalOf', () => {
     expect(r.markDate).toBe(addBusinessDays('2026-06-01', 40));
     expect(r.maturityDate).toBe(addBusinessDays('2026-06-01', 100));
     expect(r.pctPaidIn).toBe(0.22); // 22 business days of 100
-    expect(r.bucket).toBe('building'); // mark lands Jul 27, 26 days out — not yet inside 21
+    expect(r.bucket).toBe('prospecting'); // 30 days funded: eligible for more capital, mark still 26 days out
     expect(r.daysToMark).toBe(26);
+    expect(r.soon).toBe(false);
+    expect(r.prospectingDate).toBe('2026-07-01');
+    expect(r.effectiveStatus).toBe('Prospecting');
     expect(r.estRenewalGross).toBe(10_000);
   });
   it('is due once the mark is reached, building far before it, soon inside 21 days', () => {
     const d = makeDeal({ id: 'F1', date: '2026-06-01', termDays: 100 });
-    expect(renewalOf(d, settings, '2026-08-01').bucket).toBe('due');
-    expect(renewalOf(d, settings, '2026-06-02').bucket).toBe('building');
-    expect(renewalOf(d, settings, '2026-07-10').bucket).toBe('soon');
-    expect(renewalOf(d, settings, '2026-07-10').daysToMark).toBe(17);
+    expect(renewalOf(d, settings, '2026-08-01')).toMatchObject({ bucket: 'due', effectiveStatus: 'Refi Ready', soon: false });
+    expect(renewalOf(d, settings, '2026-06-02')).toMatchObject({ bucket: 'building', effectiveStatus: 'Performing', daysToProspecting: 29, soon: false });
+    expect(renewalOf(d, settings, '2026-07-10')).toMatchObject({ bucket: 'prospecting', soon: true, daysToMark: 17 });
+  });
+  it('the Prospecting trigger fires additionalCapitalAfterDays after funding, calendar days', () => {
+    const d = makeDeal({ id: 'F1', date: '2026-06-01', termDays: 300 });
+    expect(renewalOf(d, settings, '2026-06-30')).toMatchObject({ bucket: 'building', effectiveStatus: 'Performing', daysToProspecting: 1 });
+    expect(renewalOf(d, settings, '2026-07-01')).toMatchObject({ bucket: 'prospecting', effectiveStatus: 'Prospecting', daysToProspecting: 0 });
+    expect(renewalOf(d, { renewalMark: 0.4, additionalCapitalAfterDays: 45 }, '2026-07-01').bucket).toBe('building');
+    // a stored Performing / Prospecting / Refi Ready never blocks the derivation
+    expect(effectiveDealStatus({ ...d, dealStatus: 'Refi Ready' }, settings, '2026-06-02')).toBe('Performing');
+    expect(effectiveDealStatus({ ...d, dealStatus: 'Performing' }, settings, '2026-07-15')).toBe('Prospecting');
   });
   it('status overrides the math', () => {
     const d = makeDeal({ id: 'F1', date: '2026-01-01', termDays: 100 });
@@ -46,6 +57,7 @@ describe('renewalOf', () => {
     expect(renewalOf({ ...d, dealStatus: 'Paid In Full' }, settings, '2026-09-01').bucket).toBe('refinanced');
     expect(renewalOf({ ...d, dealStatus: 'Slow Pay' }, settings, '2026-09-01').bucket).toBe('risk');
     expect(renewalOf({ ...d, dealStatus: 'Default' }, settings, '2026-09-01').bucket).toBe('risk');
+    expect(effectiveDealStatus({ ...d, dealStatus: 'Slow Pay' }, settings, '2026-09-01')).toBe('Slow Pay');
   });
   it('monthly deals count the term in months', () => {
     const d = { ...makeDeal({ id: 'F1', date: '2026-01-15', termDays: 10 }), frequency: 'Monthly' };
@@ -57,7 +69,8 @@ describe('renewalOf', () => {
   });
   it('a deal without a term never becomes due and has no dates', () => {
     const r = renewalOf({ ...makeDeal({ id: 'F1' }), termDays: null }, settings, '2026-09-01');
-    expect(r).toMatchObject({ markDate: null, maturityDate: null, daysToMark: null, pctPaidIn: 0, bucket: 'building' });
+    expect(r).toMatchObject({ markDate: null, maturityDate: null, daysToMark: null, pctPaidIn: 0 });
+    expect(r.bucket).toBe('prospecting'); // no term → never due, but still eligible for more capital after 30 days
   });
   it('paid-in caps at 100% after maturity', () => {
     expect(renewalOf(makeDeal({ id: 'F1', date: '2025-01-01', termDays: 50 }), settings, '2026-09-01').pctPaidIn).toBe(1);

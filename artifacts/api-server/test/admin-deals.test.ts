@@ -44,7 +44,7 @@ describe('POST /api/admin/deals', () => {
     const { admin, repo } = await harness();
     const res = await admin.post('/api/admin/deals').send(draft);
     expect(res.status).toBe(201);
-    expect(res.body).toMatchObject({ id: 'F4', business: 'Northstar Dental', merchantEmail: 'mduran@northstar.test', funded: 100_000, gross: 14_500, referralPartner: 'MBC', referralFee: 2_175, net: 12_325, commissionStatus: 'Waiting for payment', lenderPaidLabel: 'Not collected', atRisk: true, crmUrl: 'https://crm.test/o/F4' });
+    expect(res.body).toMatchObject({ id: 'F4', business: 'Northstar Dental', merchantEmail: 'mduran@northstar.test', funded: 100_000, gross: 14_500, referralPartner: 'MBC', referralFee: 2_175, net: 12_325, commissionStatus: 'Waiting for payment', lenderPaidLabel: 'Not collected', atRisk: true, crmUrl: 'https://crm.test/o/F4', dealStatus: 'Performing', storedDealStatus: 'Performing' });
     expect(res.body.roles.map((r: { name: string; amount: number }) => [r.name, r.amount])).toEqual([['Julian Ribak', 4_313.75], ['Zach Sanders', 4_930], ['Raymond Amato', 616.25]]);
     expect(res.body.houseNet).toBe(12_325 - 4_313.75 - 4_930 - 616.25);
     expect(repo.audit.at(-1)).toMatchObject({ action: 'deal.create', actorRepId: 'rep-leor' });
@@ -81,7 +81,8 @@ describe('deal edits', () => {
   });
   it('deal status is validated against settings', async () => {
     const { admin } = await harness();
-    expect((await admin.patch('/api/admin/deals/F1/status').send({ dealStatus: 'Refi Ready' })).body.dealStatus).toBe('Refi Ready');
+    expect((await admin.patch('/api/admin/deals/F1/status').send({ dealStatus: 'Refinanced' })).body.dealStatus).toBe('Refinanced');
+    expect((await admin.patch('/api/admin/deals/F1/status').send({ dealStatus: 'Refi Ready' })).status).toBe(400); // derived, never typed
     expect((await admin.patch('/api/admin/deals/F1/status').send({ dealStatus: 'Bogus' })).status).toBe(400);
   });
   it('adding a draw prices at the subsequent rate and raises outstanding immediately', async () => {
@@ -134,7 +135,9 @@ describe('admin renewals', () => {
     const res = await admin.get('/api/admin/renewals');
     expect(res.status).toBe(200);
     expect(res.body.renewals).toHaveLength(3);
-    expect(res.body.renewals.find((r: { id: string }) => r.id === 'F1')).toMatchObject({ whoCalls: 'Zach', bucket: 'due', estRenewalGross: 1_000, merchantContact: 'Daniel Reyes' });
+    expect(res.body.renewals.find((r: { id: string }) => r.id === 'F1')).toMatchObject({ whoCalls: 'Zach', bucket: 'due', effectiveStatus: 'Refi Ready', estRenewalGross: 1_000, merchantContact: 'Daniel Reyes' });
+    // F3 funded Aug 2 with a 120-day term: eligible for more capital after 30 days, nowhere near the mark
+    expect(res.body.renewals.find((r: { id: string }) => r.id === 'F3')).toMatchObject({ bucket: 'prospecting', effectiveStatus: 'Prospecting', prospectingDate: '2026-09-01' });
   });
 });
 

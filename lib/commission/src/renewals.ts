@@ -43,7 +43,17 @@ export function addMonths(iso: string, months: number): string {
 
 /* ---------- renewals ---------- */
 
-export type RenewalBucket = 'due' | 'soon' | 'building' | 'risk' | 'refinanced';
+/**
+ *  due         past the renewal mark — renewable now
+ *  prospecting eligible for additional capital (additionalCapitalAfterDays since funding) but not yet at the mark
+ *  building    funded recently; neither trigger has fired
+ *  risk        slow pay / default — blocked
+ *  refinanced  refinanced or paid in full
+ */
+export type RenewalBucket = 'due' | 'prospecting' | 'building' | 'risk' | 'refinanced';
+
+/** Statuses ops set by hand. Everything else is derived from dates, as the workbook's Deal Status column is. */
+export const MANUAL_DEAL_STATUSES = ['Refinanced', 'Default', 'Slow Pay', 'Paid In Full'] as const;
 
 export interface Renewal {
   dealId: string;
@@ -55,12 +65,22 @@ export interface Renewal {
   /** Calendar days until the mark; negative once passed. */
   daysToMark: number | null;
   bucket: RenewalBucket;
+  /** Inside `soonDays` of the mark (and not yet there). */
+  soon: boolean;
+  /** Date the merchant becomes eligible for more capital (funded + additionalCapitalAfterDays, calendar days). */
+  prospectingDate: string;
+  /** Calendar days until eligibility; negative once eligible. */
+  daysToProspecting: number;
+  /** The deal status the board shows: manual statuses as stored, otherwise Refi Ready / Prospecting / Performing from the dates. */
+  effectiveStatus: string;
   /** Gross commission if the merchant renews at the same size and rate. */
   estRenewalGross: number;
 }
 
 export interface RenewalSettings {
   renewalMark: number;
+  /** Days after funding at which the merchant is eligible for additional capital (workbook: 30). */
+  additionalCapitalAfterDays?: number;
   soonDays?: number;
 }
 
@@ -79,14 +99,38 @@ export function renewalOf(deal: Deal, settings: RenewalSettings, today: string):
   const elapsed = monthly ? monthsBetween(deal.date, today) : businessDaysBetween(deal.date, today);
   const pctPaidIn = term > 0 ? clamp(elapsed / term, 0, 1) : 0;
   const daysToMark = markDate ? Math.round((utc(markDate).getTime() - utc(today).getTime()) / DAY) : null;
+  const capitalDays = settings.additionalCapitalAfterDays ?? 30;
+  const prospectingDate = toIso(new Date(utc(deal.date).getTime() + capitalDays * DAY));
+  const daysToProspecting = Math.round((utc(prospectingDate).getTime() - utc(today).getTime()) / DAY);
 
+  const manual = (MANUAL_DEAL_STATUSES as readonly string[]).includes(deal.dealStatus);
+  const atMark = term > 0 && pctPaidIn >= settings.renewalMark;
+  const eligible = daysToProspecting <= 0;
   let bucket: RenewalBucket = 'building';
   if (deal.dealStatus === 'Refinanced' || deal.dealStatus === 'Paid In Full') bucket = 'refinanced';
   else if (deal.dealStatus === 'Default' || deal.dealStatus === 'Slow Pay') bucket = 'risk';
-  else if (term > 0 && pctPaidIn >= settings.renewalMark) bucket = 'due';
-  else if (daysToMark !== null && daysToMark <= soonDays) bucket = 'soon';
+  else if (atMark) bucket = 'due';
+  else if (eligible) bucket = 'prospecting';
+  const effectiveStatus = manual ? deal.dealStatus : atMark ? 'Refi Ready' : eligible ? 'Prospecting' : 'Performing';
 
-  return { dealId: deal.id, pctPaidIn: Math.round(pctPaidIn * 1000) / 1000, markDate, maturityDate, daysToMark, bucket, estRenewalGross: cents(totalFunded(deal) * deal.commRate) };
+  return {
+    dealId: deal.id,
+    pctPaidIn: Math.round(pctPaidIn * 1000) / 1000,
+    markDate,
+    maturityDate,
+    daysToMark,
+    bucket,
+    soon: !manual && !atMark && daysToMark !== null && daysToMark <= soonDays,
+    prospectingDate,
+    daysToProspecting,
+    effectiveStatus,
+    estRenewalGross: cents(totalFunded(deal) * deal.commRate),
+  };
+}
+
+/** The deal status the board shows — the workbook's formula: manual statuses stick, the rest follow the dates. */
+export function effectiveDealStatus(deal: Deal, settings: RenewalSettings, today: string): string {
+  return renewalOf(deal, settings, today).effectiveStatus;
 }
 
 function monthsBetween(from: string, to: string): number {
@@ -98,9 +142,9 @@ function monthsBetween(from: string, to: string): number {
 }
 
 export const RENEWAL_BUCKET_LABEL: Record<RenewalBucket, string> = {
-  due: 'Renewal ready',
-  soon: 'Inside 21 days',
-  building: 'Building',
+  due: 'Renewable now',
+  prospecting: 'Prospecting',
+  building: 'Upcoming',
   risk: 'Blocked',
   refinanced: 'Refinanced',
 };

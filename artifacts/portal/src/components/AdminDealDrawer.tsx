@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { api, post, type AdminDealDetail, type RepOption, type Settings } from '../lib/api';
+import { DEAL_STATUS_OPTIONS, api, post, type AdminDealDetail, type RepOption, type Settings } from '../lib/api';
 import { num } from '../lib/math';
 import { paybackOf, paymentFor } from '@greystone/commission';
 import { day, fullDay, money, pct } from '../lib/format';
@@ -72,8 +72,8 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
                 </select>
               </dd>
               <dt>Deal status</dt><dd style={{ fontFamily: 'var(--sans)' }}>
-                <select className="mini" value={d.dealStatus} onChange={(e) => run(`${d.id} — ${e.target.value}`, () => post(`/api/admin/deals/${id}/status`, { dealStatus: e.target.value }, 'PATCH'))}>
-                  {[...settings.lists.dealStatuses, 'Slow Pay'].map((s) => <option key={s}>{s}</option>)}
+                <select className="mini" value={['Performing', 'Prospecting', 'Refi Ready'].includes(d.storedDealStatus) ? 'Performing' : d.storedDealStatus} onChange={(e) => run(`${d.id} — ${e.target.value}`, () => post(`/api/admin/deals/${id}/status`, { dealStatus: e.target.value }, 'PATCH'))}>
+                  {DEAL_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.value === 'Performing' ? `Auto · ${d.dealStatus}` : o.label}</option>)}
                 </select>
               </dd>
               <dt>Lender paid</dt><dd>{d.lenderPaid ? fullDay(d.lenderPaid) : '—'}</dd>

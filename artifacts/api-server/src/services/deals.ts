@@ -9,6 +9,7 @@ import {
   segmentOf,
   withCollection,
   withStatus,
+  MANUAL_DEAL_STATUSES,
   type CommissionStatus,
   type Deal,
   type NewDealDraft,
@@ -92,8 +93,7 @@ export async function updateSplits(repo: Repo, id: string, input: SplitsInput, a
 
 export async function setDealStatus(repo: Repo, id: string, dealStatus: string, actorRepId: string): Promise<Deal> {
   const deal = await requireDeal(repo, id);
-  const { lists } = await repo.getSettings();
-  const allowed = [...lists.dealStatuses, 'Slow Pay'];
+  const allowed = ['Performing', ...MANUAL_DEAL_STATUSES];
   if (!allowed.includes(dealStatus)) throw new HttpError(400, `Deal status must be one of: ${allowed.join(', ')}`);
   await repo.updateDeal(id, { dealStatus });
   await repo.writeAudit({ actorRepId, action: 'deal.update', targetRepId: null, path: `/api/admin/deals/${id}/status`, detail: { dealStatus } });

@@ -7,7 +7,7 @@ import { DEMO, api, post, type PayResult, type PayableLineView, type PayrollOver
 import { compact, day, fullDay, initials, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 
-const COLS = '44px 90px 90px minmax(170px,1.2fr) minmax(170px,1.1fr) 120px 110px 90px 70px 110px minmax(0,1fr)';
+const COLS = '44px 90px 170px minmax(170px,1.2fr) minmax(170px,1.1fr) 120px 110px 90px 70px 110px minmax(0,1fr)';
 
 export function Payroll() {
   const { notify } = useSession();
@@ -189,7 +189,7 @@ export function Payroll() {
                     <div className="empty">{d.lines.length === 0 ? `${d.rep.name} has nothing outstanding.` : `No deal lines match “${search}”.`}</div>
                   ) : (
                     <div className="scroller">
-                      <div className="table" style={{ ['--cols' as string]: COLS, minWidth: 1180 }}>
+                      <div className="table" style={{ ['--cols' as string]: COLS, minWidth: 1260 }}>
                         <div className="tr th"><div className="td">Pay</div><div className="td">Deal</div><div className="td">Line</div><div className="td">Business</div><div className="td">Merchant contact</div><div className="td">Lender</div><div className="td r">Funded</div><div className="td">Role</div><div className="td r">Rate</div><div className="td r">Payout</div><div className="td">Lender paid comm</div></div>
                         {groups.map((g) => {
                           const single = g.lines.length === 1;

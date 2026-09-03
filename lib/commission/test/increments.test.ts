@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { collectedOf, collectionLabel, scheduleEvents, scheduleFor, segmentStatus, withStopped } from '../src/collection.js';
-import { disbursementOf } from '../src/increments.js';
+import { collectedOf, collectionLabel, scheduleEvents, scheduleFor, segmentStatus, withAmounts, withStopped } from '../src/collection.js';
+import { disbursementOf, parseIncrementGrid } from '../src/increments.js';
 import { repLedger } from '../src/ledger.js';
 import { segments, totalFunded, totalGross, totalNet } from '../src/segments.js';
 import { dealLines, payableLines, repShare } from '../src/splits.js';
@@ -14,7 +14,7 @@ const plan = (received: number, stoppedAfter: number | null = null) =>
 describe('a consolidation is funded in increments', () => {
   it('shows funding progress against the plan', () => {
     const d = plan(10);
-    expect(disbursementOf(d.funded, d.commSchedule)).toEqual({ planned: 500_000, perIncrement: 25_000, disbursed: 250_000, final: 500_000, count: 10, total: 20, stopped: false });
+    expect(disbursementOf(d.funded, d.commSchedule)).toEqual({ planned: 500_000, perIncrement: 25_000, disbursed: 250_000, final: 500_000, count: 10, total: 20, stopped: false, uneven: false });
     expect(totalFunded(d)).toBe(500_000); // the plan stands, so the deal is still a 500k deal
   });
   it('when the merchant opts out after 10, the deal becomes a 250k deal — funded, gross, referral, net and rep shares all scale', () => {
@@ -48,5 +48,48 @@ describe('a consolidation is funded in increments', () => {
     expect(withStopped(segments(plan(7, 7))[0]!, false)!.schedule!.stoppedAfter).toBeNull();
     expect(collectionLabel(segments({ ...plan(7, 7) })[0]!)).toBe('7/7 wks · opted out');
     expect(collectionLabel(segments({ ...plan(7, 7), commSchedule: withStopped(segments(plan(7, 7))[0]!, false)!.schedule })[0]!)).toBe('7/20 wks');
+  });
+});
+
+describe('the increment grid: uneven disbursements', () => {
+  // 250k: 15 weeks at 12,500, then 3 at 15,000, then 2 at 8,750 = 250,000
+  const grid = parseIncrementGrid('12500 x15\n15000 x3\n8750 x2');
+  const uneven = (received: number, stoppedAfter: number | null = null) =>
+    makeDeal({ id: 'F8', funded: 250_000, commRate: 0.1, lender: 'ROWAN', commCollected: null, commSchedule: { ...scheduleFor(rowan, '2026-06-01', { amounts: grid })!, received, stoppedAfter }, closerId: null, overrideId: null });
+  it('parses pasted grids with repeats and totals them', () => {
+    expect(grid).toHaveLength(20);
+    expect(grid.reduce((a, b) => a + b, 0)).toBe(250_000);
+    expect(parseIncrementGrid('$25,000, 25000; 10,000 x2')).toEqual([25_000, 25_000, 10_000, 10_000]);
+  });
+  it('the grid defines the count, and funding + commission per increment follow its proportions', () => {
+    const d = uneven(0);
+    expect(d.commSchedule!.weeks).toBe(20);
+    const ev = scheduleEvents(segments(d)[0]!, '2026-09-01');
+    expect(ev.map((e) => e.funding).slice(14, 18)).toEqual([12_500, 15_000, 15_000, 15_000]);
+    // gross 25,000 → commission on a 12,500 increment is 25,000 × 12,500/250,000 = 1,250; on 15,000 it is 1,500
+    expect(ev[0]!.amount).toBe(1_250);
+    expect(ev[15]!.amount).toBe(1_500);
+    expect(ev[19]!.amount).toBe(875);
+    expect(ev.reduce((s, e) => s + e.amount, 0)).toBeCloseTo(25_000, 2);
+  });
+  it('received increments are scanned against the grid, not averaged', () => {
+    const d = uneven(16);
+    expect(disbursementOf(d.funded, d.commSchedule)).toMatchObject({ disbursed: 15 * 12_500 + 15_000, count: 16, total: 20, uneven: true, perIncrement: 15_000 });
+    expect(collectedOf(segments(d)[0]!)).toBe(1_250 * 15 + 1_500);
+    expect(repLedger(ctx([d]), 'rep-07').accrued).toBeCloseTo((1_250 * 15 + 1_500) * 0.35, 2);
+  });
+  it('opting out after 16 keeps the grid: the deal becomes what those 16 increments disbursed', () => {
+    const d = uneven(16, 16);
+    expect(totalFunded(d)).toBe(202_500);
+    expect(totalGross(d)).toBe(20_250);
+    expect(scheduleEvents(segments(d)[0]!, '2026-09-01')).toHaveLength(16);
+  });
+  it('withAmounts replaces the grid on a live deal and refuses one that does not total the plan or cuts received increments', () => {
+    const seg = segments(uneven(5))[0]!;
+    const patch = withAmounts(seg, parseIncrementGrid('10000 x25'))!;
+    expect(patch.schedule!.weeks).toBe(25);
+    expect(() => withAmounts(seg, [100_000, 100_000])).toThrow(/totals/);
+    expect(() => withAmounts(seg, parseIncrementGrid('125000 x2'))).toThrow(/already received/);
+    expect(withAmounts(seg, null)!.schedule!.amounts).toBeNull();
   });
 });

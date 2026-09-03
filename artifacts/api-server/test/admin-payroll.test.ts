@@ -146,7 +146,7 @@ describe('increments paid to reps', () => {
     const deal = (await admin.get(`/api/admin/deals/${id}`)).body;
     expect(deal.segments[0].schedule.paidToReps).toEqual([{ role: 'Opener', repId: 'rep-julian-ribak', name: 'Julian Ribak', paid: 4, total: 20 }]);
     // Funding progress rides the same increments: 100k planned in 20 × 5k, 4 out the door.
-    expect(deal.segments[0].schedule.disbursement).toEqual({ planned: 100_000, perIncrement: 5_000, disbursed: 20_000, final: 100_000, count: 4, total: 20, stopped: false });
+    expect(deal.segments[0].schedule.disbursement).toEqual({ planned: 100_000, perIncrement: 5_000, disbursed: 20_000, final: 100_000, count: 4, total: 20, stopped: false, uneven: false });
     // The merchant opts out after 4 → a 20k deal: funded, gross and the rep's share scale; the 4 paid units are all there is.
     const stopped = (await admin.post(`/api/admin/deals/${id}/collection`).send({ segmentKey: 'base', stopIncrements: true })).body;
     expect(stopped.funded).toBe(20_000);

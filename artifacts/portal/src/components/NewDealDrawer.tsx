@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { api, post, type AdminDealDetail, type MasterBoard, type RepOption, type Settings } from '../lib/api';
 import { compact, day, fullDay, money, pct, todayIso } from '../lib/format';
 import { addBusinessDays, liveMath, num } from '../lib/math';
+import { parseIncrementGrid } from '@greystone/commission';
 import { useSession } from '../lib/session';
 import { Drawer, Pill, toneFor } from './ui';
 
@@ -30,7 +31,7 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
     amount: '', termDays: '120', factor: '1.35', apr: '', frequency: 'Daily', commRate: String((first?.comm ?? 0.12) * 100), psfPct: '0', psfMode: '%', psfDollars: '', originationFee: '0',
     referralPartner: 'None', referralRate: '0', creditLine: '', drawInitialPct: '', drawSubsequentPct: '',
     openerId: '', openerRate: '', closerId: '', closerRate: '', overrideId: '', overrideRate: '',
-    payout: 'lender', commIncrements: '', commUpfrontPct: '', commRemainder: 'spread', commCadenceDays: '7', commStartDate: '',
+    payout: 'lender', commIncrements: '', commUpfrontPct: '', commRemainder: 'spread', commCadenceDays: '7', commStartDate: '', commGrid: '',
   });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -79,6 +80,11 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
     const month = (f.fundedDate ?? '').slice(0, 7);
     return board.deals.filter((d) => d.referralPartner === partner.name && d.date.startsWith(month)).reduce((s, d) => s + d.referralFee, 0);
   }, [board.deals, partner, f.fundedDate]);
+  // Increment grid: uneven disbursements typed or pasted ("12500 x15, 8000 x3, 5000 x2"). It defines the increment count and must total the funded amount.
+  const grid = useMemo(() => (incremental && f.commGrid?.trim() ? parseIncrementGrid(f.commGrid) : []), [incremental, f.commGrid]);
+  const gridTotal = grid.reduce((a, b) => a + b, 0);
+  const gridMismatch = grid.length > 0 && Math.abs(gridTotal - num(f.amount)) > 1;
+  useEffect(() => { if (grid.length) setF((s) => ({ ...s, commIncrements: String(grid.length) })); }, [grid.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const m = useMemo(() => liveMath(f, rule, partner, referralPaidThisMonth), [f, rule, partner, referralPaidThisMonth]);
   const email = (f.merchantEmail ?? '').trim().toLowerCase();
   const priorDeals = useMemo(() => (email ? board.deals.filter((d) => d.merchantEmail && d.merchantEmail.toLowerCase() === email).sort((a, b) => b.date.localeCompare(a.date)) : []), [board.deals, email]);
@@ -124,6 +130,7 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
         commRemainder: incremental ? (f.commRemainder as 'spread' | 'at-end') : null,
         commCadenceDays: incremental ? num(f.commCadenceDays) || 7 : null,
         commStartDate: incremental && f.commStartDate ? f.commStartDate : null,
+        commAmounts: incremental && grid.length ? grid : null,
       });
       await qc.invalidateQueries();
       notify(`${saved.id} saved — ${saved.roles.filter((r) => r.repId).length} rep portal(s) updated`);
@@ -221,7 +228,7 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
         {incremental && (
           <>
             <Field label="Upfront share %" hint="e.g. 50 → half at funding, the rest per the structure below"><input inputMode="decimal" placeholder="0" value={f.commUpfrontPct} onChange={set('commUpfrontPct')} /></Field>
-            <Field label="Number of increments"><input inputMode="numeric" value={f.commIncrements} onChange={set('commIncrements')} /></Field>
+            <Field label="Number of increments" hint={grid.length ? 'from the grid below' : undefined}><input inputMode="numeric" readOnly={grid.length > 0} className={grid.length ? 'ro' : undefined} value={f.commIncrements} onChange={set('commIncrements')} /></Field>
             <Field label="Remainder">
               <select value={f.commRemainder} onChange={set('commRemainder')}>
                 <option value="spread">Spread evenly across the increments</option>
@@ -232,7 +239,15 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
               <select value={f.commCadenceDays} onChange={set('commCadenceDays')}><option value="7">Weekly</option><option value="14">Bi-weekly</option><option value="30">Monthly</option></select>
             </Field>
             <Field label="First increment expected" hint="defaults to one cadence after funding"><input type="date" value={f.commStartDate} onChange={set('commStartDate')} /></Field>
-            <div className="note" style={{ gridColumn: '1 / -1' }}>{structureNote(m.gross, f)}</div>
+            <Field label="Increment grid (optional)" span hint={grid.length ? `${grid.length} increments totalling ${money(gridTotal)}${gridMismatch ? ` — does not match the funded amount ${money(num(f.amount))}; fix one or the other` : ' — matches the funded amount'}` : 'Only when the disbursements are not equal. One amount per line or comma-separated; "12500 x15" repeats an amount. Commission per increment follows the same proportions.'}>
+              <textarea rows={3} value={f.commGrid} onChange={(e) => setF((s) => ({ ...s, commGrid: e.target.value }))} placeholder={'12500 x15\n8000 x3\n5000 x2'} style={{ border: '1px solid var(--border-strong)', borderRadius: 8, padding: '8px 10px', background: 'var(--input-bg)', color: 'inherit', font: 'inherit', fontFamily: 'var(--mono)', fontSize: 13.5, resize: 'vertical', outline: 'none', borderColor: gridMismatch ? 'var(--red)' : undefined }} />
+            </Field>
+            {grid.length > 0 && (
+              <div className="gridpreview" style={{ gridColumn: '1 / -1' }}>
+                {grid.map((a, i) => <span key={i} title={`Increment ${i + 1} · ${money(a)}`} style={{ height: `${Math.max(8, Math.round((a / Math.max(...grid)) * 40))}px` }} />)}
+              </div>
+            )}
+            <div className="note" style={{ gridColumn: '1 / -1' }}>{grid.length ? `Expect ${grid.length} receipts in the grid's proportions${num(f.commUpfrontPct) ? ` after ${num(f.commUpfrontPct)}% upfront` : ''}: the first is ${money(m.gross * (1 - Math.min(100, Math.max(0, num(f.commUpfrontPct))) / 100) * (grid[0]! / gridTotal))} of commission on ${money(grid[0]!)} funded, the last ${money(m.gross * (1 - Math.min(100, Math.max(0, num(f.commUpfrontPct))) / 100) * (grid[grid.length - 1]! / gridTotal))} on ${money(grid[grid.length - 1]!)}.` : structureNote(m.gross, f)}</div>
           </>
         )}
         <Field label="Payback" hint="computed"><input readOnly className="ro" value={m.payback === null ? 'n/a for this product' : money(m.payback)} /></Field>
@@ -291,7 +306,7 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
       </div>
       {err && <div className="note" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>{err}</div>}
       <div style={{ display: 'flex', gap: 9 }}>
-        <button className="btn primary big" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save deal & push to Sheets'}</button>
+        <button className="btn primary big" disabled={busy || gridMismatch} title={gridMismatch ? 'The increment grid must total the funded amount' : undefined} onClick={() => void save()}>{busy ? 'Saving…' : 'Save deal & push to Sheets'}</button>
         <button className="btn big" onClick={onClose}>Cancel</button>
       </div>
       <div className="subtle" style={{ fontSize: 13 }}>Rates: {pct(0.2)} means 20 — type either.</div>

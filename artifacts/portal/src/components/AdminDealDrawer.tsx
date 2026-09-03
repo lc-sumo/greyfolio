@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { DEAL_STATUS_OPTIONS, api, post, type AdminDealDetail, type RepOption, type Settings } from '../lib/api';
 import { num } from '../lib/math';
-import { paybackOf, paymentFor } from '@greystone/commission';
+import { parseIncrementGrid, paybackOf, paymentFor } from '@greystone/commission';
 import { day, fullDay, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 import { ClawbackBar, Contact, Drawer, Loading, Pill, toneFor } from './ui';
@@ -95,7 +95,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
               <h3>Commission payout schedule{s.sk !== 'base' && <small>{s.label}</small>}{s.schedule.overdue > 0 && <small className="neg">{s.schedule.overdue} overdue · {money(s.schedule.overdueAmount)}</small>}</h3>
               <div className="muted" style={{ marginBottom: 10 }}>
                 {d.lender} pays {money(s.gross)}:{s.schedule.upfrontPct > 0 && <> <b className="num">{money(s.schedule.upfrontAmount)}</b> upfront ({Math.round(s.schedule.upfrontPct * 100)}%), then</>} {s.schedule.weeks} increments every {s.schedule.cadenceDays === 7 ? 'week' : s.schedule.cadenceDays === 14 ? 'two weeks' : `${s.schedule.cadenceDays} days`}
-                {s.schedule.remainder === 'spread' ? <> of <b className="num">{money(s.schedule.perWeek)}</b></> : <>, and <b className="num">{money(s.schedule.remainderAmount)}</b> once they are done</>}{s.schedule.startDate ? `, starting ${day(s.schedule.startDate)}` : ''}.
+                {s.schedule.amounts ? <> in the grid's proportions (disbursements step from <b className="num">{money(s.schedule.amounts[0]!)}</b> to <b className="num">{money(s.schedule.amounts[s.schedule.amounts.length - 1]!)}</b>)</> : s.schedule.remainder === 'spread' ? <> of <b className="num">{money(s.schedule.perWeek)}</b></> : <>, and <b className="num">{money(s.schedule.remainderAmount)}</b> once they are done</>}{s.schedule.startDate ? `, starting ${day(s.schedule.startDate)}` : ''}.
               </div>
               <div className="fundprog">
                 <div className="head"><span className="label">Funding progress</span><span className="num"><b>{money(s.schedule.disbursement.disbursed)}</b> <span className="subtle">of {money(s.schedule.disbursement.stopped ? s.schedule.disbursement.final : s.schedule.disbursement.planned)} · {s.schedule.disbursement.count}/{s.schedule.disbursement.total} increments × {money(s.schedule.disbursement.perIncrement)}</span></span></div>
@@ -113,12 +113,17 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
                 {s.schedule.remainder === 'at-end' && <><dt>Final {money(s.schedule.remainderAmount)}</dt><dd style={{ fontFamily: 'var(--sans)' }}>{s.schedule.remainderReceived ? <span className="pos">received</span> : s.schedule.received >= s.schedule.weeks ? <button className="btn primary" style={{ height: 26, padding: '0 8px', fontSize: 13.5 }} onClick={() => void collect({ segmentKey: s.sk, markRemainder: true }, `${d.id} — final ${money(s.schedule!.remainderAmount)} received`)}>Record final received</button> : <span className="subtle">due when increments are done</span>}</dd></>}
               </dl>
               <details style={{ marginTop: 10 }}>
+                <summary className="muted" style={{ cursor: 'pointer', fontSize: 14 }}>Increment grid {s.schedule.amounts ? '· uneven' : '· equal'}</summary>
+                <GridEditor current={s.schedule.amounts} planned={s.schedule.planned?.amount ?? s.amount} count={s.schedule.planned?.increments ?? s.schedule.weeks} onApply={(amounts) => collect({ segmentKey: s.sk, amounts }, `${d.id} — increment grid ${amounts ? 'updated' : 'reset to equal increments'}`)} />
+              </details>
+              <details style={{ marginTop: 10 }}>
                 <summary className="muted" style={{ cursor: 'pointer', fontSize: 14 }}>Expected receipts ({s.schedule.events.length})</summary>
                 <div className="pl" style={{ marginTop: 6 }}>
                   {s.schedule.events.map((e) => (
-                    <div className="row" key={`${e.kind}-${e.n}`} style={{ gridTemplateColumns: 'minmax(0,1fr) 90px 100px 90px' }}>
+                    <div className="row" key={`${e.kind}-${e.n}`} style={{ gridTemplateColumns: 'minmax(0,1fr) 90px 110px 100px 90px' }}>
                       <span className={e.overdue ? 'neg' : ''}>{e.label}</span>
                       <span className="num subtle">{e.expected ? day(e.expected) : '—'}</span>
+                      <span className="num subtle" title="Disbursed to the merchant at this increment">{e.funding !== undefined ? money(e.funding) : ''}</span>
                       <span className="num">{e.amount ? money(e.amount) : <span className="subtle">progress</span>}</span>
                       <Pill tone={e.received ? 'teal' : e.overdue ? 'red' : 'grey'}>{e.received ? 'Received' : e.overdue ? 'Overdue' : 'Expected'}</Pill>
                     </div>
@@ -225,4 +230,25 @@ function addWeeks(iso: string, n: number): string {
   const d = new Date(`${iso}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + 7 * n);
   return d.toISOString().slice(0, 10);
+}
+
+/** Paste or type the increment grid on an existing deal. It must total the plan's funded amount. */
+function GridEditor({ current, planned, count, onApply }: { current: number[] | null; planned: number; count: number; onApply: (amounts: number[] | null) => Promise<void> | void }) {
+  const [text, setText] = useState(current ? current.join('\n') : '');
+  useEffect(() => setText(current ? current.join('\n') : ''), [current]);
+  const grid = text.trim() ? parseIncrementGrid(text) : [];
+  const total = grid.reduce((a, b) => a + b, 0);
+  const mismatch = grid.length > 0 && Math.abs(total - planned) > 1;
+  return (
+    <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+      <div className="subtle" style={{ fontSize: 13 }}>{current ? `Uneven disbursements over ${current.length} increments.` : `Equal increments of ${money(planned / Math.max(1, count))}.`} Paste one amount per line, or "12500 x15" to repeat. The grid must total {money(planned)}.</div>
+      <textarea rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder={'12500 x15\n8000 x3\n5000 x2'} style={{ border: '1px solid var(--border-strong)', borderRadius: 8, padding: '8px 10px', background: 'var(--input-bg)', color: 'inherit', font: 'inherit', fontFamily: 'var(--mono)', fontSize: 13.5, resize: 'vertical', outline: 'none', borderColor: mismatch ? 'var(--red)' : undefined }} />
+      {grid.length > 0 && <div className="gridpreview">{grid.map((a, i) => <span key={i} title={`Increment ${i + 1} · ${money(a)}`} style={{ height: `${Math.max(8, Math.round((a / Math.max(...grid)) * 40))}px` }} />)}</div>}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <button className="btn primary" disabled={!grid.length || mismatch} onClick={() => void onApply(grid)}>Apply grid</button>
+        {current && <button className="btn" onClick={() => void onApply(null)}>Back to equal increments</button>}
+        <span className={`num ${mismatch ? 'neg' : 'subtle'}`} style={{ fontSize: 13 }}>{grid.length ? `${grid.length} increments · ${money(total)}${mismatch ? ` ≠ ${money(planned)}` : ''}` : ''}</span>
+      </div>
+    </div>
+  );
 }

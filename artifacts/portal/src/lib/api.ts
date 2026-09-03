@@ -83,9 +83,9 @@ export interface AdminDealRow {
   commissionStatus: string; dealStatus: string; storedDealStatus: string; atRisk: boolean; repPaid: string | null; lenderPaid: string | null; crmId: string | null; crmUrl: string;
   creditLine: number | null; drawSubsequentPct: number | null; hasClawback: boolean; clawbackWindow: ClawbackWindow; overdueReceipts: number; overdueAmount: number; increments: { total: number; lenderPaid: number; repPaid: number; disbursed: number; planned: number; perIncrement: number; stopped: boolean } | null;
 }
-export interface ScheduleEvent { kind: 'upfront' | 'increment' | 'remainder'; n: number; label: string; expected: string | null; amount: number; received: boolean; overdue: boolean }
-export interface Disbursement { planned: number; perIncrement: number; disbursed: number; final: number; count: number; total: number; stopped: boolean }
-export interface ScheduleView { disbursement: Disbursement; planned: { amount: number; gross: number; referralFee: number; net: number; increments: number } | null; weeks: number; received: number; startDate: string | null; perWeek: number; cadenceDays: number; upfrontPct: number; upfrontAmount: number; upfrontReceived: boolean; remainder: 'spread' | 'at-end'; remainderAmount: number; remainderReceived: boolean; events: ScheduleEvent[]; nextExpected: ScheduleEvent | null; overdue: number; overdueAmount: number; paidToReps: Array<{ role: Role; repId: string; name: string | null; paid: number; total: number }> }
+export interface ScheduleEvent { kind: 'upfront' | 'increment' | 'remainder'; n: number; label: string; expected: string | null; amount: number; received: boolean; overdue: boolean; funding?: number }
+export interface Disbursement { planned: number; perIncrement: number; disbursed: number; final: number; count: number; total: number; stopped: boolean; uneven: boolean }
+export interface ScheduleView { disbursement: Disbursement; amounts: number[] | null; planned: { amount: number; gross: number; referralFee: number; net: number; increments: number } | null; weeks: number; received: number; startDate: string | null; perWeek: number; cadenceDays: number; upfrontPct: number; upfrontAmount: number; upfrontReceived: boolean; remainder: 'spread' | 'at-end'; remainderAmount: number; remainderReceived: boolean; events: ScheduleEvent[]; nextExpected: ScheduleEvent | null; overdue: number; overdueAmount: number; paidToReps: Array<{ role: Role; repId: string; name: string | null; paid: number; total: number }> }
 export interface SegmentView { sk: string; label: string; n: number; date: string; amount: number; commRate: number; gross: number; referralFee: number; net: number; collected: number; outstanding: number; status: string; lenderPaidLabel: string; schedule: ScheduleView | null; termDays: number | null; factor: number | null; payback: number | null; payment: number | null }
 export interface AdminDealDetail extends AdminDealRow {
   segments: SegmentView[];
@@ -99,7 +99,7 @@ export interface NewDealDraft {
   amount: number; termDays?: number | null; factor?: number | null; apr?: number | null; frequency?: string; commRate?: number | null; psfPct?: number | null; originationFee?: number | null;
   referralPartner?: string | null; referralRate?: number | null; creditLine?: number | null; drawInitialPct?: number | null; drawSubsequentPct?: number | null;
   openerId?: string | null; openerRate?: number | null; closerId?: string | null; closerRate?: number | null; overrideId?: string | null; overrideRate?: number | null; leadSource?: string | null; notes?: string | null;
-  commIncrements?: number | null; commUpfrontPct?: number | null; commRemainder?: 'spread' | 'at-end' | null; commCadenceDays?: number | null; commStartDate?: string | null;
+  commIncrements?: number | null; commUpfrontPct?: number | null; commRemainder?: 'spread' | 'at-end' | null; commCadenceDays?: number | null; commStartDate?: string | null; commAmounts?: number[] | null;
 }
 export const post = <T,>(path: string, body: unknown, method = 'POST') => api<T>(path, { method, body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
 

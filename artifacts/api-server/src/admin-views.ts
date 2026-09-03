@@ -205,7 +205,9 @@ export interface SegmentView {
     /** Per role: increments paid to the rep vs total units. */
     paidToReps: Array<{ role: Role; repId: string; name: string | null; paid: number; total: number }>;
     /** Funding side of the same increments: dollars disbursed to the merchant against the plan. */
-    disbursement: { planned: number; perIncrement: number; disbursed: number; final: number; count: number; total: number; stopped: boolean };
+    disbursement: { planned: number; perIncrement: number; disbursed: number; final: number; count: number; total: number; stopped: boolean; uneven: boolean };
+    /** The increment grid when the disbursements are not equal. */
+    amounts: number[] | null;
     /** The plan as entered, when the merchant has opted out part-way. */
     planned: Segment['planned'] | null;
   } | null;
@@ -285,6 +287,7 @@ function scheduleView(s: Segment, today: string, deal: Deal, ctx: LedgerContext,
     overdueAmount: sum(events.filter((e) => e.overdue).map((e) => e.amount)),
     disbursement: disbursementOf(s.planned?.amount ?? s.amount, s.schedule)!,
     planned: s.planned ?? null,
+    amounts: s.schedule?.amounts ?? null,
     paidToReps: roleAssignments(deal)
       .filter((r): r is { role: Role; repId: string; rate: number } => !!r.repId && r.rate > 0)
       .map((r) => {

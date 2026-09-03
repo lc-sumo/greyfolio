@@ -108,7 +108,7 @@ export interface RepDealView {
   /** Total funded across every segment (initial + draws). */
   funded: number;
   /** For a consolidation funded in increments: what has gone out to the merchant against the plan. */
-  disbursement: { planned: number; perIncrement: number; disbursed: number; final: number; count: number; total: number; stopped: boolean } | null;
+  disbursement: { planned: number; perIncrement: number; disbursed: number; final: number; count: number; total: number; stopped: boolean; uneven: boolean } | null;
   drawCount: number;
   roles: Role[];
   lines: RepRoleLine[];

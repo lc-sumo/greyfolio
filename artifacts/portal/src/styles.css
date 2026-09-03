@@ -326,3 +326,5 @@ input.mini-input:focus { border-color: var(--teal); }
 .theme .seg { background: var(--navy-raised); border-color: var(--navy-border-2); }
 .theme .seg button { background: transparent; color: var(--navy-text-3); }
 .theme .seg button.on { background: var(--navy-raised-3); color: #fff; }
+.gridpreview { display: flex; align-items: flex-end; gap: 2px; height: 44px; }
+.gridpreview span { flex: 1 1 0; min-width: 3px; background: var(--teal); opacity: .75; border-radius: 2px 2px 0 0; }

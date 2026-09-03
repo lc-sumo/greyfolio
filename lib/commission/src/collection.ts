@@ -1,4 +1,4 @@
-import { effectiveIncrements, incrementParts } from './increments.js';
+import { effectiveIncrements, gridOf, incrementCommission, incrementFunding, incrementParts, shareThrough } from './increments.js';
 import { cents, clamp, sum } from './money.js';
 import { segments } from './segments.js';
 import type { CommissionStatus, Deal, Lender, Segment, WeeklySchedule } from './types.js';
@@ -32,7 +32,7 @@ export function collectedOf(seg: Pick<Segment, 'gross' | 'collected' | 'schedule
     const parts = scheduleParts(plannedGrossOf(seg), s);
     const eff = effectiveIncrements(s);
     let got = s.upfrontReceived ? parts.upfront : 0;
-    if ((s.remainder ?? 'spread') === 'spread') got += cents(parts.rest * (clamp(s.received, 0, eff) / s.weeks));
+    if ((s.remainder ?? 'spread') === 'spread') got += cents(parts.rest * shareThrough(s, clamp(s.received, 0, eff)));
     else if (s.remainderReceived) got += parts.remainder;
     return cents(clamp(got, 0, seg.gross));
   }
@@ -142,6 +142,8 @@ export interface ScheduleEvent {
   received: boolean;
   /** Expected before `today` and not yet received. */
   overdue: boolean;
+  /** For increments: what the merchant is disbursed at this step (from the grid, or the plan ÷ increments). */
+  funding?: number;
 }
 
 /**
@@ -160,10 +162,12 @@ export function scheduleEvents(seg: Pick<Segment, 'gross' | 'collected' | 'sched
   const at = (i: number) => (start ? new Date(new Date(`${start}T00:00:00Z`).getTime() + i * cadence * 86_400_000).toISOString().slice(0, 10) : null);
   const out: ScheduleEvent[] = [];
   if (parts.upfront > 0) out.push({ kind: 'upfront', n: 0, label: 'Upfront', expected: seg.date, amount: parts.upfront, received: !!s.upfrontReceived, overdue: !s.upfrontReceived && seg.date < today });
+  const plannedAmount = (seg as { planned?: Segment['planned']; amount?: number }).planned?.amount ?? (seg as { amount?: number }).amount;
   for (let i = 1; i <= eff; i++) {
     const expected = at(i - 1);
     const received = i <= s.received;
-    out.push({ kind: 'increment', n: i, label: `Increment ${i}`, expected, amount: parts.perIncrement, received, overdue: !received && expected !== null && expected < today });
+    const amount = gridOf(s) ? incrementCommission(plannedGrossOf(seg), s, i) : parts.perIncrement;
+    out.push({ kind: 'increment', n: i, label: `Increment ${i}`, expected, amount, received, overdue: !received && expected !== null && expected < today, funding: plannedAmount !== undefined ? incrementFunding(plannedAmount, s, i) : undefined });
   }
   if (parts.remainder > 0) {
     const expected = at(eff);
@@ -217,6 +221,20 @@ export function recordWeek(seg: Pick<Segment, 'gross' | 'collected' | 'schedule'
   return { collected: null, schedule: { ...s, received: clamp((s.received || 0) + delta, 0, effectiveIncrements(s)) } };
 }
 
+/** Replace the increment grid. The grid must total the plan's funded amount (within a dollar) and cover the increments already received. */
+export function withAmounts(seg: Pick<Segment, 'gross' | 'collected' | 'schedule'> & { amount?: number; planned?: Segment['planned'] }, amounts: number[] | null): CollectionPatch | null {
+  const s = schedOf(seg);
+  if (!s) return null;
+  if (!amounts || amounts.length === 0) return { collected: null, schedule: { ...s, amounts: null } };
+  const planned = seg.planned?.amount ?? seg.amount;
+  const total = amounts.reduce((a, b) => a + b, 0);
+  if (planned !== undefined && Math.abs(total - planned) > 1) throw new Error(`The increment grid totals ${total.toFixed(2)} but the deal was entered at ${planned.toFixed(2)}`);
+  if (amounts.length < (s.received || 0)) throw new Error(`The grid has ${amounts.length} increments but ${s.received} were already received`);
+  if (amounts.some((a) => !(a >= 0))) throw new Error('Every increment amount must be zero or more');
+  const stoppedAfter = s.stoppedAfter === null || s.stoppedAfter === undefined ? s.stoppedAfter : Math.min(s.stoppedAfter, amounts.length);
+  return { collected: null, schedule: { ...s, weeks: amounts.length, amounts: amounts.map((a) => cents(a)), stoppedAfter } };
+}
+
 /**
  * The merchant opted out of the rest of the plan: the increments received so
  * far are the increments there will be. `false` reopens the full plan.
@@ -229,6 +247,8 @@ export function withStopped(seg: Pick<Segment, 'gross' | 'collected' | 'schedule
 }
 
 export interface ScheduleOptions {
+  /** Increment grid — when set it defines the increment count. */
+  amounts?: number[] | null;
   /** Number of increments; defaults to the lender's. */
   increments?: number | null;
   /** 0–1 (or 0–100). */
@@ -246,7 +266,8 @@ export interface ScheduleOptions {
  */
 export function scheduleFor(lender: Lender | null | undefined, fundedDate: string | null, opts: ScheduleOptions = {}): WeeklySchedule | null {
   const weekly = !!lender && lender.terms === 'weekly' && lender.weeks > 0;
-  const weeks = Math.round(opts.increments ?? (weekly ? lender!.weeks : 0));
+  const grid = opts.amounts && opts.amounts.length ? opts.amounts.map((a) => cents(a)) : null;
+  const weeks = grid ? grid.length : Math.round(opts.increments ?? (weekly ? lender!.weeks : 0));
   if (!(weeks > 0)) return null;
   const rawUp = opts.upfrontPct ?? lender?.upfrontPct ?? 0;
   const upfrontPct = clamp(rawUp > 1 ? rawUp / 100 : rawUp, 0, 1);
@@ -259,5 +280,6 @@ export function scheduleFor(lender: Lender | null | undefined, fundedDate: strin
     s.upfrontReceived = false;
   }
   if (remainder === 'at-end') s.remainderReceived = false;
+  if (grid) s.amounts = grid;
   return s;
 }

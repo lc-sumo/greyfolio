@@ -110,6 +110,13 @@ export interface WeeklySchedule {
    * (funded, gross, referral, net, rep shares) scales down to what was disbursed.
    */
   stoppedAfter?: number | null;
+  /**
+   * The increment grid: what the merchant is disbursed at each increment,
+   * when the increments are not equal (e.g. 15 weeks at 12,500, then 8,000,
+   * then 5,000). Length = `weeks`; sum = the planned funded amount. Absent =
+   * equal increments. Commission per increment follows the same proportions.
+   */
+  amounts?: number[] | null;
 }
 
 export type CommissionSchedule = WeeklySchedule;

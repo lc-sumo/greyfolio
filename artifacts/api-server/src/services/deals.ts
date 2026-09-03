@@ -7,6 +7,7 @@ import {
   priceDeal,
   recordWeek,
   withStopped,
+  withAmounts,
   scheduleFor,
   segmentOf,
   withCollection,
@@ -146,7 +147,8 @@ export type CollectionInput =
   | { segmentKey: SegmentKey; toggle: true }
   | { segmentKey: SegmentKey; markUpfront: boolean }
   | { segmentKey: SegmentKey; markRemainder: boolean }
-  | { segmentKey: SegmentKey; stopIncrements: boolean };
+  | { segmentKey: SegmentKey; stopIncrements: boolean }
+  | { segmentKey: SegmentKey; amounts: number[] | null };
 
 /**
  * THE single collection writer. The status dropdown, the lender-paid pill,
@@ -169,6 +171,13 @@ export async function setCollection(repo: Repo, id: string, input: CollectionInp
   } else if ('markRemainder' in input) {
     patch = withRemainder(seg, !!input.markRemainder);
     if (!patch) throw new HttpError(400, `${id} ${seg.sk} has no at-end remainder`);
+  } else if ('amounts' in input) {
+    try {
+      patch = withAmounts(seg, Array.isArray(input.amounts) ? input.amounts.map(Number) : null);
+    } catch (e) {
+      throw new HttpError(400, e instanceof Error ? e.message : 'Bad increment grid');
+    }
+    if (!patch) throw new HttpError(400, `${id} ${seg.sk} is not funded in increments`);
   } else if ('stopIncrements' in input) {
     // Merchant opted out: the increments received so far are the increments there will be.
     patch = withStopped(seg, !!input.stopIncrements);

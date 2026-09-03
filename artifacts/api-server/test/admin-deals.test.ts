@@ -72,6 +72,27 @@ describe('POST /api/admin/deals', () => {
     expect(second.body.referralFee).toBe(0); // the month's cap is spent
     expect(second.body.net).toBe(second.body.gross);
   });
+  it('a consolidation can carry an increment grid; it must total the funded amount and can be edited on the deal', async () => {
+    const { admin } = await harness();
+    const grid = [...Array(15).fill(12_500), ...Array(3).fill(15_000), 8_750, 8_750];
+    const bad = await admin.post('/api/admin/deals').send({ ...draft, product: CONSOL, lender: 'ROWAN', amount: 250_000, referralPartner: null, commAmounts: [100_000, 100_000] });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toMatch(/increment grid totals/);
+    const res = await admin.post('/api/admin/deals').send({ ...draft, product: CONSOL, lender: 'ROWAN', amount: 250_000, referralPartner: null, commAmounts: grid });
+    expect(res.status).toBe(201);
+    const sch = res.body.segments[0].schedule;
+    expect(sch.weeks).toBe(20);
+    expect(sch.amounts).toEqual(grid);
+    expect(sch.events[0]).toMatchObject({ funding: 12_500 });
+    expect(sch.events[15]).toMatchObject({ funding: 15_000 });
+    expect(sch.disbursement).toMatchObject({ planned: 250_000, uneven: true, count: 0 });
+    const after = (await admin.post(`/api/admin/deals/${res.body.id}/collection`).send({ segmentKey: 'base', recordWeeks: 16 })).body;
+    expect(after.segments[0].schedule.disbursement).toMatchObject({ disbursed: 202_500, count: 16 });
+    const regrid = await admin.post(`/api/admin/deals/${res.body.id}/collection`).send({ segmentKey: 'base', amounts: [...Array(16).fill(12_500), 25_000, 25_000] });
+    expect(regrid.status).toBe(200);
+    expect(regrid.body.segments[0].schedule.weeks).toBe(18);
+    expect((await admin.post(`/api/admin/deals/${res.body.id}/collection`).send({ segmentKey: 'base', amounts: [1, 2] })).status).toBe(400);
+  });
   it('increments are a consolidation thing: MCAs, LOCs and LOC draws are paid upfront even on a weekly lender', async () => {
     const { admin } = await harness();
     const mca = await admin.post('/api/admin/deals').send({ ...draft, lender: 'ROWAN' });

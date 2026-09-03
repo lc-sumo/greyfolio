@@ -42,6 +42,8 @@ export interface NewDealDraft {
   commRemainder?: 'spread' | 'at-end' | null;
   commCadenceDays?: number | null;
   commStartDate?: string | null;
+  /** Increment grid: what the merchant is disbursed at each increment; must total `amount`. */
+  commAmounts?: number[] | null;
 }
 
 export interface PricingContext {
@@ -60,6 +62,7 @@ export interface PricingContext {
  * and attach the lender's collection schedule. Throws `ValidationError`.
  */
 export function priceDeal(draft: NewDealDraft, ctx: PricingContext): Deal {
+  const rule0 = ctx.rule;
   const errors = validateNewDeal(
     { business: draft.business, fundedDate: draft.fundedDate, lender: draft.lender, amount: draft.amount, product: draft.product, parentId: draft.parentId ?? null },
     ctx.rule,
@@ -67,6 +70,11 @@ export function priceDeal(draft: NewDealDraft, ctx: PricingContext): Deal {
   );
   if (!ctx.lender && draft.lender?.trim()) errors.push(`Unknown lender "${draft.lender}"`);
   if (draft.referralPartner && draft.referralPartner !== 'None' && !ctx.partner) errors.push(`Unknown referral partner "${draft.referralPartner}"`);
+  if (draft.commAmounts && draft.commAmounts.length && rule0?.incremental) {
+    const total = draft.commAmounts.reduce((a, b) => a + b, 0);
+    if (Math.abs(total - draft.amount) > 1) errors.push(`The increment grid totals ${total.toLocaleString('en-US', { maximumFractionDigits: 2 })} but the funded amount is ${draft.amount.toLocaleString('en-US', { maximumFractionDigits: 2 })}`);
+    if (draft.commAmounts.some((a) => !(a >= 0))) errors.push('Every increment amount must be zero or more');
+  }
   if (errors.length) throw new ValidationError(errors);
   const rule = ctx.rule!;
 
@@ -99,7 +107,7 @@ export function priceDeal(draft: NewDealDraft, ctx: PricingContext): Deal {
     overrideRate,
   });
   // Increments are a consolidation thing: LOCs and single-payout products never get a schedule.
-  const schedule = !rule.incremental ? null : scheduleFor(ctx.lender, draft.fundedDate, { increments: draft.commIncrements, upfrontPct: draft.commUpfrontPct, remainder: draft.commRemainder, cadenceDays: draft.commCadenceDays, startDate: draft.commStartDate });
+  const schedule = !rule.incremental ? null : scheduleFor(ctx.lender, draft.fundedDate, { increments: draft.commIncrements, upfrontPct: draft.commUpfrontPct, remainder: draft.commRemainder, cadenceDays: draft.commCadenceDays, startDate: draft.commStartDate, amounts: draft.commAmounts ?? null });
 
   return {
     id: ctx.id,

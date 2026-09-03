@@ -25,6 +25,7 @@ import {
   segments,
   unitsPaid,
   sum,
+  cents,
   totalFunded,
   type Clawback,
   type CommissionStatus,
@@ -87,7 +88,8 @@ export interface RepRoleLine {
   units: { paid: number; total: number; collected: number } | null;
 }
 
-export type PayoutStatus = 'Paid' | 'Partially paid' | 'Owed';
+/** 'Awaiting lender': nothing is owed yet because the lender has not paid the commission this share sits on. */
+export type PayoutStatus = 'Paid' | 'Partially paid' | 'Owed' | 'Awaiting lender';
 
 export interface RepDealView {
   id: string;
@@ -104,6 +106,8 @@ export interface RepDealView {
   lines: RepRoleLine[];
   /** Σ of the rep's lines — their share of the deal. */
   share: number;
+  /** Share on commission the lender has already paid. */
+  accrued: number;
   paid: number;
   owed: number;
   payoutStatus: PayoutStatus;
@@ -114,15 +118,17 @@ export interface RepDealView {
   clawback: { amount: number; remaining: number; status: Clawback['status'] } | null;
 }
 
-function payoutStatus(share: number, paid: number): PayoutStatus {
+function payoutStatus(share: number, paid: number, accrued: number): PayoutStatus {
   if (share > 0 && paid >= share) return 'Paid';
-  return paid > 0 ? 'Partially paid' : 'Owed';
+  if (paid > 0) return 'Partially paid';
+  return accrued > paid ? 'Owed' : 'Awaiting lender';
 }
 
 export function repDealView(deal: Deal, repId: string, lines: PayoutLine[], clawbacks: Clawback[] = []): RepDealView {
   const mine = repLines(deal, repId);
   const paidSet = paidKeys(lines.filter((l) => l.repId === repId));
   const share = repShare(deal, repId);
+  const accrued = sum(mine.filter((l) => l.collected).map((l) => l.amount));
   const grouped = new Map<string, typeof mine>();
   for (const l of mine) grouped.set(`${l.role}|${l.segmentKey}`, [...(grouped.get(`${l.role}|${l.segmentKey}`) ?? []), l]);
   const paid = sum(lines.filter((l) => l.repId === repId && l.dealId === deal.id && l.amount > 0).map((l) => l.amount));
@@ -154,9 +160,10 @@ export function repDealView(deal: Deal, repId: string, lines: PayoutLine[], claw
       };
     }),
     share,
+    accrued,
     paid,
-    owed: Math.max(0, share - paid),
-    payoutStatus: payoutStatus(share, paid),
+    owed: Math.max(0, cents(accrued - paid)),
+    payoutStatus: payoutStatus(share, paid, accrued),
     commissionStatus: dealCommissionStatus(deal),
     lenderPaidLabel: segs.length === 1 ? collectionLabel(segs[0]!) : `${segs.filter((s) => collectionLabel(s) === 'Collected' || /^(\d+)\/\1 wks$/.test(collectionLabel(s))).length}/${segs.length} segments`,
     dealStatus: deal.dealStatus,
@@ -179,15 +186,7 @@ export interface RepWallet {
 
 export function repWallet(ctx: LedgerContext, repId: string): RepWallet {
   const l = repLedger(ctx, repId);
-  let awaiting = 0;
-  for (const d of l.deals) {
-    for (const line of repLines(d, repId)) {
-      const label = collectionLabel(line.segment);
-      const collected = label === 'Collected' || /^(\d+)\/\1 wks$/.test(label);
-      if (!collected) awaiting += line.amount;
-    }
-  }
-  return { earned: l.earned, paid: l.paid, cash: l.cash, held: l.held, recovered: l.recovered, owed: l.owed, dealCount: l.deals.length, awaitingLender: sum([awaiting]) };
+  return { earned: l.earned, paid: l.paid, cash: l.cash, held: l.held, recovered: l.recovered, owed: l.owed, dealCount: l.deals.length, awaitingLender: l.awaitingLender };
 }
 
 export interface RepClawbackView {

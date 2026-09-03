@@ -1,12 +1,16 @@
 import { cents, sum } from './money.js';
 import { clawbacksFor, repClawback } from './clawback.js';
-import { repDeals, repShare } from './splits.js';
+import { dealLines, repDeals, repShare } from './splits.js';
 import type { Deal, LedgerContext, PayoutLine } from './types.js';
 
 export interface RepLedger {
   deals: Deal[];
   /** Σ rep's share of every deal they are on, regardless of collection. */
   earned: number;
+  /** Σ rep's share on commission the LENDER HAS PAID — increments received, upfronts collected. */
+  accrued: number;
+  /** earned − accrued: the rep's share still sitting with the lender. */
+  awaitingLender: number;
   /** Σ positive ledger rows — GROSS settled. */
   paid: number;
   /** Σ ALL ledger rows — net of recoveries. */
@@ -15,14 +19,15 @@ export interface RepLedger {
   held: number;
   /** Σ recovered slice over every clawback. */
   recovered: number;
-  /** max(0, earned − paid − held). Nets against settled GROSS, never cash. */
+  /** max(0, accrued − paid − held). Nets against settled GROSS, never cash. A rep is owed only what the house has collected. */
   owed: number;
 }
 
 /**
  * THE ONE definition of a rep's money. The wallet, rep cards, admin roster,
  * and payroll netting must all read this and never re-derive any field.
- * "Paid" comes from the ledger — never from deal status.
+ * "Paid" comes from the ledger — never from deal status. "Owed" accrues as the
+ * lender pays: recording an increment moves that unit from awaitingLender to owed.
  */
 export function repLedger(ctx: LedgerContext, repId: string): RepLedger {
   const deals = repDeals(ctx.deals, repId);
@@ -30,6 +35,7 @@ export function repLedger(ctx: LedgerContext, repId: string): RepLedger {
   const mine = ctx.lines.filter((l) => l.repId === repId);
 
   const earned = sum(deals.map((d) => repShare(d, repId)));
+  const accrued = sum(deals.flatMap((d) => dealLines(d).filter((l) => l.repId === repId && l.collected).map((l) => l.amount)));
   const paid = sum(mine.filter((l) => l.amount > 0).map((l) => l.amount));
   const cash = sum(mine.map((l) => l.amount));
 
@@ -43,7 +49,7 @@ export function repLedger(ctx: LedgerContext, repId: string): RepLedger {
   held = cents(held);
   recovered = cents(recovered);
 
-  return { deals, earned, paid, cash, held, recovered, owed: Math.max(0, cents(earned - paid - held)) };
+  return { deals, earned, accrued, awaitingLender: Math.max(0, cents(earned - accrued)), paid, cash, held, recovered, owed: Math.max(0, cents(accrued - paid - held)) };
 }
 
 export interface PaidFigures {

@@ -52,12 +52,11 @@ describe('GET /api/admin/payroll', () => {
     // Every figure is repLedger's — the same number the rep's wallet shows.
     const ctx = { deals, lines, clawbacks };
     const owed = (id: string) => repLedger(ctx, id).owed;
-    expect(res.body.reps.slice(0, 3).map((r: { id: string; owed: number; lineCount: number }) => [r.id, r.owed, r.lineCount])).toEqual([
-      ['rep-zach-sanders', owed('rep-zach-sanders'), 4],
-      ['rep-julian-ribak', owed('rep-julian-ribak'), 1],
-      ['rep-raymond-amato', owed('rep-raymond-amato'), 2],
-    ]);
-    expect(owed('rep-zach-sanders')).toBeGreaterThan(owed('rep-julian-ribak'));
+    const reps: Array<{ id: string; owed: number; lineCount: number }> = res.body.reps;
+    for (const r of reps) expect(r.owed).toBe(owed(r.id));
+    expect(Object.fromEntries(reps.map((r) => [r.id, r.lineCount]))).toMatchObject({ 'rep-zach-sanders': 4, 'rep-julian-ribak': 1, 'rep-raymond-amato': 2 });
+    const sorted = [...reps].sort((a, b) => b.owed - a.owed || a.id.localeCompare(b.id));
+    expect(reps.map((r) => r.id)).toEqual(sorted.map((r) => r.id));
     expect(res.body.reps.find((r: { id: string }) => r.id === 'rep-zach-sanders').held).toBe(400);
     expect(res.body.outstanding).toBe(res.body.reps.reduce((s: number, r: { owed: number }) => s + r.owed, 0));
   });

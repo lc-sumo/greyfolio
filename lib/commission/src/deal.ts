@@ -98,7 +98,8 @@ export function priceDeal(draft: NewDealDraft, ctx: PricingContext): Deal {
     closerRate,
     overrideRate,
   });
-  const schedule = scheduleFor(ctx.lender, draft.fundedDate, { increments: draft.commIncrements, upfrontPct: draft.commUpfrontPct, remainder: draft.commRemainder, cadenceDays: draft.commCadenceDays, startDate: draft.commStartDate });
+  // Increments are a consolidation thing: LOCs and single-payout products never get a schedule.
+  const schedule = !rule.incremental ? null : scheduleFor(ctx.lender, draft.fundedDate, { increments: draft.commIncrements, upfrontPct: draft.commUpfrontPct, remainder: draft.commRemainder, cadenceDays: draft.commCadenceDays, startDate: draft.commStartDate });
 
   return {
     id: ctx.id,

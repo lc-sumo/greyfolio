@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import { AdminDealDrawer } from '../components/AdminDealDrawer';
 import { DealDrawer } from '../components/DealDrawer';
 import { Shell } from '../components/Shell';
-import { Card, Empty, Loading, Pill } from '../components/ui';
+import { Card, Contact, Empty, Loading, Pill } from '../components/ui';
 import { api, type AdminRenewalRow, type RenewalBucket, type RepRenewalView, type Settings } from '../lib/api';
 import { day, money } from '../lib/format';
 import { useSession } from '../lib/session';
@@ -59,7 +59,7 @@ export function Renewals({ admin }: { admin: boolean }) {
                     <div className="td num subtle">{r.id}</div>
                     <div className="td num">{day(r.date)}</div>
                     <div className="td num">{r.parentId ? r.parentId : r.isParent ? <>{r.id}<div className="subtle" style={{ fontSize: 10.5, fontFamily: 'var(--sans)' }}>parent · {r.drawCount} draw{r.drawCount === 1 ? '' : 's'}</div></> : <span className="subtle">—</span>}</div>
-                    <div className="td ellipsis"><b>{r.business}</b>{'crmUrl' in r && r.crmUrl && <a href={r.crmUrl} target="_blank" rel="noopener" className="crm-mini" onClick={(e) => e.stopPropagation()}>↗</a>}<div className="subtle ellipsis" style={{ fontSize: 11 }}>{r.merchantContact || '—'}{r.merchantPhone ? ` · ${r.merchantPhone}` : ''}</div></div>
+                    <div className="td ellipsis"><b>{r.business}</b>{'crmUrl' in r && r.crmUrl && <a href={r.crmUrl} target="_blank" rel="noopener" className="crm-mini" onClick={(e) => e.stopPropagation()}>↗</a>}<Contact name={r.merchantContact} email={r.merchantEmail} phone={r.merchantPhone} /></div>
                     <div className="td"><div className="paidin" title={`${Math.round(r.pctPaidIn * 100)}% of term paid in · renewal mark at ${Math.round(mark * 100)}%`}><i style={{ width: `${Math.round(r.pctPaidIn * 100)}%`, background: r.pctPaidIn >= mark ? 'var(--teal)' : r.pctPaidIn >= mark - 0.1 ? 'var(--amber)' : 'var(--border-strong)' }} /><i className="mark" style={{ left: `${mark * 100}%` }} /></div><div className="subtle num" style={{ fontSize: 10.5, marginTop: 3 }}>{Math.round(r.pctPaidIn * 100)}% paid in</div></div>
                     <div className="td ellipsis">{r.lender}</div>
                     <div className="td num">{money(r.funded)}{'factor' in r && r.factor ? <span className="subtle" style={{ fontSize: 11 }}> ×{r.factor}</span> : null}</div>

@@ -110,6 +110,7 @@ export async function addDraw(repo: Repo, id: string, input: { amount: number; d
   if (date > today()) throw new HttpError(400, `Draw date ${date} is in the future`);
   const lender = settings.lenders.find((l) => l.name === deal.lender);
   const partner = settings.partners.find((p) => p.name === deal.referralPartner) ?? null;
+  const incremental = !!settings.products.find((p) => p.name === deal.product)?.incremental;
   let draw;
   try {
     draw = newDraw(deal, {
@@ -118,7 +119,8 @@ export async function addDraw(repo: Repo, id: string, input: { amount: number; d
       partner,
       termDays: input.termDays ? Number(input.termDays) : null,
       factor: input.factor ? Number(input.factor) : null,
-      schedule: lender?.terms === 'weekly' ? { mode: 'weekly', weeks: lender.weeks, received: 0, startDate: date } : null,
+      // LOC draws are paid upfront; only an incremental (consolidation) product schedules its draws.
+      schedule: incremental ? scheduleFor(lender, date) : null,
     });
   } catch (e) {
     bad(e);

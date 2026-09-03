@@ -78,4 +78,4 @@ Sign in with any rep's email from the roster (e.g. `leor@greystoneus.com` for ad
 
 ## The one rule
 
-There is **one** definition of a rep's money: `repLedger(ctx, repId)` in `lib/commission/src/ledger.ts`. It returns `{ earned, paid, cash, held, recovered, owed }`. Every screen, roster, and payroll total reads it. `paid` comes only from the payment ledger (`commission_payout_lines`), never from a deal's status.
+There is **one** definition of a rep's money: `repLedger(ctx, repId)` in `lib/commission/src/ledger.ts`. It returns `{ earned, accrued, awaitingLender, paid, cash, held, recovered, owed }`. Every screen, roster, and payroll total reads it. `paid` comes only from the payment ledger (`commission_payout_lines`), never from a deal's status. `accrued` is the rep's share on commission the lender has actually paid (each increment received, each upfront collected), and **owed = max(0, accrued − paid − held)** — recording a lender increment is what moves money from "awaiting lender" into "owed". Increment schedules exist only on consolidation products; LOCs and LOC draws are paid upfront.

@@ -29,14 +29,26 @@ describe('demo board', () => {
       if (c.status === 'recovered') expect(c.recovered).toBeGreaterThan(0);
     }
   });
-  it('every rep ledger balances: owed = earned − paid − held, all non-negative', () => {
+  it('every rep ledger balances: owed = accrued − paid − held, accrued ≤ earned, all non-negative', () => {
     for (const r of demo.reps) {
       const l = repLedger(demo, r.id);
       expect(l.owed).toBeGreaterThanOrEqual(0);
       expect(l.paid).toBeGreaterThanOrEqual(0);
+      expect(l.accrued).toBeLessThanOrEqual(l.earned + 0.005);
+      expect(l.awaitingLender).toBeCloseTo(l.earned - l.accrued, 2);
       expect(l.paid - l.recovered).toBeCloseTo(l.cash, 2);
-      expect(l.owed).toBeCloseTo(Math.max(0, l.earned - l.paid - l.held), 2);
+      expect(l.owed).toBeCloseTo(Math.max(0, l.accrued - l.paid - l.held), 2);
     }
+  });
+  it('only consolidations carry increment schedules; LOCs and their draws are paid upfront', () => {
+    for (const d of demo.deals) {
+      const incremental = d.product.startsWith('CONSOLIDATION');
+      if (!incremental) {
+        expect(d.commSchedule).toBeNull();
+        for (const dr of d.draws) expect(dr.schedule ?? null).toBeNull();
+      }
+    }
+    expect(demo.deals.filter((d) => d.commSchedule).length).toBeGreaterThan(3);
   });
   it('repPaid is stamped only on fully paid deals, and only paid-in-full commission was paid out', () => {
     for (const d of demo.deals) {

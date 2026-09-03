@@ -102,6 +102,7 @@ export async function saveProducts(repo: Repo, input: unknown, actorRepId: strin
       multiDraw,
       drawInitial: multiDraw ? asRate(Number(p.drawInitial) || 0) : null,
       drawSubsequent: multiDraw ? asRate(Number(p.drawSubsequent) || 0) : null,
+      incremental: !!p.incremental,
     };
   });
   uniqueNames(products, 'product');

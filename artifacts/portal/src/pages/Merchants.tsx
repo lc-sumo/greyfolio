@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { AdminDealDrawer } from '../components/AdminDealDrawer';
 import { Shell } from '../components/Shell';
-import { Card, Empty, Loading, Pill, toneFor } from '../components/ui';
+import { Card, Contact, Empty, Loading, Pill, toneFor } from '../components/ui';
 import { api, type MerchantRow, type Settings } from '../lib/api';
 import { compact, day, money } from '../lib/format';
 
@@ -40,7 +40,7 @@ export function Merchants() {
               return (
                 <div key={key} className={`merchant ${isOpen ? 'open' : ''}`}>
                   <button className="merchant-row" onClick={() => setExpanded(isOpen ? null : key)}>
-                    <span className="who"><b>{m.business}</b><span className="subtle">{m.email || 'no email on file'}</span><span className="subtle">{[m.contact, m.phone].filter(Boolean).join(' · ') || '—'}</span></span>
+                    <span className="who"><b>{m.business}</b><Contact name={m.contact} email={m.email || null} phone={m.phone} />{!m.email && <span className="subtle">no email on file</span>}</span>
                     <span className="stat"><span className="label">Deals</span><b className="num">{m.dealCount}</b></span>
                     <span className="stat"><span className="label">Funded</span><b className="num">{compact(m.funded)}</b></span>
                     <span className="stat"><span className="label">Gross commission</span><b className="num">{compact(m.gross)}</b></span>

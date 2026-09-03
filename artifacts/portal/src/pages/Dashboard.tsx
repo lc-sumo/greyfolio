@@ -44,7 +44,7 @@ export function Dashboard() {
           <div className="grid-auto">
             <Metric label="Earned this period" value={money(d.period.earned)} sub={`${d.period.dealCount} deal${d.period.dealCount === 1 ? '' : 's'} funded ${day(d.period.from)} – ${day(d.period.to)}`} />
             <Metric label="Paid this period" value={money(d.period.paid)} tone="pos" sub={d.period.recovered ? <span className="neg">less {money(d.period.recovered)} clawback recovered</span> : 'no clawbacks recovered'} />
-            <Metric label="Balance owed" value={money(d.period.owed)} tone={d.period.owed ? 'warn' : undefined} sub="lifetime · earned − paid − held" />
+            <Metric label="Balance owed" value={money(d.period.owed)} tone={d.period.owed ? 'warn' : undefined} sub="lifetime · collected from lenders − paid − held" />
             <Metric label="Funded volume" value={compact(d.period.funded)} sub="deals I opened, closed or override" />
             <Metric label="My rank" value={d.period.rank ? `#${d.period.rank}` : '—'} sub={`of ${d.period.repCount} reps by commission this period`} />
           </div>

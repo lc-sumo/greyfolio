@@ -59,6 +59,12 @@ export interface ProductRule {
   multiDraw: boolean;
   drawInitial: number | null;
   drawSubsequent: number | null;
+  /**
+   * Commission arrives from the lender in increments (consolidations). Only
+   * incremental products get a payout schedule; LOCs and their draws are paid
+   * upfront and never ask for one.
+   */
+  incremental?: boolean;
 }
 
 /**

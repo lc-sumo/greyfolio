@@ -139,13 +139,13 @@ function ProductsTab({ products, usage, run }: { products: ProductRule[]; usage:
   const [rows, setRows] = useState<Draft[]>(products.map(toDraft));
   useEffect(() => setRows(products.map(toDraft)), [products]);
   const set = (i: number, patch: Partial<Draft>) => setRows(rows.map((x, j) => (j === i ? { ...x, ...patch } : x)));
-  const cols = 'minmax(200px,1.3fr) 120px 80px 80px 80px repeat(5, 74px) 90px 80px';
+  const cols = 'minmax(200px,1.3fr) 120px 80px 80px 80px repeat(6, 74px) 90px 80px';
   const Toggle = ({ on, onChange, disabled }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean }) => <button type="button" className={`tog ${on ? 'on' : ''}`} disabled={disabled} onClick={() => onChange(!on)} aria-pressed={on}><i /></button>;
   return (
-    <Card title="Product rules" extra="draw %s apply only to multi-draw products">
+    <Card title="Product rules" extra="draw %s apply only to multi-draw products · increments (lender pays commission in pieces) apply to consolidations only">
       <div className="scroller">
         <div style={{ minWidth: 1280 }}>
-          <Head cols={cols}><span>Product</span><span>Commission basis</span><span>Default %</span><span>Initial draw %</span><span>Subsequent %</span><span>Factor</span><span>Term</span><span>Parent</span><span>Clawback</span><span>Renewable</span><span>Usage</span><span /></Head>
+          <Head cols={cols}><span>Product</span><span>Commission basis</span><span>Default %</span><span>Initial draw %</span><span>Subsequent %</span><span>Factor</span><span>Term</span><span>Parent</span><span>Clawback</span><span>Renewable</span><span>Increments</span><span>Usage</span><span /></Head>
           {rows.map((p, i) => (
             <Row key={i} cols={cols}>
               <input value={p.name} onChange={(e) => set(i, { name: e.target.value })} />
@@ -158,18 +158,19 @@ function ProductsTab({ products, usage, run }: { products: ProductRule[]; usage:
               <Toggle on={p.parent} onChange={(v) => set(i, { parent: v })} disabled={p.basis === 'draw'} />
               <Toggle on={p.clawback} onChange={(v) => set(i, { clawback: v })} />
               <Toggle on={p.renewal} onChange={(v) => set(i, { renewal: v })} />
+              <Toggle on={!!p.incremental} onChange={(v) => set(i, { incremental: v })} />
               <span className="num subtle">{usage[p.name] ? `${usage[p.name]} deal${usage[p.name] === 1 ? '' : 's'}` : 'unused'}</span>
               <button className="btn" disabled={!!usage[p.name]} onClick={() => setRows(rows.filter((_, j) => j !== i))}>Remove</button>
             </Row>
           ))}
-          <div className="subtle" style={{ fontSize: 11, margin: '6px 0' }}>Multi-draw: <span className="num">{rows.filter((p) => p.multiDraw).map((p) => p.name).join(', ') || 'none'}</span> · toggle per product below.</div>
+          <div className="subtle" style={{ fontSize: 11, margin: '6px 0' }}>Multi-draw: <span className="num">{rows.filter((p) => p.multiDraw).map((p) => p.name).join(', ') || 'none'}</span> · toggle per product below. Incremental payout: <span className="num">{rows.filter((p) => p.incremental).map((p) => p.name).join(', ') || 'none'}</span> — LOCs and LOC draws are paid upfront.</div>
           <div className="toolbar" style={{ marginTop: 8, gap: 8 }}>
             {rows.map((p, i) => <button key={i} className={`btn ${p.multiDraw ? 'primary' : ''}`} style={{ height: 28, padding: '0 10px', fontSize: 11.5 }} onClick={() => set(i, { multiDraw: !p.multiDraw, drawInitial: p.drawInitial || p.comm, drawSubsequent: p.drawSubsequent || String(Number(p.comm) / 2) })}>{p.name || '(unnamed)'}: {p.multiDraw ? 'multi-draw' : 'single'}</button>)}
           </div>
         </div>
       </div>
       <div className="toolbar" style={{ marginTop: 12 }}>
-        <button className="btn" onClick={() => setRows([...rows, { name: '', basis: 'funded', factor: true, term: true, parent: false, comm: '10', clawback: true, renewal: true, multiDraw: false, drawInitial: '', drawSubsequent: '' }])}>+ Add product</button>
+        <button className="btn" onClick={() => setRows([...rows, { name: '', basis: 'funded', factor: true, term: true, parent: false, comm: '10', clawback: true, renewal: true, multiDraw: false, drawInitial: '', drawSubsequent: '', incremental: false }])}>+ Add product</button>
         <span className="count" />
         <button className="btn primary" onClick={() => void run('Product rules saved', () => post('/api/admin/settings/products', { products: rows.map((r) => ({ ...r, comm: Number(r.comm) || 0, drawInitial: Number(r.drawInitial) || 0, drawSubsequent: Number(r.drawSubsequent) || 0 })) }, 'PUT'))}>Save product rules</button>
       </div>

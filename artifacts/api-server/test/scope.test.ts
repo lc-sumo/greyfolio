@@ -37,7 +37,9 @@ describe('repDealView', () => {
   it('a referral fee on the deal reduces the share but is never shown', () => {
     const v = repDealView(deals[1]!, JULIAN, lines, clawbacks);
     expect(v.share).toBe(630); // (2000 − 200 referral) × 35%
-    expect(v).toMatchObject({ payoutStatus: 'Owed', paid: 0, owed: 630, commissionStatus: 'Waiting for payment', lenderPaidLabel: 'Not collected' });
+    // MBC has not paid F2 yet, so nothing is owed to Julian on it until the lender pays.
+    expect(v).toMatchObject({ payoutStatus: 'Awaiting lender', accrued: 0, paid: 0, owed: 0, commissionStatus: 'Waiting for payment', lenderPaidLabel: 'Not collected' });
+    expect(repDealView({ ...deals[1]!, commCollected: 2_000 }, JULIAN, lines, clawbacks)).toMatchObject({ payoutStatus: 'Owed', accrued: 630, owed: 630 });
     expect(JSON.stringify(v)).not.toContain('HUB TRACKER'); // referral partner name
   });
   it('the override rep sees their own override line', () => {
@@ -49,8 +51,11 @@ describe('repDealView', () => {
 
 describe('repWallet', () => {
   it('reads repLedger and adds the awaiting-lender figure', () => {
-    // Julian: earned 350 + 630 = 980; paid 350 (gross); cash 250; held 250 (350 − 100 recovered); owed 980 − 350 − 250 = 380.
-    expect(repWallet(ctx, JULIAN)).toEqual({ earned: 980, paid: 350, cash: 250, held: 250, recovered: 100, owed: 380, dealCount: 2, awaitingLender: 630 });
+    // Julian: earned 350 + 630 = 980; accrued 350 (F2 uncollected); paid 350 (gross); cash 250; held 250 (350 − 100 recovered); owed max(0, 350 − 350 − 250) = 0; 630 awaits MBC.
+    expect(repWallet(ctx, JULIAN)).toEqual({ earned: 980, paid: 350, cash: 250, held: 250, recovered: 100, owed: 0, dealCount: 2, awaitingLender: 630 });
+    // once MBC pays F2 the 630 accrues and, net of the 250 still held, 380 is owed
+    const collected = { ...ctx, deals: ctx.deals.map((d) => (d.id === 'F2' ? { ...d, commCollected: 2_000 } : d)) };
+    expect(repWallet(collected, JULIAN)).toMatchObject({ earned: 980, owed: 380, awaitingLender: 0 });
   });
 });
 
@@ -85,13 +90,15 @@ describe('repDashboard', () => {
   it('buckets earned by funded date and paid by cleared date, ranks within the period, and lists what is owed', () => {
     const d = repDashboard(ctx, reps, runs, JULIAN, '2026-07-01', '2026-09-02');
     assertRepSafe(d);
-    expect(d.period).toMatchObject({ earned: 630, paid: 350, recovered: 100, owed: 380, funded: 20_000, dealCount: 1, rank: 2, repCount: 4 });
+    expect(d.period).toMatchObject({ earned: 630, paid: 350, recovered: 100, owed: 0, funded: 20_000, dealCount: 1, rank: 2, repCount: 4 });
     expect(d.nextPayout).toEqual({ date: '2026-09-15', runLabel: 'Sep 1 – Sep 15, 2026', cycle: 'Twice monthly' });
     expect(d.monthly.map((m) => m.month)).toEqual(['2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08', '2026-09']);
     expect(d.monthly.find((m) => m.month === '2026-06')).toEqual({ month: '2026-06', earned: 350, paid: 0 });
     expect(d.monthly.find((m) => m.month === '2026-08')).toEqual({ month: '2026-08', earned: 0, paid: 350 });
-    expect(d.owedToMe.map((v) => v.id)).toEqual(['F2']);
-    expect(d.wallet.owed).toBe(380);
+    expect(d.owedToMe).toEqual([]); // F2 is not collected yet — it waits with the lender, not in "owed to me"
+    expect(d.wallet.owed).toBe(0);
+    const collected = { ...ctx, deals: ctx.deals.map((x) => (x.id === 'F2' ? { ...x, commCollected: 2_000 } : x)) };
+    expect(repDashboard(collected, reps, runs, JULIAN, '2026-07-01', '2026-09-02').owedToMe.map((v) => v.id)).toEqual(['F2']);
   });
   it('YTD includes June', () => {
     expect(repDashboard(ctx, reps, runs, JULIAN, '2026-01-01', '2026-09-02').period.earned).toBe(980);

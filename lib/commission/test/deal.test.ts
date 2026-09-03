@@ -6,6 +6,7 @@ import { ValidationError } from '../src/validate.js';
 
 const MCA: ProductRule = { name: 'MCA', basis: 'funded', factor: true, term: true, parent: false, comm: 0.12, clawback: true, renewal: true, multiDraw: false, drawInitial: null, drawSubsequent: null };
 const LOC: ProductRule = { name: 'LOC - INITIAL', basis: 'funded', factor: false, term: true, parent: false, comm: 0.08, clawback: true, renewal: false, multiDraw: true, drawInitial: 0.08, drawSubsequent: 0.04 };
+const CONSOL: ProductRule = { ...{ name: 'CONSOLIDATION - UPFRONT COMM', basis: 'funded', factor: true, term: true, parent: false, comm: 0.1, clawback: true, renewal: true, multiDraw: true, drawInitial: 0.1, drawSubsequent: 0.05 }, incremental: true };
 const TERM: ProductRule = { name: 'TERM LOAN', basis: 'funded', factor: false, term: true, parent: false, comm: 0.05, clawback: false, renewal: true, multiDraw: false, drawInitial: null, drawSubsequent: null };
 const ctx = (over: Partial<PricingContext> = {}): PricingContext => ({ id: 'F10', today: '2026-09-02', rule: MCA, lender: { name: 'MBC', terms: 'upfront', weeks: 0 }, partner: undefined, ...over });
 const draft = { business: 'Northstar Dental', fundedDate: '2026-09-01', lender: 'MBC', product: 'MCA', amount: 100_000, termDays: 120, factor: 1.3, commRate: 12, psfPct: 2, originationFee: 500, openerId: 'rep-a', openerRate: 20, closerId: 'rep-b', closerRate: 20, overrideId: 'rep-c', overrideRate: 5 };
@@ -16,14 +17,20 @@ describe('priceDeal', () => {
     expect(d).toMatchObject({ id: 'F10', opportunityId: 'F10', funded: 100_000, factor: 1.3, apr: null, termDays: 120, payback: 130_000, commRate: 0.12, psfPct: 0.02, originationFee: 500, gross: 14_500, referralFee: 0, net: 14_500, openerRate: 0.2, closerRate: 0.2, overrideRate: 0.05, commCollected: 0, commSchedule: null, dealStatus: 'Performing' });
     expect(segments(d)).toHaveLength(1);
   });
-  it('attaches a weekly schedule for weekly lenders and starts uncollected', () => {
-    const d = priceDeal({ ...draft, lender: 'ROWAN' }, ctx({ lender: { name: 'ROWAN', terms: 'weekly', weeks: 20 } }));
+  it('attaches a weekly schedule to an incremental product on a weekly lender, starting uncollected', () => {
+    const d = priceDeal({ ...draft, lender: 'ROWAN', product: CONSOL.name }, ctx({ rule: CONSOL, lender: { name: 'ROWAN', terms: 'weekly', weeks: 20 } }));
     expect(d.commSchedule).toMatchObject({ mode: 'weekly', weeks: 20, received: 0, startDate: '2026-09-08', cadenceDays: 7, remainder: 'spread' });
     expect(d.commCollected).toBeNull();
     expect(collectedOf(segments(d)[0]!)).toBe(0);
   });
+  it('increments are a consolidation thing: an MCA or LOC never gets a schedule, even on a weekly lender', () => {
+    const weekly = { name: 'ROWAN', terms: 'weekly' as const, weeks: 20 };
+    expect(priceDeal({ ...draft, lender: 'ROWAN' }, ctx({ lender: weekly })).commSchedule).toBeNull();
+    expect(priceDeal({ ...draft, lender: 'ROWAN', product: LOC.name, creditLine: 250_000, commIncrements: 10 }, ctx({ rule: LOC, lender: weekly })).commSchedule).toBeNull();
+    expect(priceDeal({ ...draft, lender: 'ROWAN' }, ctx({ lender: weekly })).commCollected).toBe(0);
+  });
   it('a consolidation can ask for 50 upfront and the rest when the increments are done', () => {
-    const d = priceDeal({ ...draft, lender: 'MBC', commIncrements: 12, commUpfrontPct: 50, commRemainder: 'at-end', commCadenceDays: 7 }, ctx());
+    const d = priceDeal({ ...draft, lender: 'MBC', product: CONSOL.name, commIncrements: 12, commUpfrontPct: 50, commRemainder: 'at-end', commCadenceDays: 7 }, ctx({ rule: CONSOL }));
     expect(d.commSchedule).toMatchObject({ weeks: 12, upfrontPct: 0.5, upfrontReceived: false, remainder: 'at-end', remainderReceived: false, cadenceDays: 7, startDate: '2026-09-08' });
     expect(collectedOf(segments(d)[0]!)).toBe(0);
   });

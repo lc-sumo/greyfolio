@@ -1,14 +1,14 @@
 /* Types mirror artifacts/api-server/src/scope.ts. */
 export type Role = 'Opener' | 'Closer' | 'Override';
 export type CommissionStatus = 'Waiting for payment' | 'Invoice Sent' | 'Partially Paid' | 'YES - Paid In Full';
-export type PayoutStatus = 'Paid' | 'Partially paid' | 'Owed';
+export type PayoutStatus = 'Paid' | 'Partially paid' | 'Owed' | 'Awaiting lender';
 
 export interface SessionUser { repId: string; email: string; name: string; role: 'rep' | 'manager' | 'admin' }
 export interface AuthMe { user: SessionUser; canViewAs: boolean; oidc: boolean; devAuth: boolean }
 export interface RepRoleLine { role: Role; rate: number; amount: number; segment: string; segmentKey: string; paid: boolean; paidAmount: number; units: { paid: number; total: number; collected: number } | null }
 export interface RepDealView {
   id: string; crmId: string | null; date: string; business: string; lender: string; product: string; funded: number; drawCount: number;
-  roles: Role[]; lines: RepRoleLine[]; share: number; paid: number; owed: number; payoutStatus: PayoutStatus;
+  roles: Role[]; lines: RepRoleLine[]; share: number; accrued: number; paid: number; owed: number; payoutStatus: PayoutStatus;
   commissionStatus: CommissionStatus; lenderPaidLabel: string; dealStatus: string; repPaid: string | null;
   clawback: { amount: number; remaining: number; status: 'open' | 'recovered' } | null;
 }
@@ -62,7 +62,7 @@ export const qs = (o: Record<string, string | undefined>) => {
 /* ---- Admin (Phase 4). Never served to reps. ---- */
 export interface Lender { name: string; terms: 'upfront' | 'weekly'; weeks: number; upfrontPct?: number; remainder?: 'spread' | 'at-end'; cadenceDays?: number }
 export interface ReferralPartner { name: string; pct: number; monthlyCap: number | null }
-export interface ProductRule { name: string; basis: 'funded' | 'draw' | 'payback'; factor: boolean; term: boolean; parent: boolean; comm: number; clawback: boolean; renewal: boolean; multiDraw: boolean; drawInitial: number | null; drawSubsequent: number | null }
+export interface ProductRule { name: string; basis: 'funded' | 'draw' | 'payback'; factor: boolean; term: boolean; parent: boolean; comm: number; clawback: boolean; renewal: boolean; multiDraw: boolean; drawInitial: number | null; drawSubsequent: number | null; incremental?: boolean }
 export interface Settings {
   lenders: Lender[]; partners: ReferralPartner[]; products: ProductRule[];
   thresholds: { clawbackWindowDays: number; paymentOverdueDays: number; renewalMark: number; additionalCapitalAfterDays: number };
@@ -108,7 +108,7 @@ export interface PayrollRepDetail {
   lines: PayableLineView[];
   clawbacks: Array<{ id: string; dealId: string; business: string; date: string; remaining: number }>;
   outstandingClawback: number;
-  paidInRun: Array<{ key: string; dealId: string; business: string; merchantContact: string; role: string; segmentKey: string | null; unitLabel: string | null; amount: number; paidAt: string }>;
+  paidInRun: Array<{ key: string; dealId: string; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string; role: string; segmentKey: string | null; unitLabel: string | null; amount: number; paidAt: string }>;
   paidSummary: { gross: number; recovered: number; cash: number; lineCount: number };
 }
 export interface PayResult { repId: string; runId: string; gross: number; withheld: number; net: number; lines: number; recoveries: number; dealsFullyPaid: string[]; uncollectedDealIds: string[] }

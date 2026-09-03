@@ -1,10 +1,10 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { api, post, type AdminDealDetail, type MasterBoard, type RepOption, type Settings } from '../lib/api';
-import { compact, fullDay, money, pct, todayIso } from '../lib/format';
+import { compact, day, fullDay, money, pct, todayIso } from '../lib/format';
 import { addBusinessDays, liveMath, num } from '../lib/math';
 import { useSession } from '../lib/session';
-import { Drawer } from './ui';
+import { Drawer, Pill, toneFor } from './ui';
 
 type F = Record<string, string>;
 const BASIS: Record<string, string> = { funded: 'funded amount', draw: 'draw amount', payback: 'payback amount' };
@@ -38,7 +38,9 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
 
   const rule = settings.products.find((p) => p.name === f.product);
   const lender = settings.lenders.find((l) => l.name === f.lender);
-  const incremental = f.payout === 'increments' || (f.payout === 'lender' && lender?.terms === 'weekly');
+  // Increments are a consolidation thing: the structure block only shows (and only saves) on incremental products.
+  const canIncrement = !!rule?.incremental;
+  const incremental = canIncrement && (f.payout === 'increments' || (f.payout === 'lender' && lender?.terms === 'weekly'));
   const partner = settings.partners.find((p) => p.name === f.referralPartner);
   const reps = roster.data?.reps ?? [];
   const assign: RepOption[] = board.repOptions.assign;
@@ -73,7 +75,23 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
 
   const m = useMemo(() => liveMath(f, rule, partner), [f, rule, partner]);
   const email = (f.merchantEmail ?? '').trim().toLowerCase();
-  const priorDeals = useMemo(() => (email ? board.deals.filter((d) => d.merchantEmail && d.merchantEmail.toLowerCase() === email) : []), [board.deals, email]);
+  const priorDeals = useMemo(() => (email ? board.deals.filter((d) => d.merchantEmail && d.merchantEmail.toLowerCase() === email).sort((a, b) => b.date.localeCompare(a.date)) : []), [board.deals, email]);
+  const client = priorDeals[0];
+  // Existing client: the email matched an account → pull its profile in and link the deal to it.
+  // Fields we filled from the profile are remembered, so they clear again if the email stops matching.
+  const [auto, setAuto] = useState<Partial<F>>({});
+  useEffect(() => {
+    const next: Partial<F> = client ? { business: client.business, merchantContact: client.merchantContact, merchantPhone: client.merchantPhone } : {};
+    setF((s) => {
+      const out = { ...s };
+      for (const k of ['business', 'merchantContact', 'merchantPhone'] as const) {
+        const untouched = !s[k] || s[k] === auto[k];
+        if (untouched) out[k] = next[k] ?? '';
+      }
+      return out;
+    });
+    setAuto(next);
+  }, [client?.merchantEmail]); // eslint-disable-line react-hooks/exhaustive-deps
   const parents = board.deals.filter((d) => d.drawSubsequentPct || d.drawCount > 0);
   const renewal = rule?.renewal && m.termDays ? addBusinessDays(f.fundedDate ?? '', m.termDays * settings.thresholds.renewalMark) : null;
   const explainer = !rule
@@ -114,6 +132,7 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
   const amountLabel = rule?.multiDraw ? 'Initial draw amount' : rule?.basis === 'draw' ? 'Draw amount' : 'Funded amount';
   return (
     <Drawer title="New deal" sub="Funded deals only — the funded date cannot be in the future." onClose={onClose}>
+      <div className="drawer-cols">
       <div className="form">
         <Field label="Product" span>
           <select value={f.product} onChange={set('product')}>{settings.products.map((p) => <option key={p.name}>{p.name}</option>)}</select>
@@ -131,9 +150,30 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
         <Field label="Deal ID (CRM)" hint="The sheet row number is assigned automatically"><input value={f.crmId} onChange={set('crmId')} placeholder="OPP-48213" /></Field>
         <Field label="Merchant contact"><input value={f.merchantContact} onChange={set('merchantContact')} /></Field>
         <Field label="Merchant phone"><input value={f.merchantPhone} onChange={set('merchantPhone')} /></Field>
-        <Field label="Merchant email" span hint={priorDeals.length ? `Existing merchant — ${priorDeals.length} prior deal(s) totalling ${compact(priorDeals.reduce((s, d) => s + d.funded, 0))} funded. This deal files under the same merchant record.` : 'All deals group by merchant email.'}>
-          <input type="email" value={f.merchantEmail} onChange={set('merchantEmail')} />
+        <Field label="Merchant email" hint={client ? 'Existing client — profile pulled in below.' : 'Type the email first: an existing client\u2019s profile fills in automatically.'}>
+          <input type="email" value={f.merchantEmail} onChange={set('merchantEmail')} placeholder="owner@business.com" />
         </Field>
+        {client && (
+          <div className="client" data-testid="client-profile">
+            <div className="head">
+              <div><Pill tone="teal">Existing client</Pill> <b style={{ marginLeft: 8 }}>{client.business}</b><span className="subtle"> · {client.merchantContact || 'no contact on file'}{client.merchantPhone ? ` · ${client.merchantPhone}` : ''}</span></div>
+              <span className="subtle">{priorDeals.length} deal{priorDeals.length === 1 ? '' : 's'} · {compact(priorDeals.reduce((s, d) => s + d.funded, 0))} funded · this deal links to the same account</span>
+            </div>
+            <div className="deals">
+              <div className="h"><span>Deal ID</span><span>Funded</span><span>Lender · product</span><span>Amount</span><span>Lender paid</span><span>Status</span></div>
+              {priorDeals.map((d) => (
+                <div key={d.id}>
+                  <span className="num">{d.crmId ?? d.id}</span>
+                  <span className="num">{day(d.date)}</span>
+                  <span className="ellipsis">{d.lender} · {d.product}{d.drawCount ? ` · ${d.drawCount} draw${d.drawCount > 1 ? 's' : ''}` : ''}</span>
+                  <span className="num">{money(d.funded)}</span>
+                  <span className="num subtle">{d.lenderPaidLabel}</span>
+                  <span><Pill tone={toneFor(d.dealStatus)}>{d.dealStatus}</Pill></span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <Field label="Funded date"><input type="date" max={todayIso()} value={f.fundedDate} onChange={set('fundedDate')} /></Field>
         <Field label="Lender">
           <select value={f.lender} onChange={set('lender')}>
@@ -159,13 +199,14 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
         <Field label="Referral partner"><select value={f.referralPartner} onChange={set('referralPartner')}>{settings.partners.map((p) => <option key={p.name}>{p.name}</option>)}</select></Field>
         <Field label="Referral fee %"><input inputMode="decimal" value={f.referralRate} onChange={set('referralRate')} /></Field>
         <div className="label" style={{ gridColumn: '1 / -1', marginTop: 6 }}>Commission payout from the lender</div>
-        <Field label="Payout structure" span>
+        {!canIncrement && rule && <div className="note" style={{ gridColumn: '1 / -1' }}>{rule.name} commission is paid upfront by the lender. Increment structures (upfront share, number of increments, cadence) apply to consolidations only — not LOCs or LOC draws.</div>}
+        {canIncrement && <Field label="Payout structure" span>
           <select value={f.payout} onChange={set('payout')}>
             <option value="lender">{lender ? (lender.terms === 'weekly' ? `Lender default — ${lender.weeks} increments${lender.upfrontPct ? `, ${Math.round(lender.upfrontPct * 100)}% upfront` : ''}${lender.remainder === 'at-end' ? ', rest when done' : ''}` : 'Lender default — all upfront at funding') : 'Lender default'}</option>
             <option value="upfront">All upfront at funding</option>
             <option value="increments">In increments (consolidation-style)</option>
           </select>
-        </Field>
+        </Field>}
         {incremental && (
           <>
             <Field label="Upfront share %" hint="e.g. 50 → half at funding, the rest per the structure below"><input inputMode="decimal" placeholder="0" value={f.commUpfrontPct} onChange={set('commUpfrontPct')} /></Field>
@@ -201,7 +242,7 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
         ))}
       </div>
 
-      <section className="share">
+      <section className="share" style={{ position: 'sticky', top: 0 }}>
         <div className="label" style={{ color: 'var(--navy-text-3)' }}>Live math</div>
         <dl className="kv navy">
           <dt>Commission $</dt><dd>{money(m.commission)}</dd>
@@ -214,6 +255,7 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
           <dt>House net</dt><dd style={{ color: 'var(--teal-bright)' }}>{money(m.houseNet)}</dd>
         </dl>
       </section>
+      </div>
       {err && <div className="note" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>{err}</div>}
       <div style={{ display: 'flex', gap: 9 }}>
         <button className="btn primary big" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save deal & push to Sheets'}</button>

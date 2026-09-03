@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { AdminDealDrawer } from '../components/AdminDealDrawer';
 import { Shell } from '../components/Shell';
-import { Card, Loading, Pill, toneFor } from '../components/ui';
+import { Card, Contact, Loading, Pill, toneFor } from '../components/ui';
 import { DEMO, api, post, type PayResult, type PayableLineView, type PayrollOverview, type PayrollRepDetail, type Settings } from '../lib/api';
 import { compact, day, fullDay, initials, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
@@ -168,7 +168,7 @@ export function Payroll() {
                             <div className="td num" style={{ cursor: 'pointer' }} onClick={() => setOpen(l.dealId)}>{l.dealId}</div>
                             <div className="td"><span className={l.segmentKey === 'base' ? 'muted' : 'warn'}>{l.segmentLabel}</span>{l.units && <div className="subtle num" style={{ fontSize: 10.5 }}>Lender paid {l.units.collected}/{l.units.total} · Rep paid {l.units.paid}/{l.units.total}</div>}</div>
                             <div className="td ellipsis">{l.business}</div>
-                            <div className="td ellipsis"><div className="ellipsis">{l.merchantContact || '—'}</div><div className="subtle ellipsis" style={{ fontSize: 11 }}>{[l.merchantEmail, l.merchantPhone].filter(Boolean).join(' · ')}</div></div>
+                            <div className="td contact-cell"><Contact name={l.merchantContact} email={l.merchantEmail} phone={l.merchantPhone} /></div>
                             <div className="td ellipsis">{l.lender}</div>
                             <div className="td r num">{compact(l.funded)}</div>
                             <div className="td"><Pill tone={l.role === 'Override' ? 'amber' : 'teal'}>{l.role}</Pill></div>
@@ -201,7 +201,7 @@ export function Payroll() {
                             <div className="tr" key={p.key}>
                               <div className="td num" style={{ cursor: 'pointer' }} onClick={() => setOpen(p.dealId)}>{p.dealId}</div>
                               <div className="td ellipsis">{p.business}</div>
-                              <div className="td ellipsis">{p.merchantContact}</div>
+                              <div className="td contact-cell"><Contact name={p.merchantContact} email={p.merchantEmail} phone={p.merchantPhone} /></div>
                               <div className={`td ${p.amount < 0 ? 'neg' : ''}`}>{p.role}{p.segmentKey && p.segmentKey !== 'base' ? ` · ${p.segmentKey}` : ''}{p.unitLabel ? <span className="subtle"> · {p.unitLabel}</span> : ''}</div>
                               <div className={`td r num ${p.amount < 0 ? 'neg' : 'pos'}`}>{money(p.amount)}</div>
                               <div className="td num">{day(p.paidAt)}</div>

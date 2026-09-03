@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import { AdminDealDrawer } from '../components/AdminDealDrawer';
 import { NewDealDrawer } from '../components/NewDealDrawer';
 import { Shell } from '../components/Shell';
-import { Card, Empty, Loading, toneFor } from '../components/ui';
+import { Card, Contact, Empty, Loading, toneFor } from '../components/ui';
 import { DEAL_STATUS_OPTIONS, api, post, qs, type MasterBoard, type Settings } from '../lib/api';
 import { compact, day, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
@@ -65,7 +65,7 @@ export function MasterDeals() {
                   <div className="td num subtle" style={{ cursor: 'pointer' }} onClick={() => setOpen(d.id)}>{d.id}</div>
                   <div className="td num">{day(d.date)}</div>
                   <div className="td ellipsis" style={{ cursor: 'pointer' }} onClick={() => setOpen(d.id)}><b>{d.business}</b>{d.drawCount > 0 && <span className="subtle"> · {d.drawCount} draw{d.drawCount > 1 ? 's' : ''}</span>}</div>
-                  <div className="td ellipsis"><div className="ellipsis">{d.merchantContact || '—'}</div><div className="subtle ellipsis" style={{ fontSize: 11 }}>{[d.merchantEmail, d.merchantPhone].filter(Boolean).join(' · ')}</div></div>
+                  <div className="td contact-cell"><Contact name={d.merchantContact} email={d.merchantEmail} phone={d.merchantPhone} /></div>
                   <div className="td ellipsis">{d.lender}</div>
                   <div className="td ellipsis">{d.product}</div>
                   <div className="td r num">{money(d.funded)}</div>

@@ -6,7 +6,7 @@ import { ctx, line, makeClawback, makeDeal, makeDraw } from './fixtures.js';
 // F1: net 1,000 → rep-07 opener 350, rep-05 closer 400, rep-02 override 50.
 // F2: net 2,000 → rep-07 opener 700.
 const F1 = makeDeal({ id: 'F1', date: '2026-06-05', funded: 10_000, commRate: 0.1, commCollected: 1_000 });
-const F2 = makeDeal({ id: 'F2', date: '2026-07-12', funded: 20_000, commRate: 0.1 });
+const F2 = makeDeal({ id: 'F2', date: '2026-07-12', funded: 20_000, commRate: 0.1, commCollected: 2_000 });
 
 describe('planPayout', () => {
   it('writes one positive ledger row per selected line, pinned to the rep and run', () => {
@@ -115,7 +115,8 @@ describe('planPayout', () => {
   });
 
   it('flags deal ids whose commission the lender has not fully paid', () => {
-    const plan = planPayout(ctx([F1, F2]), { repId: 'rep-07', selectedKeys: ['F1|Opener|base', 'F2|Opener|base'], runId: 'run-4', paidAt: '2026-09-02' });
+    const open = { ...F2, commCollected: 0 };
+    const plan = planPayout(ctx([F1, open]), { repId: 'rep-07', selectedKeys: ['F1|Opener|base', 'F2|Opener|base'], runId: 'run-4', paidAt: '2026-09-02' });
     expect(plan.uncollectedDealIds).toEqual(['F2']);
   });
 

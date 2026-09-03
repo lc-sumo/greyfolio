@@ -20,7 +20,7 @@ export function DealDrawer({ id, onClose }: { id: string; onClose: () => void })
             <div style={{ color: 'var(--navy-text-2)', fontSize: 12.5 }}>
               {d.lines.map((l) => `${l.role} ${pct(l.rate)}${l.segment !== 'Initial' ? ` · ${l.segment}` : ''}`).join(' + ')}
               {' · '}
-              <b style={{ color: d.owed ? 'var(--amber-bright)' : 'var(--teal-bright)' }}>{d.owed ? `${money(d.owed)} still owed to me` : 'paid in full'}</b>
+              <b style={{ color: d.owed ? 'var(--amber-bright)' : 'var(--teal-bright)' }}>{d.owed ? `${money(d.owed)} still owed to me` : d.paid >= d.share ? 'paid in full' : d.paid > 0 ? 'rest awaiting lender payment' : 'awaiting lender payment'}</b>
             </div>
           </div>
 

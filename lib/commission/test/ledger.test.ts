@@ -3,8 +3,9 @@ import { linesInPeriod, monthlySeries, paidFigures, repLedger } from '../src/led
 import { ctx, line, makeClawback, makeDeal } from './fixtures.js';
 
 // F1: net 1,000 → rep-07 (opener 35%) = 350. F2: net 2,000 → rep-07 = 700.
-const F1 = makeDeal({ id: 'F1', date: '2026-06-05', funded: 10_000, commRate: 0.1 });
-const F2 = makeDeal({ id: 'F2', date: '2026-07-12', funded: 20_000, commRate: 0.1 });
+// Both fully collected from the lender, so accrued === earned here.
+const F1 = makeDeal({ id: 'F1', date: '2026-06-05', funded: 10_000, commRate: 0.1, commCollected: 1_000 });
+const F2 = makeDeal({ id: 'F2', date: '2026-07-12', funded: 20_000, commRate: 0.1, commCollected: 2_000 });
 
 describe('repLedger — invariant #1: one definition of a rep\'s money', () => {
   it('earned sums the rep\'s share across every deal they are on', () => {
@@ -41,6 +42,15 @@ describe('repLedger — invariant #1: one definition of a rep\'s money', () => {
     expect(l.owed).toBe(0); // NOT earned − cash = 350, which would hand the clawback back
   });
 
+  it('owed accrues only as the lender pays: uncollected commission waits with the lender', () => {
+    const open = makeDeal({ id: 'F4', funded: 10_000, commRate: 0.1, commCollected: 0 });
+    const half = makeDeal({ id: 'F5', funded: 10_000, commRate: 0.1, commCollected: 500 });
+    expect(repLedger(ctx([open]), 'rep-07')).toMatchObject({ earned: 350, accrued: 0, awaitingLender: 350, owed: 0 });
+    // a partially collected whole-segment line is not accrued until the lender pays it in full
+    expect(repLedger(ctx([half]), 'rep-07')).toMatchObject({ earned: 350, accrued: 0, awaitingLender: 350, owed: 0 });
+    expect(repLedger(ctx([F1, open]), 'rep-07')).toMatchObject({ earned: 700, accrued: 350, awaitingLender: 350, owed: 350 });
+  });
+
   it('held is the REMAINING slice of open clawbacks, so a rep is charged once', () => {
     const cb = makeClawback('cb-1', 'F1', 1_000);
     const rows = [line('cbrec|cb-1|run-2|rep-07', 'rep-07', -200, { role: 'Clawback recovery', clawbackId: 'cb-1', segmentKey: null })];
@@ -56,7 +66,7 @@ describe('repLedger — invariant #1: one definition of a rep\'s money', () => {
   });
 
   it('a clawback on a deal the rep is not on does not touch their ledger', () => {
-    const other = makeDeal({ id: 'F3', openerId: 'rep-02', closerId: 'rep-05', overrideId: null });
+    const other = makeDeal({ id: 'F3', openerId: 'rep-02', closerId: 'rep-05', overrideId: null, commCollected: 1_000 });
     const cb = makeClawback('cb-x', 'F3', 500);
     expect(repLedger(ctx([F1, other], [], [cb]), 'rep-07')).toMatchObject({ held: 0, recovered: 0, owed: 350 });
   });

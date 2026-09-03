@@ -45,9 +45,10 @@ describe('paying increments as they land', () => {
     state = applyPayout(state, plan);
     expect(unitsPaid(state.deals[0]!, state.lines, 'rep-07', 'base')).toEqual({ paid: 4, total: 20, collected: 4 });
     expect(payableLines(state.deals, state.lines, 'rep-07')).toHaveLength(16);
-    expect(repLedger(state, 'rep-07')).toMatchObject({ earned: 3_500, paid: 700, owed: 2_800 });
-    // lender pays 6 more → 6 collected units payable, still 10 uncollected
+    expect(repLedger(state, 'rep-07')).toMatchObject({ earned: 3_500, accrued: 700, paid: 700, owed: 0, awaitingLender: 2_800 });
+    // lender pays 6 more → those 6 increments accrue to the rep's ledger: 6 collected units payable, still 10 uncollected
     state = { ...state, deals: [consol(10)] };
+    expect(repLedger(state, 'rep-07')).toMatchObject({ earned: 3_500, accrued: 1_750, paid: 700, owed: 1_050, awaitingLender: 1_750 });
     const next = payableLines(state.deals, state.lines, 'rep-07');
     expect(next.filter((l) => l.collected)).toHaveLength(6);
     expect(next.filter((l) => !l.collected)).toHaveLength(10);

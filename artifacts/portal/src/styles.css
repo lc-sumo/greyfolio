@@ -102,6 +102,9 @@ button, input, select { font: inherit; color: inherit; }
 .table { display: grid; min-width: 1220px; }
 .table .tr { display: grid; grid-template-columns: var(--cols); align-items: center; border-bottom: 1px solid var(--border-light); min-height: 44px; }
 .table .tr:last-child { border-bottom: none; }
+/* Zebra: every other data row is tinted so wide tables read across. */
+.table .tr:not(.th):nth-child(even) { background: var(--sunken); }
+.table .tr.click:nth-child(even):hover { background: var(--surface-alt); }
 .table .th { background: var(--sunken); border-radius: 8px; min-height: 36px; margin-bottom: 4px; }
 .table .th .td { font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-subtle); }
 .table .td { padding: 8px 10px; min-width: 0; font-size: 12.5px; }
@@ -126,7 +129,7 @@ input.search:focus, select.filter:focus { border-color: var(--teal); }
 
 /* Drawer */
 .scrim { position: fixed; inset: 0; background: rgba(20,24,32,.42); z-index: 40; }
-.drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(620px, 100%); background: var(--surface-alt); z-index: 41; box-shadow: -20px 0 60px rgba(20,24,32,.18); overflow-y: auto; padding: 24px; display: grid; gap: 16px; align-content: start; }
+.drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(1240px, 100%); background: var(--surface-alt); z-index: 41; box-shadow: -20px 0 60px rgba(20,24,32,.18); overflow-y: auto; padding: 24px; display: grid; gap: 16px; align-content: start; }
 .drawer h2 { margin: 0; font-size: 21px; font-weight: 700; letter-spacing: -.035em; }
 .drawer .close { position: absolute; top: 18px; right: 18px; }
 .share { background: var(--navy); color: var(--navy-text); border-radius: 12px; padding: 18px 20px; }
@@ -161,13 +164,36 @@ input.search:focus, select.filter:focus { border-color: var(--teal); }
 .roster { min-width: 900px; }
 
 /* Forms (admin drawers) */
-.form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; }
+.form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 14px; }
+@media (max-width: 900px) { .form { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 560px) { .form { grid-template-columns: 1fr; } }
+.drawer-cols .form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 900px) { .drawer-cols .form { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 560px) { .drawer-cols .form { grid-template-columns: 1fr; } }
+.drawer-cols { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(260px, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 900px) { .drawer-cols { grid-template-columns: 1fr; } }
 .field { display: grid; gap: 5px; min-width: 0; }
 .field input, .field select { height: 36px; border: 1px solid var(--border-strong); border-radius: 8px; padding: 0 10px; background: #fff; outline: none; width: 100%; font-size: 13px; }
 .field input:focus, .field select:focus { border-color: var(--teal); }
 .field input.ro { background: var(--sunken); color: var(--ink-muted); font-family: var(--mono); }
 .field input[inputmode] { font-family: var(--mono); }
 .split-row { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1.4fr) 90px 120px; gap: 12px; align-items: end; }
+@media (min-width: 901px) { .split-row { grid-column: span 2; } }
+/* Merchant contact: name / email / phone stacked, phone is click-to-call. */
+.contact { display: grid; gap: 1px; min-width: 0; line-height: 1.3; }
+.contact > * { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contact .name { font-size: 12.5px; }
+.contact a { font-size: 11px; color: var(--ink-muted); text-decoration: none; }
+.contact a:hover { color: var(--teal); text-decoration: underline; }
+.contact a.tel { font-family: var(--mono); color: var(--navy); font-weight: 600; }
+.table .tr .td.contact-cell { padding-top: 6px; padding-bottom: 6px; }
+/* Existing-client profile on New deal */
+.client { grid-column: 1 / -1; background: var(--teal-light); border: 1px solid var(--teal-light-2, var(--border-light-2)); border-radius: 10px; padding: 12px 14px; display: grid; gap: 8px; }
+.client .head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.client .head b { font-size: 13.5px; }
+.client .deals { display: grid; gap: 4px; font-size: 12px; }
+.client .deals > div { display: grid; grid-template-columns: 90px 80px minmax(0, 1fr) 110px 90px 110px; gap: 10px; padding: 4px 6px; border-radius: 6px; background: rgba(255,255,255,.6); align-items: center; }
+.client .deals > div.h { background: none; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-subtle); font-weight: 600; }
 .kv.navy dt { color: var(--navy-text-2); } .kv.navy dd { color: #fff; }
 .share-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--navy-border); }
 .share-stats span { display: block; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--navy-text-3); }
@@ -234,6 +260,7 @@ input.mini-input:focus { border-color: var(--teal); }
 /* Settings */
 .srow { display: grid; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border-light); }
 .srow:last-of-type { border-bottom: none; }
+.srow:not(.head):nth-of-type(odd) { background: var(--sunken); }
 .srow.head { padding: 6px 0; border-bottom: 1px solid var(--border-light-2); }
 .srow.head span { font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-subtle); }
 .srow input, .srow select { height: 32px; border: 1px solid var(--border); border-radius: 7px; padding: 0 8px; background: #fff; font-size: 12.5px; width: 100%; min-width: 0; outline: none; }

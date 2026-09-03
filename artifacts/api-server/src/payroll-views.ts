@@ -122,7 +122,7 @@ export interface PayrollRepDetail {
   lines: PayableLineView[];
   clawbacks: Array<{ id: string; dealId: string; business: string; date: string; remaining: number }>;
   outstandingClawback: number;
-  paidInRun: Array<{ key: string; dealId: string; business: string; merchantContact: string; role: string; segmentKey: string | null; unitLabel: string | null; amount: number; paidAt: string }>;
+  paidInRun: Array<{ key: string; dealId: string; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string; role: string; segmentKey: string | null; unitLabel: string | null; amount: number; paidAt: string }>;
   paidSummary: { gross: number; recovered: number; cash: number; lineCount: number };
 }
 
@@ -136,7 +136,7 @@ export function payrollRepDetail(ctx: LedgerContext, rep: Rep, runId: string): P
     clawbacks: queue.map((q) => ({ id: q.clawback.id, dealId: q.clawback.dealId, business: byId.get(q.clawback.dealId)?.business ?? q.clawback.dealId, date: q.clawback.date, remaining: q.remaining })),
     outstandingClawback: sum(queue.map((q) => q.remaining)),
     paidInRun: paid
-      .map((l) => ({ key: l.key, dealId: l.dealId, business: byId.get(l.dealId)?.business ?? '—', merchantContact: byId.get(l.dealId)?.merchantContact ?? '—', role: l.role, segmentKey: l.segmentKey, unitLabel: unitLabelOf(l.key), amount: l.amount, paidAt: l.paidAt }))
+      .map((l) => ({ key: l.key, dealId: l.dealId, business: byId.get(l.dealId)?.business ?? '—', merchantContact: byId.get(l.dealId)?.merchantContact ?? '—', merchantEmail: byId.get(l.dealId)?.merchantEmail ?? '', merchantPhone: byId.get(l.dealId)?.merchantPhone ?? '', role: l.role, segmentKey: l.segmentKey, unitLabel: unitLabelOf(l.key), amount: l.amount, paidAt: l.paidAt }))
       .sort((a, b) => a.paidAt.localeCompare(b.paidAt) || Math.sign(b.amount) - Math.sign(a.amount) || a.key.localeCompare(b.key)),
     paidSummary: paidFigures(paid),
   };

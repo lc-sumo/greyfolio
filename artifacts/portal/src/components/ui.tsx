@@ -36,6 +36,19 @@ export function toneFor(status: CommissionStatus | PayoutStatus | string): 'teal
   return 'grey';
 }
 
+/** Merchant contact stacked: name, email (mailto), phone (click-to-call). Clicks never bubble into a row's open handler. */
+export function Contact({ name, email, phone, size = 'table' }: { name?: string | null; email?: string | null; phone?: string | null; size?: 'table' | 'inline' }) {
+  const stop = (e: React.MouseEvent) => e.stopPropagation();
+  if (!name && !email && !phone) return <span className="subtle">—</span>;
+  return (
+    <div className={`contact ${size}`}>
+      {name && <span className="name">{name}</span>}
+      {email && <a href={`mailto:${email}`} onClick={stop} title="Email merchant">{email}</a>}
+      {phone && <a className="tel" href={`tel:${phone.replace(/[^+\d]/g, '')}`} onClick={stop} title="Call merchant">{phone}</a>}
+    </div>
+  );
+}
+
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="empty">{children}</div>;
 }

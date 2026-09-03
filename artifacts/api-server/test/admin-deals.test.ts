@@ -19,6 +19,7 @@ async function harness() {
   return { repo, app, admin: await as('leor@greystoneus.com'), rep: await as('julian.ribak@greystoneus.com'), mgr: await as('raymond.amato@greystoneus.com') };
 }
 
+const CONSOL = 'CONSOLIDATION - UPFRONT COMM';
 const draft = { business: 'Northstar Dental', merchantContact: 'Maria Duran', merchantEmail: 'MDuran@northstar.test', merchantPhone: '(201) 555-0199', fundedDate: today, lender: 'MBC', product: 'MCA', amount: 100_000, termDays: 120, factor: 1.3, commRate: 12, psfPct: 2, originationFee: 500, referralPartner: 'MBC', openerId: 'rep-julian-ribak', openerRate: 35, closerId: 'rep-zach-sanders', closerRate: 40, overrideId: 'rep-raymond-amato', overrideRate: 5 };
 
 describe('only admins add deals', () => {
@@ -53,14 +54,28 @@ describe('POST /api/admin/deals', () => {
     const { rep } = await harness().then(async (h) => ({ rep: h.rep }));
     void rep;
   });
-  it('attaches a weekly schedule for weekly lenders', async () => {
+  it('attaches a weekly schedule to a consolidation on a weekly lender', async () => {
     const { admin } = await harness();
-    const res = await admin.post('/api/admin/deals').send({ ...draft, lender: 'ROWAN' });
+    const res = await admin.post('/api/admin/deals').send({ ...draft, lender: 'ROWAN', product: CONSOL });
     expect(res.status).toBe(201);
     expect(res.body.segments[0].schedule).toMatchObject({ weeks: 20, received: 0, perWeek: 725, cadenceDays: 7, upfrontPct: 0, remainder: 'spread', overdue: 0 });
     expect(res.body.segments[0].schedule.events).toHaveLength(20);
     expect(res.body.segments[0].schedule.nextExpected).toMatchObject({ kind: 'increment', n: 1, amount: 725 });
     expect(res.body.lenderPaidLabel).toBe('0/20 wks');
+  });
+  it('increments are a consolidation thing: MCAs, LOCs and LOC draws are paid upfront even on a weekly lender', async () => {
+    const { admin } = await harness();
+    const mca = await admin.post('/api/admin/deals').send({ ...draft, lender: 'ROWAN' });
+    expect(mca.body.segments[0].schedule).toBeNull();
+    expect(mca.body.lenderPaidLabel).toBe('Not collected');
+    const loc = await admin.post('/api/admin/deals').send({ ...draft, lender: 'ROWAN', product: 'LOC - INITIAL', factor: undefined, commRate: undefined, creditLine: 250_000, referralPartner: null, commIncrements: 10, commUpfrontPct: 50 });
+    expect(loc.body.segments[0].schedule).toBeNull();
+    const draw = await admin.post(`/api/admin/deals/${loc.body.id}/draws`).send({ amount: 25_000 });
+    expect(draw.body.segments.map((x: { schedule: unknown }) => x.schedule)).toEqual([null, null]);
+    // a consolidation's draw follows the lender's increments
+    const consol = await admin.post('/api/admin/deals').send({ ...draft, lender: 'ROWAN', product: CONSOL, creditLine: 300_000, referralPartner: null });
+    const cdraw = await admin.post(`/api/admin/deals/${consol.body.id}/draws`).send({ amount: 25_000 });
+    expect(cdraw.body.segments[1].schedule).toMatchObject({ weeks: 20, received: 0 });
   });
   it('rejects the guards with a readable message', async () => {
     const { admin } = await harness();
@@ -115,7 +130,7 @@ describe('deal edits', () => {
 describe('consolidation payout structures', () => {
   it('a deal can ask for 50 upfront and the rest when increments are done; upfront and final have recorders', async () => {
     const { admin } = await harness();
-    const res = await admin.post('/api/admin/deals').send({ ...draft, referralPartner: null, commIncrements: 10, commUpfrontPct: 50, commRemainder: 'at-end' });
+    const res = await admin.post('/api/admin/deals').send({ ...draft, product: CONSOL, referralPartner: null, commIncrements: 10, commUpfrontPct: 50, commRemainder: 'at-end' });
     expect(res.status).toBe(201);
     const sch = res.body.segments[0].schedule;
     expect(sch).toMatchObject({ weeks: 10, upfrontPct: 0.5, upfrontAmount: 7_250, upfrontReceived: false, remainder: 'at-end', remainderAmount: 7_250, remainderReceived: false, perWeek: 0 });
@@ -134,7 +149,7 @@ describe('consolidation payout structures', () => {
     const lenders = (await admin.get('/api/admin/settings')).body.lenders.map((l: { name: string }) => (l.name === 'ROWAN' ? { ...l, upfrontPct: 50, remainder: 'at-end', cadenceDays: 14 } : l));
     const saved = await admin.put('/api/admin/settings/lenders').send({ lenders });
     expect(saved.body.lenders.find((l: { name: string }) => l.name === 'ROWAN')).toEqual({ name: 'ROWAN', terms: 'weekly', weeks: 20, upfrontPct: 0.5, remainder: 'at-end', cadenceDays: 14 });
-    const res = await admin.post('/api/admin/deals').send({ ...draft, lender: 'ROWAN', referralPartner: null });
+    const res = await admin.post('/api/admin/deals').send({ ...draft, lender: 'ROWAN', product: CONSOL, referralPartner: null });
     expect(res.body.segments[0].schedule).toMatchObject({ weeks: 20, upfrontPct: 0.5, remainder: 'at-end', cadenceDays: 14 });
     const ov = (await admin.get('/api/admin/overview')).body.cards;
     expect(ov.expected30Count).toBeGreaterThanOrEqual(1); // the upfront is due today
@@ -155,7 +170,7 @@ describe('collection is one writer', () => {
   });
   it('weekly segments record weeks, and Paid In Full sets received = weeks', async () => {
     const { admin } = await harness();
-    await admin.post('/api/admin/deals').send({ ...draft, lender: 'ROWAN', referralPartner: null });
+    await admin.post('/api/admin/deals').send({ ...draft, lender: 'ROWAN', product: CONSOL, referralPartner: null });
     let res = await admin.post('/api/admin/deals/F4/collection').send({ segmentKey: 'base', recordWeeks: 3 });
     expect(res.body.segments[0].schedule.received).toBe(3);
     expect(res.body.lenderPaidLabel).toBe('3/20 wks');

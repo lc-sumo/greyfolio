@@ -32,6 +32,7 @@ export function Deals() {
             <option value="all">All payout statuses</option>
             <option value="Owed">Owed</option>
             <option value="Partially paid">Partially paid</option>
+            <option value="Awaiting lender">Awaiting lender</option>
             <option value="Paid">Paid</option>
           </select>
           <span className="count">{rows.length} of {q.data?.count ?? 0} deals</span>

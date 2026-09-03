@@ -123,8 +123,10 @@ export function buildDemo(today = iso(new Date()), seed = 20260902): DemoData {
   for (let cursor = start; cursor <= today; cursor = addDays(cursor, r.int(2, 5))) {
     n++;
     const id = `F${n}`;
-    const product = r.pick(fundableProducts);
     const lender = r.pick(LENDERS);
+    // Weekly lenders mostly fund consolidations — the only product family paid in increments.
+    const consol = fundableProducts.find((p) => p.incremental);
+    const product = lender.terms === 'weekly' && consol && r.next() < 0.7 ? consol : r.pick(fundableProducts);
     const partnerName = r.pick(['None', 'None', 'None', 'MBC', 'HUB TRACKER']);
     const partner = partnerByName.get(partnerName)!;
     const funded = Math.round((28 + r.next() * 420) * 1000);
@@ -146,7 +148,7 @@ export function buildDemo(today = iso(new Date()), seed = 20260902): DemoData {
     const fn = FIRST[bIdx % FIRST.length]!;
     const ln = LAST[(bIdx * 3) % LAST.length]!;
     const age = daysBetween(cursor, today);
-    const schedule = scheduleFor(lender, addDays(cursor, 7));
+    const schedule = product.incremental ? scheduleFor(lender, addDays(cursor, 7)) : null;
     if (schedule) schedule.received = Math.min(schedule.weeks, Math.floor(age / 7));
     const collected = schedule ? null : age > 40 ? calc.gross : age > 18 ? (r.next() > 0.45 ? calc.gross : Math.round(calc.gross * 0.5)) : 0;
     const slow = age > 30 && r.next() > 0.9;
@@ -201,7 +203,7 @@ export function buildDemo(today = iso(new Date()), seed = 20260902): DemoData {
         if (date > today) break;
         const amount = Math.round(((0.1 + r.next() * 0.35) * deal.creditLine!) / 1000) * 1000;
         const dAge = daysBetween(date, today);
-        const draw = newDraw(deal, { amount, date, partner: partner.pct > 0 ? partner : null, schedule: scheduleFor(lender, addDays(date, 7)) });
+        const draw = newDraw(deal, { amount, date, partner: partner.pct > 0 ? partner : null, schedule: product.incremental ? scheduleFor(lender, addDays(date, 7)) : null });
         if (draw.schedule) draw.schedule.received = Math.min(draw.schedule.weeks, Math.floor(dAge / 7));
         else draw.collected = dAge > 35 ? draw.gross : dAge > 14 && r.next() > 0.5 ? Math.round(draw.gross / 2) : 0;
         deal.draws.push(draw);

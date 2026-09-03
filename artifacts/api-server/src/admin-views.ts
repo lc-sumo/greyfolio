@@ -1,0 +1,187 @@
+/** Admin projections: everything, including house net, referral and every rep's name. Never served to reps. */
+import {
+  atRisk,
+  clawbackSlices,
+  collectedGross,
+  collectedOf,
+  collectionLabel,
+  crmUrl,
+  dealCommissionStatus,
+  dealLines,
+  houseNet,
+  outstandingGross,
+  outstandingOf,
+  segmentStatus,
+  segments,
+  sum,
+  totalFunded,
+  totalGross,
+  totalNet,
+  totalRepPayout,
+  type Clawback,
+  type Deal,
+  type LedgerContext,
+  type Rep,
+  type Role,
+} from '@greystone/commission';
+import type { Settings } from './repo.js';
+
+export interface RoleView {
+  role: Role;
+  repId: string | null;
+  name: string | null;
+  rate: number;
+  amount: number;
+  paid: number;
+}
+
+export interface AdminDealRow {
+  id: string;
+  opportunityId: string;
+  parentId: string | null;
+  date: string;
+  business: string;
+  drawCount: number;
+  merchantContact: string;
+  merchantEmail: string;
+  merchantPhone: string;
+  lender: string;
+  product: string;
+  funded: number;
+  factor: number | null;
+  apr: number | null;
+  termDays: number | null;
+  frequency: string;
+  payback: number | null;
+  commRate: number;
+  psfPct: number;
+  originationFee: number;
+  gross: number;
+  referralPartner: string | null;
+  referralRate: number;
+  referralFee: number;
+  net: number;
+  roles: RoleView[];
+  totalRepPayout: number;
+  houseNet: number;
+  collected: number;
+  outstanding: number;
+  lenderPaidLabel: string;
+  commissionStatus: string;
+  dealStatus: string;
+  atRisk: boolean;
+  repPaid: string | null;
+  lenderPaid: string | null;
+  crmUrl: string;
+  creditLine: number | null;
+  drawSubsequentPct: number | null;
+  hasClawback: boolean;
+}
+
+export function adminDealRow(deal: Deal, ctx: LedgerContext, reps: Rep[], settings: Settings, today: string): AdminDealRow {
+  const name = (id: string | null) => (id ? reps.find((r) => r.id === id)?.name ?? id : null);
+  const lines = dealLines(deal);
+  const paidKeys = new Set(ctx.lines.filter((l) => l.amount > 0).map((l) => l.key));
+  const roleView = (role: Role, repId: string | null, rate: number): RoleView => {
+    const mine = lines.filter((l) => l.role === role);
+    return { role, repId, name: name(repId), rate, amount: sum(mine.map((l) => l.amount)), paid: sum(mine.filter((l) => paidKeys.has(l.key)).map((l) => l.amount)) };
+  };
+  const segs = segments(deal);
+  const full = segs.filter((s) => outstandingOf(s) === 0 && s.gross > 0).length;
+  return {
+    id: deal.id,
+    opportunityId: deal.opportunityId,
+    parentId: deal.parentId,
+    date: deal.date,
+    business: deal.business,
+    drawCount: deal.draws.length,
+    merchantContact: deal.merchantContact,
+    merchantEmail: deal.merchantEmail,
+    merchantPhone: deal.merchantPhone,
+    lender: deal.lender,
+    product: deal.product,
+    funded: totalFunded(deal),
+    factor: deal.factor,
+    apr: deal.apr,
+    termDays: deal.termDays,
+    frequency: deal.frequency,
+    payback: deal.payback,
+    commRate: deal.commRate,
+    psfPct: deal.psfPct,
+    originationFee: deal.originationFee,
+    gross: totalGross(deal),
+    referralPartner: deal.referralPartner,
+    referralRate: deal.referralRate,
+    referralFee: sum(segs.map((s) => s.referralFee)),
+    net: totalNet(deal),
+    roles: [roleView('Opener', deal.openerId, deal.openerRate), roleView('Closer', deal.closerId, deal.closerRate), roleView('Override', deal.overrideId, deal.overrideRate)],
+    totalRepPayout: totalRepPayout(deal),
+    houseNet: houseNet(deal),
+    collected: collectedGross(deal),
+    outstanding: outstandingGross(deal),
+    lenderPaidLabel: segs.length === 1 ? collectionLabel(segs[0]!) : `${full}/${segs.length} segments`,
+    commissionStatus: dealCommissionStatus(deal),
+    dealStatus: deal.dealStatus,
+    atRisk: atRisk(deal, settings.thresholds.clawbackWindowDays, today),
+    repPaid: deal.repPaid,
+    lenderPaid: deal.lenderPaid,
+    crmUrl: crmUrl(settings.crm.urlTemplate, deal),
+    creditLine: deal.creditLine,
+    drawSubsequentPct: deal.drawSubsequentPct,
+    hasClawback: ctx.clawbacks.some((c) => c.dealId === deal.id),
+  };
+}
+
+export interface SegmentView {
+  sk: string;
+  label: string;
+  n: number;
+  date: string;
+  amount: number;
+  commRate: number;
+  gross: number;
+  referralFee: number;
+  net: number;
+  collected: number;
+  outstanding: number;
+  status: string;
+  lenderPaidLabel: string;
+  schedule: { weeks: number; received: number; startDate: string | null; perWeek: number } | null;
+}
+
+export interface AdminDealDetail extends AdminDealRow {
+  segments: SegmentView[];
+  payments: Array<{ role: string; segmentKey: string | null; repId: string; repName: string; amount: number; paidAt: string; runId: string | null }>;
+  clawbacks: Array<Clawback & { slices: Array<{ repId: string; name: string; share: number; recovered: number; remaining: number }> }>;
+}
+
+export function adminDealDetail(deal: Deal, ctx: LedgerContext, reps: Rep[], settings: Settings, today: string): AdminDealDetail {
+  const row = adminDealRow(deal, ctx, reps, settings, today);
+  const name = (id: string) => reps.find((r) => r.id === id)?.name ?? id;
+  return {
+    ...row,
+    segments: segments(deal).map((s) => ({
+      sk: s.sk,
+      label: s.label,
+      n: s.n,
+      date: s.date,
+      amount: s.amount,
+      commRate: s.commRate,
+      gross: s.gross,
+      referralFee: s.referralFee,
+      net: s.net,
+      collected: collectedOf(s),
+      outstanding: outstandingOf(s),
+      status: segmentStatus(s),
+      lenderPaidLabel: collectionLabel(s),
+      schedule: s.schedule ? { weeks: s.schedule.weeks, received: s.schedule.received, startDate: s.schedule.startDate, perWeek: sum([s.gross / s.schedule.weeks]) } : null,
+    })),
+    payments: ctx.lines
+      .filter((l) => l.dealId === deal.id)
+      .map((l) => ({ role: l.role, segmentKey: l.segmentKey, repId: l.repId, repName: name(l.repId), amount: l.amount, paidAt: l.paidAt, runId: l.runId }))
+      .sort((a, b) => a.paidAt.localeCompare(b.paidAt)),
+    clawbacks: ctx.clawbacks
+      .filter((c) => c.dealId === deal.id)
+      .map((c) => ({ ...c, slices: clawbackSlices(c, deal, ctx.lines).map((s) => ({ ...s, name: name(s.repId) })) })),
+  };
+}

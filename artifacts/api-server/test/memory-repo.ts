@@ -1,5 +1,4 @@
 import { commissionFor, type Clawback, type Deal, type DealDraw, type LedgerContext, type PayoutLine, type PayrollRun, type Rep, type Team } from '@greystone/commission';
-import type { AuditEntry, Repo } from '../src/repo.js';
 
 export const reps: Rep[] = [
   { id: 'rep-leor', name: 'Leor', email: 'leor@greystoneus.com', role: 'admin', teamId: null, openerRate: 0.2, closerRate: 0.2, overrideRate: 0.05, active: true },
@@ -78,37 +77,17 @@ export const lines: PayoutLine[] = [
 
 export const clawbacks: Clawback[] = [{ id: 'cb-1', dealId: 'F1', date: '2026-08-15', amount: 1_000, recovered: 100, reason: 'Merchant defaulted inside 30 days', status: 'open' }];
 
-export function memoryRepo(): Repo & { audit: AuditEntry[] } {
-  const audit: AuditEntry[] = [];
-  const ctx: LedgerContext = { deals, lines, clawbacks };
-  return {
-    audit,
-    async findRepByEmail(email) {
-      return reps.find((r) => r.email.toLowerCase() === email.trim().toLowerCase()) ?? null;
-    },
-    async findRep(id) {
-      return reps.find((r) => r.id === id) ?? null;
-    },
-    async listReps() {
-      return reps;
-    },
-    async listTeams() {
-      return teams;
-    },
-    async listRuns() {
-      return runs;
-    },
-    async loadContext() {
-      return ctx;
-    },
-    async getSetting<T>(key: string): Promise<T | null> {
-      return key === 'payroll' ? ({ cycle: 'Twice monthly' } as T) : null;
-    },
-    async writeAudit(e) {
-      audit.push({ ...e, at: new Date().toISOString() });
-    },
-    async listAudit(limit = 100) {
-      return audit.slice(-limit).reverse();
-    },
-  };
+import { memoryRepo as makeRepo } from '../src/repo.memory.js';
+import { LENDERS, LISTS, PARTNERS, PRODUCTS, THRESHOLDS } from '../../../lib/db/src/seed/workbook.js';
+
+export function memoryRepo() {
+  return makeRepo({
+    reps: reps.map((r) => ({ ...r })),
+    teams: [...teams],
+    runs: [...runs],
+    deals: deals.map((d) => ({ ...d, draws: [...d.draws] })),
+    lines: [...lines],
+    clawbacks: clawbacks.map((c) => ({ ...c })),
+    settings: { lenders: [...LENDERS], partners: [...PARTNERS], products: [...PRODUCTS], thresholds: THRESHOLDS, lists: LISTS, crm: { urlTemplate: 'https://crm.test/o/{id}' }, payroll: { cycle: 'Twice monthly' } },
+  });
 }

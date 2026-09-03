@@ -159,3 +159,24 @@ input.search:focus, select.filter:focus { border-color: var(--teal); }
 
 .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: var(--navy); color: #fff; padding: 12px 20px; border-radius: 10px; font-weight: 500; box-shadow: 0 18px 40px rgba(20,24,32,.3); z-index: 60; }
 .roster { min-width: 900px; }
+
+/* Forms (admin drawers) */
+.form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; }
+.field { display: grid; gap: 5px; min-width: 0; }
+.field input, .field select { height: 36px; border: 1px solid var(--border-strong); border-radius: 8px; padding: 0 10px; background: #fff; outline: none; width: 100%; font-size: 13px; }
+.field input:focus, .field select:focus { border-color: var(--teal); }
+.field input.ro { background: var(--sunken); color: var(--ink-muted); font-family: var(--mono); }
+.field input[inputmode] { font-family: var(--mono); }
+.split-row { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1.4fr) 90px 120px; gap: 12px; align-items: end; }
+.kv.navy dt { color: var(--navy-text-2); } .kv.navy dd { color: #fff; }
+.share-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--navy-border); }
+.share-stats span { display: block; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--navy-text-3); }
+.share-stats b { display: block; font-family: var(--mono); color: #fff; margin-top: 4px; }
+.crm { margin-left: 10px; font-size: 12px; font-weight: 600; vertical-align: middle; }
+.crm-mini { margin-left: 4px; font-size: 11px; }
+.pips { display: flex; flex-wrap: wrap; gap: 4px; }
+.pips i { width: 14px; height: 10px; border-radius: 3px; background: var(--border-light-2); }
+.pips i.on { background: var(--teal); }
+select.mini { height: 28px; border: 1px solid var(--border-strong); border-radius: 7px; background: #fff; font-size: 11.5px; padding: 0 6px; max-width: 100%; }
+.pl .row.draw { grid-template-columns: minmax(0, 1.2fr) 100px 60px 100px auto; align-items: center; }
+.pl .row.draw.total { font-weight: 700; border-bottom: none; }

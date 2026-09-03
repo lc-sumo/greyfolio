@@ -8,6 +8,7 @@ import { Clawbacks } from './pages/Clawbacks';
 import { Dashboard } from './pages/Dashboard';
 import { Deals } from './pages/Deals';
 import { Login } from './pages/Login';
+import { MasterDeals } from './pages/MasterDeals';
 import { Roster } from './pages/Roster';
 import { Soon } from './pages/Soon';
 import { Statements } from './pages/Statements';
@@ -32,7 +33,7 @@ function App() {
   return (
     <Routes>
       <Route path="/" element={repMode ? <Dashboard /> : <Roster />} />
-      <Route path="/deals" element={repMode ? <Deals /> : <Navigate to="/soon/deals" replace />} />
+      <Route path="/deals" element={repMode ? <Deals /> : auth.user.role === 'admin' ? <MasterDeals /> : <Navigate to="/" replace />} />
       <Route path="/clawbacks" element={<Clawbacks />} />
       <Route path="/statements" element={<Statements />} />
       <Route path="/soon/:what" element={<Soon />} />

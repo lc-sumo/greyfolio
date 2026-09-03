@@ -6,6 +6,7 @@ import { HttpError } from './auth/middleware.js';
 import type { AppConfig } from './config.js';
 import type { Repo } from './repo.js';
 import { adminRouter } from './routes/admin.js';
+import { adminDealsRouter } from './routes/admin-deals.js';
 import { healthRouter } from './routes/health.js';
 import { meRouter } from './routes/me.js';
 
@@ -29,6 +30,7 @@ export function createApp(config: AppConfig, repo: Repo): express.Express {
   app.use('/auth', authRouter(config, repo));
   app.use('/api/me', meRouter(repo));
   app.use('/api/admin', adminRouter(repo));
+  app.use('/api/admin', adminDealsRouter(repo));
 
   if (config.portalDist) {
     const dist = path.resolve(config.portalDist);

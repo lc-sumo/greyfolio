@@ -13,8 +13,8 @@ export function compact(v: number): string {
   return '$' + Math.round(v);
 }
 export function pct(v: number): string {
-  const p = v * 100;
-  return (p % 1 ? p.toFixed(1) : p.toFixed(0)) + '%';
+  const p = Math.round(v * 10000) / 100;
+  return (Number.isInteger(p) ? p.toFixed(0) : p.toFixed(p * 10 % 1 ? 2 : 1)) + '%';
 }
 const asDate = (s: string) => new Date(`${s}T12:00:00Z`);
 export function day(s: string | null | undefined): string {

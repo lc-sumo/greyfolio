@@ -1,5 +1,5 @@
 import { desc, eq, sql } from 'drizzle-orm';
-import type { LedgerContext, PayrollRun, Rep, Team } from '@greystone/commission';
+import type { Deal, DealDraw, LedgerContext, PayrollRun, Rep, Team, WeeklySchedule } from '@greystone/commission';
 import {
   commissionAuditLog,
   commissionClawbacks,
@@ -17,7 +17,7 @@ import {
   toTeam,
   type Database,
 } from '@greystone/db';
-import type { AuditEntry, Repo } from './repo.js';
+import type { AuditEntry, DealPatch, Repo, Settings } from './repo.js';
 
 export function dbRepo(db: Database): Repo {
   return {
@@ -55,6 +55,35 @@ export function dbRepo(db: Database): Repo {
     async getSetting<T>(key: string): Promise<T | null> {
       const rows = await db.select().from(commissionSettings).where(eq(commissionSettings.key, key)).limit(1);
       return rows[0] ? (rows[0].value as T) : null;
+    },
+    async getSettings(): Promise<Settings> {
+      const rows = await db.select().from(commissionSettings);
+      const map = Object.fromEntries(rows.map((r) => [r.key, r.value])) as Partial<Settings>;
+      return {
+        lenders: map.lenders ?? [],
+        partners: map.partners ?? [],
+        products: map.products ?? [],
+        thresholds: map.thresholds ?? { clawbackWindowDays: 30, paymentOverdueDays: 14, renewalMark: 0.4, additionalCapitalAfterDays: 30 },
+        lists: map.lists ?? { frequencies: [], commissionStatuses: [], dealStatuses: [] },
+        crm: map.crm ?? { urlTemplate: '' },
+        payroll: map.payroll ?? { cycle: 'Twice monthly' },
+      };
+    },
+    async insertDeal(deal: Deal) {
+      const { draws, ...row } = deal;
+      await db.transaction(async (tx) => {
+        await tx.insert(commissionDeals).values(row);
+        for (const x of draws) await tx.insert(commissionDealDraws).values({ dealId: deal.id, ...x });
+      });
+    },
+    async updateDeal(id: string, patch: DealPatch) {
+      await db.update(commissionDeals).set({ ...patch, updatedAt: sql`now()` }).where(eq(commissionDeals.id, id));
+    },
+    async insertDraw(dealId: string, draw: DealDraw) {
+      await db.insert(commissionDealDraws).values({ dealId, ...draw });
+    },
+    async updateDraw(dealId: string, ref: string, patch: { collected: number | null; schedule: WeeklySchedule | null }) {
+      await db.update(commissionDealDraws).set(patch).where(sql`${commissionDealDraws.dealId} = ${dealId} and ${commissionDealDraws.ref} = ${ref}`);
     },
     async writeAudit(entry: AuditEntry) {
       await db.insert(commissionAuditLog).values({

@@ -1,18 +1,12 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import type { Rep } from '@greystone/commission';
 import type { Repo } from '../repo.js';
+import { HttpError } from '../http-error.js';
 import type { RequestScope, SessionUser } from './session.js';
 
 export const VIEW_AS_HEADER = 'x-view-as';
 
-export class HttpError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+export { HttpError } from '../http-error.js';
 
 export function currentUser(req: Request): SessionUser | null {
   return req.session?.user ?? null;

@@ -1,18 +1,28 @@
 /**
  * In-browser stand-in for the API, used by the demo build (VITE_DEMO=1).
- * It runs the same domain layer and rep projections the server runs, over
- * the deterministic demo board — no network, no database. Every rule the
- * server enforces (rep scoping, View-as authorization) is mirrored here so
- * the preview behaves like the real thing.
+ * It runs the SAME services and projections the Express server runs, over an
+ * in-memory repo holding the deterministic demo board — no network, no
+ * database. Rep scoping and View-as authorization are mirrored exactly, and
+ * writes (new deals, draws, collection, splits) mutate the in-memory board.
  */
-import { repDeals, repLedger, repOptions, type LedgerContext, type Rep, type Team } from '@greystone/commission';
+import { repDeals, repLedger, repOptions, type Rep, type Team } from '@greystone/commission';
 import { buildDemo, type DemoData } from '@greystone/db/seed/demo';
+import { LENDERS, LISTS, PARTNERS, PRODUCTS, THRESHOLDS } from '@greystone/db/seed';
+import { adminDealDetail, adminDealRow } from '../../../api-server/src/admin-views';
+import { memoryRepo } from '../../../api-server/src/repo.memory';
 import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repStatements, repWallet } from '../../../api-server/src/scope';
+import { addDraw, createDeal, setCollection, setDealStatus, updateSplits } from '../../../api-server/src/services/deals';
 import { ApiError, type SessionUser } from './api';
 
+let repo: ReturnType<typeof memoryRepo> | null = null;
 let demo: DemoData | null = null;
-const board = () => (demo ??= buildDemo(new Date().toISOString().slice(0, 10)));
-const ctxOf = (d: DemoData): LedgerContext => ({ deals: d.deals, lines: d.lines, clawbacks: d.clawbacks });
+function board() {
+  if (!demo) {
+    demo = buildDemo(new Date().toISOString().slice(0, 10));
+    repo = memoryRepo({ reps: demo.reps, teams: demo.teams, runs: demo.runs, deals: demo.deals, lines: demo.lines, clawbacks: demo.clawbacks, settings: { lenders: [...LENDERS], partners: [...PARTNERS], products: [...PRODUCTS], thresholds: THRESHOLDS, lists: LISTS, crm: { urlTemplate: '' }, payroll: { cycle: 'Twice monthly' } } });
+  }
+  return { d: demo!, repo: repo! };
+}
 
 const KEY = 'gs-demo-user';
 const OUT = 'gs-demo-signed-out';
@@ -22,7 +32,7 @@ const store = {
     try { return sessionStorage.getItem(k); } catch { return null; }
   },
   set(k: string, v: string | null) {
-    try { v === null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v); } catch { /* storage blocked — fall back to memory */ }
+    try { v === null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v); } catch { /* storage blocked — memory only */ }
   },
 };
 function user(): SessionUser | null {
@@ -31,9 +41,9 @@ function user(): SessionUser | null {
     const stored = JSON.parse(store.get(KEY) ?? 'null') as SessionUser | null;
     if (stored) return (memoryUser = stored);
   } catch { /* ignore */ }
-  // First visit: open straight into a rep's portal so the preview shows something at rest.
   if (store.get(OUT) === '1') return (memoryUser = null);
-  const rep = board().reps.find((r) => r.name === 'Julian Ribak')!;
+  // First visit: open straight into a rep's portal so the preview shows something at rest.
+  const rep = board().d.reps.find((r) => r.name === 'Julian Ribak')!;
   memoryUser = { repId: rep.id, email: rep.email, name: rep.name, role: rep.role };
   store.set(KEY, JSON.stringify(memoryUser));
   return memoryUser;
@@ -43,7 +53,6 @@ function setUser(u: SessionUser | null) {
   store.set(KEY, u ? JSON.stringify(u) : null);
   store.set(OUT, u ? null : '1');
 }
-const audit: Array<{ actorRepId: string; action: string; targetRepId: string | null; path: string | null; at: string }> = [];
 
 function canViewAs(reps: Rep[], _teams: Team[], actor: SessionUser, targetId: string): { ok: true; target: Rep } | { ok: false; reason: string } {
   const target = reps.find((r) => r.id === targetId);
@@ -57,23 +66,29 @@ function canViewAs(reps: Rep[], _teams: Team[], actor: SessionUser, targetId: st
   return { ok: false, reason: 'Reps can only view their own portal' };
 }
 
+/** Errors thrown by the shared services are HttpError-shaped ({status, message}). */
+function rethrow(e: unknown): never {
+  if (e && typeof e === 'object' && 'status' in e && typeof (e as { status: unknown }).status === 'number') throw new ApiError((e as { status: number }).status, String((e as { message?: unknown }).message ?? 'Request failed'));
+  throw e;
+}
+
 export async function demoFetch<T>(path: string, init: RequestInit, viewAs: string | null): Promise<T> {
   const url = new URL(path, 'http://demo');
   const p = url.pathname;
   const q = url.searchParams;
-  const d = board();
-  const ctx = ctxOf(d);
+  const method = (init.method ?? 'GET').toUpperCase();
+  const body = init.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+  const { d, repo } = board();
+  const ctx = await repo.loadContext();
   const u = user();
   const json = (v: unknown) => v as T;
-  const requireUser = () => {
-    if (!u) throw new ApiError(401, 'Sign in required');
-    return u;
-  };
+  const today = d.today;
+  const settings = await repo.getSettings();
 
   if (p === '/auth/methods') return json({ oidc: false, devAuth: true });
   if (p === '/auth/me') {
-    const me = requireUser();
-    return json({ user: me, canViewAs: me.role !== 'rep', oidc: false, devAuth: true });
+    if (!u) throw new ApiError(401, 'Sign in required');
+    return json({ user: u, canViewAs: u.role !== 'rep', oidc: false, devAuth: true });
   }
   if (p === '/auth/dev-login') {
     const email = (q.get('email') ?? '').trim().toLowerCase();
@@ -82,18 +97,15 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     if (!rep.active) throw new ApiError(403, `${rep.name} is inactive — ask an admin to reactivate the account`);
     const su: SessionUser = { repId: rep.id, email: rep.email, name: rep.name, role: rep.role };
     setUser(su);
-    audit.push({ actorRepId: rep.id, action: 'login', targetRepId: null, path: '/auth/dev-login', at: new Date().toISOString() });
     return json({ ok: true, user: su });
   }
-  if (p === '/auth/logout' && init.method === 'POST') {
-    if (u) audit.push({ actorRepId: u.repId, action: 'logout', targetRepId: null, path: '/auth/logout', at: new Date().toISOString() });
+  if (p === '/auth/logout' && method === 'POST') {
     setUser(null);
     return json({ ok: true, redirect: null });
   }
+  if (!u) throw new ApiError(401, 'Sign in required');
+  const me = u;
 
-  const me = requireUser();
-
-  // Server-side scope: resolve the effective rep, refuse unauthorized View-as, audit it.
   let effective = me.repId;
   let viewing = false;
   if (viewAs && viewAs !== me.repId) {
@@ -101,7 +113,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     if (!check.ok) throw new ApiError(403, check.reason);
     effective = check.target.id;
     viewing = true;
-    audit.push({ actorRepId: me.repId, action: 'view-as', targetRepId: effective, path: p, at: new Date().toISOString() });
+    await repo.writeAudit({ actorRepId: me.repId, action: 'view-as', targetRepId: effective, path: p });
   }
 
   if (p === '/api/me') {
@@ -109,7 +121,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     return json({ rep: { id: rep.id, name: rep.name, email: rep.email, role: rep.role, active: rep.active }, viewAs: viewing, actor: viewing ? { id: me.repId, name: me.name, role: me.role } : null });
   }
   if (p === '/api/me/dashboard') {
-    const to = q.get('to') ?? d.today;
+    const to = q.get('to') ?? today;
     const from = q.get('from') ?? `${to.slice(0, 4)}-01-01`;
     if (from > to) throw new ApiError(400, 'from must not be after to');
     return json(repDashboard(ctx, d.reps, d.runs, effective, from, to, 'Twice monthly'));
@@ -125,10 +137,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     const deal = ctx.deals.find((x) => x.id === id);
     if (!deal || !repDeals([deal], effective).length) throw new ApiError(404, 'Deal not found');
     const view = repDealView(deal, effective, ctx.lines, ctx.clawbacks);
-    const payments = ctx.lines
-      .filter((l) => l.repId === effective && l.dealId === deal.id)
-      .map((l) => ({ role: l.role, segmentKey: l.segmentKey, amount: l.amount, paidAt: l.paidAt, runId: l.runId }))
-      .sort((a, b) => a.paidAt.localeCompare(b.paidAt));
+    const payments = ctx.lines.filter((l) => l.repId === effective && l.dealId === deal.id).map((l) => ({ role: l.role, segmentKey: l.segmentKey, amount: l.amount, paidAt: l.paidAt, runId: l.runId })).sort((a, b) => a.paidAt.localeCompare(b.paidAt));
     return json({ ...view, payments });
   }
   if (p === '/api/me/clawbacks') return json({ clawbacks: repClawbackViews(ctx, effective) });
@@ -136,18 +145,16 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
   if (p === '/api/me/leaderboard') return json({ rows: leaderboard(ctx, d.reps, effective) });
   if (p === '/api/me/monthly') return json({ series: repMonthly(ctx, effective, (q.get('months') ?? '').split(',').filter(Boolean)) });
 
-  if (p === '/api/admin/reps') {
-    if (me.role !== 'admin') throw new ApiError(403, 'This requires one of: admin');
-    const teamName = new Map(d.teams.map((t) => [t.id, t.name]));
-    return json({
-      reps: d.reps.map((rep) => {
-        const l = repLedger(ctx, rep.id);
-        return { id: rep.id, name: rep.name, email: rep.email, role: rep.role, teamId: rep.teamId, team: rep.teamId ? teamName.get(rep.teamId) ?? null : null, openerRate: rep.openerRate, closerRate: rep.closerRate, overrideRate: rep.overrideRate, active: rep.active, earned: l.earned, paid: l.paid, held: l.held, owed: l.owed, dealCount: l.deals.length };
-      }),
-    });
+  /* ---- admin / manager ---- */
+  const requireRole = (...roles: string[]) => {
+    if (!roles.includes(me.role)) throw new ApiError(403, `This requires one of: ${roles.join(', ')}`);
+  };
+  if (p === '/api/admin/teams') {
+    requireRole('admin', 'manager');
+    return json({ teams: d.teams });
   }
   if (p === '/api/admin/reps/options') {
-    if (me.role === 'rep') throw new ApiError(403, 'This requires one of: admin, manager');
+    requireRole('admin', 'manager');
     const purpose = q.get('purpose');
     if (purpose !== 'assign' && purpose !== 'edit' && purpose !== 'view-as') throw new ApiError(400, 'purpose must be assign, edit or view-as');
     let reps = d.reps;
@@ -157,9 +164,54 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     }
     return json({ options: repOptions(reps, purpose) });
   }
-  if (p === '/api/admin/audit') {
-    if (me.role !== 'admin') throw new ApiError(403, 'This requires one of: admin');
-    return json({ entries: [...audit].reverse().slice(0, 100) });
+  requireRole('admin');
+  if (p === '/api/admin/reps') {
+    const teamName = new Map(d.teams.map((t) => [t.id, t.name]));
+    return json({
+      reps: d.reps.map((rep) => {
+        const l = repLedger(ctx, rep.id);
+        return { id: rep.id, name: rep.name, email: rep.email, role: rep.role, teamId: rep.teamId, team: rep.teamId ? teamName.get(rep.teamId) ?? null : null, openerRate: rep.openerRate, closerRate: rep.closerRate, overrideRate: rep.overrideRate, active: rep.active, earned: l.earned, paid: l.paid, held: l.held, owed: l.owed, dealCount: l.deals.length };
+      }),
+    });
+  }
+  if (p === '/api/admin/audit') return json({ entries: await repo.listAudit(100) });
+  if (p === '/api/admin/settings') return json(settings);
+
+  const detail = async (id: string) => {
+    const c = await repo.loadContext();
+    const deal = c.deals.find((x) => x.id === id);
+    if (!deal) throw new ApiError(404, 'Deal not found');
+    return adminDealDetail(deal, c, d.reps, settings, today);
+  };
+  try {
+    if (p === '/api/admin/deals' && method === 'GET') {
+      const s = (q.get('search') ?? '').trim().toLowerCase();
+      const rep = q.get('rep') ?? '';
+      const status = q.get('status') ?? '';
+      let deals = ctx.deals;
+      if (rep) deals = deals.filter((x) => x.openerId === rep || x.closerId === rep || x.overrideId === rep);
+      let rows = deals.map((x) => adminDealRow(x, ctx, d.reps, settings, today));
+      if (s) rows = rows.filter((x) => `${x.id} ${x.business} ${x.merchantContact} ${x.merchantEmail} ${x.merchantPhone} ${x.lender} ${x.product}`.toLowerCase().includes(s));
+      if (status) rows = rows.filter((x) => x.commissionStatus === status || x.dealStatus === status);
+      return json({ count: rows.length, deals: rows, repOptions: { assign: repOptions(d.reps, 'assign'), edit: repOptions(d.reps, 'edit') } });
+    }
+    if (p === '/api/admin/deals' && method === 'POST') {
+      const deal = await createDeal(repo, body as never, me.repId);
+      return json(await detail(deal.id));
+    }
+    const m = p.match(/^\/api\/admin\/deals\/([^/]+)(?:\/(splits|status|draws|collection))?$/);
+    if (m) {
+      const id = decodeURIComponent(m[1]!);
+      const sub = m[2];
+      if (!sub) return json(await detail(id));
+      if (sub === 'splits') await updateSplits(repo, id, body as never, me.repId);
+      if (sub === 'status') await setDealStatus(repo, id, String(body.dealStatus ?? ''), me.repId);
+      if (sub === 'draws') await addDraw(repo, id, body as never, me.repId);
+      if (sub === 'collection') await setCollection(repo, id, body as never, me.repId);
+      return json(await detail(id));
+    }
+  } catch (e) {
+    rethrow(e);
   }
   throw new ApiError(404, 'Not found');
 }

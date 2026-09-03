@@ -34,6 +34,10 @@ export function adminRouter(repo: Repo): Router {
     });
   });
 
+  r.get('/teams', requireRole('admin', 'manager'), async (_req, res) => {
+    res.json({ teams: await repo.listTeams() });
+  });
+
   /** Invariant #9 — three different option lists. */
   r.get('/reps/options', requireRole('admin', 'manager'), async (req, res) => {
     const purpose = req.query.purpose;

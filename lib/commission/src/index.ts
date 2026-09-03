@@ -9,3 +9,4 @@ export * from './ledger.js';
 export * from './payroll.js';
 export * from './draws.js';
 export * from './validate.js';
+export * from './deal.js';

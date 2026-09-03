@@ -58,3 +58,39 @@ export const qs = (o: Record<string, string | undefined>) => {
   const s = p.toString();
   return s ? `?${s}` : '';
 };
+
+/* ---- Admin (Phase 4). Never served to reps. ---- */
+export interface Lender { name: string; terms: 'upfront' | 'weekly'; weeks: number }
+export interface ReferralPartner { name: string; pct: number; monthlyCap: number | null }
+export interface ProductRule { name: string; basis: 'funded' | 'draw' | 'payback'; factor: boolean; term: boolean; parent: boolean; comm: number; clawback: boolean; renewal: boolean; multiDraw: boolean; drawInitial: number | null; drawSubsequent: number | null }
+export interface Settings {
+  lenders: Lender[]; partners: ReferralPartner[]; products: ProductRule[];
+  thresholds: { clawbackWindowDays: number; paymentOverdueDays: number; renewalMark: number; additionalCapitalAfterDays: number };
+  lists: { frequencies: string[]; commissionStatuses: string[]; dealStatuses: string[] };
+  crm: { urlTemplate: string }; payroll: { cycle: string };
+}
+export interface RoleView { role: Role; repId: string | null; name: string | null; rate: number; amount: number; paid: number }
+export interface AdminDealRow {
+  id: string; opportunityId: string; parentId: string | null; date: string; business: string; drawCount: number;
+  merchantContact: string; merchantEmail: string; merchantPhone: string; lender: string; product: string;
+  funded: number; factor: number | null; apr: number | null; termDays: number | null; frequency: string; payback: number | null;
+  commRate: number; psfPct: number; originationFee: number; gross: number; referralPartner: string | null; referralRate: number; referralFee: number; net: number;
+  roles: RoleView[]; totalRepPayout: number; houseNet: number; collected: number; outstanding: number; lenderPaidLabel: string;
+  commissionStatus: string; dealStatus: string; atRisk: boolean; repPaid: string | null; lenderPaid: string | null; crmUrl: string;
+  creditLine: number | null; drawSubsequentPct: number | null; hasClawback: boolean;
+}
+export interface SegmentView { sk: string; label: string; n: number; date: string; amount: number; commRate: number; gross: number; referralFee: number; net: number; collected: number; outstanding: number; status: string; lenderPaidLabel: string; schedule: { weeks: number; received: number; startDate: string | null; perWeek: number } | null }
+export interface AdminDealDetail extends AdminDealRow {
+  segments: SegmentView[];
+  payments: Array<{ role: string; segmentKey: string | null; repId: string; repName: string; amount: number; paidAt: string; runId: string | null }>;
+  clawbacks: Array<{ id: string; date: string; amount: number; recovered: number; reason: string; status: string; slices: Array<{ repId: string; name: string; share: number; recovered: number; remaining: number }> }>;
+}
+export interface RepOption { id: string; label: string }
+export interface MasterBoard { count: number; deals: AdminDealRow[]; repOptions: { assign: RepOption[]; edit: RepOption[] } }
+export interface NewDealDraft {
+  business: string; merchantContact?: string; merchantEmail?: string; merchantPhone?: string; fundedDate: string; lender: string; product: string; parentId?: string | null;
+  amount: number; termDays?: number | null; factor?: number | null; apr?: number | null; frequency?: string; commRate?: number | null; psfPct?: number | null; originationFee?: number | null;
+  referralPartner?: string | null; referralRate?: number | null; creditLine?: number | null; drawInitialPct?: number | null; drawSubsequentPct?: number | null;
+  openerId?: string | null; openerRate?: number | null; closerId?: string | null; closerRate?: number | null; overrideId?: string | null; overrideRate?: number | null; leadSource?: string | null; notes?: string | null;
+}
+export const post = <T,>(path: string, body: unknown, method = 'POST') => api<T>(path, { method, body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });

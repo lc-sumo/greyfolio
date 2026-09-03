@@ -24,6 +24,8 @@ import {
   totalGross,
   totalNet,
   totalRepPayout,
+  roleAssignments,
+  unitsPaid,
   type Clawback,
   type Deal,
   type LedgerContext,
@@ -91,6 +93,8 @@ export interface AdminDealRow {
   /** Lender receipts expected before today that have not landed. */
   overdueReceipts: number;
   overdueAmount: number;
+  /** Incremental initial segment: lender increments received and the fewest increments paid to any assigned rep. */
+  increments: { total: number; lenderPaid: number; repPaid: number } | null;
 }
 
 export function adminDealRow(deal: Deal, ctx: LedgerContext, reps: Rep[], settings: Settings, today: string): AdminDealRow {
@@ -146,6 +150,13 @@ export function adminDealRow(deal: Deal, ctx: LedgerContext, reps: Rep[], settin
     creditLine: deal.creditLine,
     drawSubsequentPct: deal.drawSubsequentPct,
     hasClawback: ctx.clawbacks.some((c) => c.dealId === deal.id),
+    increments: (() => {
+      const base = segs[0]!;
+      if (!base.schedule) return null;
+      const assigned = roleAssignments(deal).filter((r) => r.repId && r.rate > 0);
+      const paid = assigned.map((r) => unitsPaid(deal, ctx.lines, r.repId!, 'base').paid);
+      return { total: base.schedule.weeks, lenderPaid: Math.min(base.schedule.received, base.schedule.weeks), repPaid: paid.length ? Math.min(...paid) : 0 };
+    })(),
     overdueReceipts: segs.reduce((n, s) => n + scheduleEvents(s, today).filter((e) => e.overdue).length, 0),
     overdueAmount: sum(segs.flatMap((s) => scheduleEvents(s, today).filter((e) => e.overdue).map((e) => e.amount))),
   };
@@ -181,6 +192,8 @@ export interface SegmentView {
     nextExpected: ScheduleEvent | null;
     overdue: number;
     overdueAmount: number;
+    /** Per role: increments paid to the rep vs total units. */
+    paidToReps: Array<{ role: Role; repId: string; name: string | null; paid: number; total: number }>;
   } | null;
   /** Funding terms: the deal's for the initial segment, the draw's own for draws. */
   termDays: number | null;
@@ -191,7 +204,7 @@ export interface SegmentView {
 
 export interface AdminDealDetail extends AdminDealRow {
   segments: SegmentView[];
-  payments: Array<{ role: string; segmentKey: string | null; repId: string; repName: string; amount: number; paidAt: string; runId: string | null }>;
+  payments: Array<{ role: string; segmentKey: string | null; unit: string | null; repId: string; repName: string; amount: number; paidAt: string; runId: string | null }>;
   clawbacks: Array<Clawback & { slices: Array<{ repId: string; name: string; share: number; recovered: number; remaining: number }> }>;
 }
 
@@ -219,14 +232,14 @@ export function adminDealDetail(deal: Deal, ctx: LedgerContext, reps: Rep[], set
       outstanding: outstandingOf(s),
       status: segmentStatus(s),
       lenderPaidLabel: collectionLabel(s),
-      schedule: s.schedule ? scheduleView(s, today) : null,
+      schedule: s.schedule ? scheduleView(s, today, deal, ctx, reps) : null,
       ...(s.sk === 'base'
         ? { termDays: deal.termDays, factor: deal.factor, payback: deal.payback, payment: paymentFor({ payback: deal.payback, termDays: deal.termDays, frequency: deal.frequency }) }
         : termsOfDraw(deal, s.sk)),
     })),
     payments: ctx.lines
       .filter((l) => l.dealId === deal.id)
-      .map((l) => ({ role: l.role, segmentKey: l.segmentKey, repId: l.repId, repName: name(l.repId), amount: l.amount, paidAt: l.paidAt, runId: l.runId }))
+      .map((l) => ({ role: l.role, segmentKey: l.segmentKey, unit: unitOf(l.key), repId: l.repId, repName: name(l.repId), amount: l.amount, paidAt: l.paidAt, runId: l.runId }))
       .sort((a, b) => a.paidAt.localeCompare(b.paidAt)),
     clawbacks: ctx.clawbacks
       .filter((c) => c.dealId === deal.id)
@@ -234,7 +247,7 @@ export function adminDealDetail(deal: Deal, ctx: LedgerContext, reps: Rep[], set
   };
 }
 
-function scheduleView(s: Segment, today: string): NonNullable<SegmentView['schedule']> {
+function scheduleView(s: Segment, today: string, deal: Deal, ctx: LedgerContext, reps: Rep[]): NonNullable<SegmentView['schedule']> {
   const sch = s.schedule!;
   const parts = scheduleParts(s.gross, sch);
   const events = scheduleEvents(s, today);
@@ -255,7 +268,18 @@ function scheduleView(s: Segment, today: string): NonNullable<SegmentView['sched
     nextExpected: pending.sort((a, b) => (a.expected! < b.expected! ? -1 : 1))[0] ?? null,
     overdue: events.filter((e) => e.overdue).length,
     overdueAmount: sum(events.filter((e) => e.overdue).map((e) => e.amount)),
+    paidToReps: roleAssignments(deal)
+      .filter((r): r is { role: Role; repId: string; rate: number } => !!r.repId && r.rate > 0)
+      .map((r) => {
+        const u = unitsPaid(deal, ctx.lines, r.repId, s.sk);
+        return { role: r.role, repId: r.repId, name: reps.find((x) => x.id === r.repId)?.name ?? null, paid: u.paid, total: u.total };
+      }),
   };
+}
+
+function unitOf(key: string): string | null {
+  const m = /\|u(\d+)$/.exec(key);
+  return m ? (Number(m[1]) === 0 ? 'Upfront' : `Increment ${m[1]}`) : null;
 }
 
 /* ---------- renewals (admin) ---------- */

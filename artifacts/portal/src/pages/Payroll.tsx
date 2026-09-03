@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AdminDealDrawer } from '../components/AdminDealDrawer';
 import { Shell } from '../components/Shell';
 import { Card, Loading, Pill, toneFor } from '../components/ui';
-import { DEMO, api, post, type PayResult, type PayrollOverview, type PayrollRepDetail, type Settings } from '../lib/api';
+import { DEMO, api, post, type PayResult, type PayableLineView, type PayrollOverview, type PayrollRepDetail, type Settings } from '../lib/api';
 import { compact, day, fullDay, initials, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 
@@ -36,17 +36,31 @@ export function Payroll() {
   const d = detail.data;
   const q = search.trim().toLowerCase();
   const shown = useMemo(() => (d?.lines ?? []).filter((l) => !q || `${l.dealId} ${l.business} ${l.merchantContact} ${l.merchantEmail} ${l.merchantPhone} ${l.lender}`.toLowerCase().includes(q)), [d, q]);
-  const selLines = (d?.lines ?? []).filter((l) => selected[l.key]);
-  const selGross = selLines.reduce((s, l) => s + l.amount, 0);
+  // Selection is by ledger unit key. A row's checkbox selects its collected units; the "+ uncollected" toggle adds the rest.
+  const amountOf = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const l of d?.lines ?? []) {
+      for (const k of l.collectedKeys) m.set(k, l.collectedKeys.length ? l.collectedAmount / l.collectedKeys.length : 0);
+      for (const k of l.uncollectedKeys) m.set(k, l.uncollectedKeys.length ? l.uncollectedAmount / l.uncollectedKeys.length : 0);
+    }
+    return m;
+  }, [d]);
+  const selectedKeys = Object.keys(selected).filter((k) => amountOf.has(k));
+  const rowKeys = (l: PayableLineView) => [...l.collectedKeys, ...l.uncollectedKeys];
+  const rowSelected = (l: PayableLineView) => rowKeys(l).some((k) => selected[k]);
+  const selLines = (d?.lines ?? []).filter(rowSelected);
+  const selGross = Math.round(selectedKeys.reduce((s, k) => s + (amountOf.get(k) ?? 0), 0) * 100) / 100;
   const withheld = Math.min(d?.outstandingClawback ?? 0, selGross);
-  const uncollected = [...new Set(selLines.filter((l) => !l.collected).map((l) => l.dealId))];
-  const allShown = shown.length > 0 && shown.every((l) => selected[l.key]);
+  const uncollected = [...new Set((d?.lines ?? []).filter((l) => l.uncollectedKeys.some((k) => selected[k])).map((l) => l.dealId))];
+  const allShown = shown.length > 0 && shown.every((l) => (l.collectedKeys.length ? l.collectedKeys : l.uncollectedKeys).every((k) => selected[k]));
+  const toggleRow = (l: PayableLineView) => setSelected((s) => { const n = { ...s }; const keys = l.collectedKeys.length ? l.collectedKeys : l.uncollectedKeys; const on = keys.every((k) => n[k]); for (const k of rowKeys(l)) delete n[k]; if (!on) for (const k of keys) n[k] = true; return n; });
+  const toggleUncollected = (l: PayableLineView) => setSelected((s) => { const n = { ...s }; const on = l.uncollectedKeys.every((k) => n[k]); for (const k of l.uncollectedKeys) { if (on) delete n[k]; else n[k] = true; } return n; });
 
   async function pay() {
-    if (!activeRun || !payRepId || !selLines.length) { notify('Select at least one deal line to pay'); return; }
+    if (!activeRun || !payRepId || !selectedKeys.length) { notify('Select at least one deal line to pay'); return; }
     setBusy(true);
     try {
-      const r = await post<PayResult>(`/api/admin/payroll/runs/${activeRun.id}/pay`, { repId: payRepId, selectedKeys: selLines.map((l) => l.key) });
+      const r = await post<PayResult>(`/api/admin/payroll/runs/${activeRun.id}/pay`, { repId: payRepId, selectedKeys });
       setRepId(r.repId); // pin
       setSelected({});
       await qc.invalidateQueries();
@@ -139,8 +153,8 @@ export function Payroll() {
                 <Card title="Select deals to pay" extra={d ? `${d.lines.length} outstanding line${d.lines.length === 1 ? '' : 's'} for ${d.rep.name}` : ''}>
                   <div className="toolbar" style={{ marginBottom: 12 }}>
                     <input className="search" placeholder="Search deal ID, business, merchant contact, email or phone" value={search} onChange={(e) => setSearch(e.target.value)} style={{ minWidth: 340 }} />
-                    <button className="btn" disabled={!shown.length} onClick={() => setSelected((s) => { const n = { ...s }; shown.forEach((l) => { if (allShown) delete n[l.key]; else n[l.key] = true; }); return n; })}>{allShown ? 'Clear selection' : 'Select all shown'}</button>
-                    <span className="count">{selLines.length} of {d?.lines.length ?? 0} selected</span>
+                    <button className="btn" disabled={!shown.length} onClick={() => setSelected((s) => { const n = { ...s }; shown.forEach((l) => { const keys = l.collectedKeys.length ? l.collectedKeys : l.uncollectedKeys; if (allShown) rowKeys(l).forEach((k) => delete n[k]); else keys.forEach((k) => { n[k] = true; }); }); return n; })}>{allShown ? 'Clear selection' : 'Select all collected'}</button>
+                    <span className="count">{selLines.length} of {d?.lines.length ?? 0} rows · {selectedKeys.length} unit{selectedKeys.length === 1 ? '' : 's'}</span>
                   </div>
                   {!d ? <Loading error={detail.error} /> : shown.length === 0 ? (
                     <div className="empty">{d.lines.length === 0 ? `${d.rep.name} has nothing outstanding.` : `No deal lines match “${search}”.`}</div>
@@ -149,18 +163,18 @@ export function Payroll() {
                       <div className="table" style={{ ['--cols' as string]: COLS, minWidth: 1180 }}>
                         <div className="tr th"><div className="td">Pay</div><div className="td">Deal</div><div className="td">Line</div><div className="td">Business</div><div className="td">Merchant contact</div><div className="td">Lender</div><div className="td r">Funded</div><div className="td">Role</div><div className="td r">Rate</div><div className="td r">Payout</div><div className="td">Lender paid comm</div></div>
                         {shown.map((l) => (
-                          <div className="tr" key={l.key} style={{ background: selected[l.key] ? '#f6faf8' : !l.collected ? '#fdfaf5' : undefined }}>
-                            <div className="td"><input type="checkbox" checked={!!selected[l.key]} onChange={() => setSelected((s) => { const n = { ...s }; if (n[l.key]) delete n[l.key]; else n[l.key] = true; return n; })} /></div>
+                          <div className="tr" key={l.key} style={{ background: rowSelected(l) ? '#f6faf8' : !l.collected ? '#fdfaf5' : undefined }}>
+                            <div className="td"><input type="checkbox" checked={rowSelected(l)} onChange={() => toggleRow(l)} /></div>
                             <div className="td num" style={{ cursor: 'pointer' }} onClick={() => setOpen(l.dealId)}>{l.dealId}</div>
-                            <div className="td"><span className={l.segmentKey === 'base' ? 'muted' : 'warn'}>{l.segmentLabel}</span></div>
+                            <div className="td"><span className={l.segmentKey === 'base' ? 'muted' : 'warn'}>{l.segmentLabel}</span>{l.units && <div className="subtle num" style={{ fontSize: 10.5 }}>Lender paid {l.units.collected}/{l.units.total} · Rep paid {l.units.paid}/{l.units.total}</div>}</div>
                             <div className="td ellipsis">{l.business}</div>
                             <div className="td ellipsis"><div className="ellipsis">{l.merchantContact || '—'}</div><div className="subtle ellipsis" style={{ fontSize: 11 }}>{[l.merchantEmail, l.merchantPhone].filter(Boolean).join(' · ')}</div></div>
                             <div className="td ellipsis">{l.lender}</div>
                             <div className="td r num">{compact(l.funded)}</div>
                             <div className="td"><Pill tone={l.role === 'Override' ? 'amber' : 'teal'}>{l.role}</Pill></div>
                             <div className="td r num">{pct(l.rate)}</div>
-                            <div className="td r num">{money(l.amount)}</div>
-                            <div className="td"><Pill tone={l.collected ? 'teal' : l.lenderPaidLabel === 'Not collected' ? 'grey' : 'amber'}>{l.lenderPaidLabel}</Pill></div>
+                            <div className="td r num">{l.units ? <>{money(l.collectedAmount)}<div className="subtle" style={{ fontSize: 10.5 }}>of {money(l.amount)} unpaid</div></> : money(l.amount)}</div>
+                            <div className="td"><Pill tone={l.collected ? 'teal' : l.lenderPaidLabel === 'Not collected' ? 'grey' : 'amber'}>{l.lenderPaidLabel}</Pill>{l.uncollectedKeys.length > 0 && l.collectedKeys.length > 0 && <label className="subtle" style={{ display: 'block', fontSize: 10.5, marginTop: 3, cursor: 'pointer' }}><input type="checkbox" style={{ verticalAlign: '-2px', marginRight: 4 }} checked={l.uncollectedKeys.every((k) => selected[k])} onChange={() => toggleUncollected(l)} />+ {l.uncollectedKeys.length} uncollected · {money(l.uncollectedAmount)}</label>}</div>
                           </div>
                         ))}
                       </div>
@@ -188,7 +202,7 @@ export function Payroll() {
                               <div className="td num" style={{ cursor: 'pointer' }} onClick={() => setOpen(p.dealId)}>{p.dealId}</div>
                               <div className="td ellipsis">{p.business}</div>
                               <div className="td ellipsis">{p.merchantContact}</div>
-                              <div className={`td ${p.amount < 0 ? 'neg' : ''}`}>{p.role}{p.segmentKey && p.segmentKey !== 'base' ? ` · ${p.segmentKey}` : ''}</div>
+                              <div className={`td ${p.amount < 0 ? 'neg' : ''}`}>{p.role}{p.segmentKey && p.segmentKey !== 'base' ? ` · ${p.segmentKey}` : ''}{p.unitLabel ? <span className="subtle"> · {p.unitLabel}</span> : ''}</div>
                               <div className={`td r num ${p.amount < 0 ? 'neg' : 'pos'}`}>{money(p.amount)}</div>
                               <div className="td num">{day(p.paidAt)}</div>
                             </div>

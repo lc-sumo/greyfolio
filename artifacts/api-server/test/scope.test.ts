@@ -31,7 +31,7 @@ describe('repDealView', () => {
   it('shows the rep only their own role, rate, share and payment state', () => {
     const v = repDealView(deals[0]!, JULIAN, lines, clawbacks);
     expect(v).toMatchObject({ id: 'F1', funded: 10_000, roles: ['Opener'], share: 350, paid: 350, owed: 0, payoutStatus: 'Paid', commissionStatus: 'YES - Paid In Full', lenderPaidLabel: 'Collected' });
-    expect(v.lines).toEqual([{ role: 'Opener', rate: 0.35, amount: 350, segment: 'Initial', segmentKey: 'base', paid: true }]);
+    expect(v.lines).toEqual([{ role: 'Opener', rate: 0.35, amount: 350, segment: 'Initial', segmentKey: 'base', paid: true, paidAmount: 350, units: null }]);
     expect(v.clawback).toEqual({ amount: 350, remaining: 250, status: 'open' });
   });
   it('a referral fee on the deal reduces the share but is never shown', () => {

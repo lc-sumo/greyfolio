@@ -58,7 +58,7 @@ export function Deals() {
                   <div className="td r num">{money(d.funded)}</div>
                   <div className="td">{d.roles.map((r) => <Pill key={r} tone={r === 'Override' ? 'amber' : 'teal'}>{r}</Pill>)}</div>
                   <div className="td r num">{[...new Set(d.lines.map((l) => pct(l.rate)))].join('+')}</div>
-                  <div className="td r num">{money(d.share)}</div>
+                  <div className="td r num">{money(d.share)}{(() => { const u = d.lines.find((l) => l.units)?.units; return u ? <div className="subtle" style={{ fontSize: 10.5 }}>Lender {u.collected}/{u.total} · You {u.paid}/{u.total}</div> : null; })()}</div>
                   <div className="td"><Pill tone={toneFor(d.payoutStatus)}>{d.payoutStatus}</Pill></div>
                 </div>
               ))}

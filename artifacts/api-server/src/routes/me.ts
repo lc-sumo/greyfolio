@@ -57,7 +57,7 @@ export function meRouter(repo: Repo): Router {
     const view = repDealView(deal, repId, ctx.lines, ctx.clawbacks);
     const payments = ctx.lines
       .filter((l) => l.repId === repId && l.dealId === deal.id)
-      .map((l) => ({ role: l.role, segmentKey: l.segmentKey, amount: l.amount, paidAt: l.paidAt, runId: l.runId }))
+      .map((l) => ({ role: l.role, segmentKey: l.segmentKey, unit: /\|u(\d+)$/.test(l.key) ? (l.key.endsWith('|u0') ? 'Upfront' : `Increment ${/\|u(\d+)$/.exec(l.key)![1]}`) : null, amount: l.amount, paidAt: l.paidAt, runId: l.runId }))
       .sort((a, b) => a.paidAt.localeCompare(b.paidAt));
     res.json({ ...view, payments });
   });

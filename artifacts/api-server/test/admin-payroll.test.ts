@@ -82,7 +82,7 @@ describe('per-rep payroll detail', () => {
     const { admin } = await harness();
     const res = await admin.get('/api/admin/payroll/runs/run-3/reps/rep-julian-ribak');
     expect(res.body.rep).toMatchObject({ id: 'rep-julian-ribak', name: 'Julian Ribak' });
-    expect(res.body.lines).toEqual([expect.objectContaining({ key: 'F2|Opener|base', segmentLabel: 'Initial', business: 'F2 Business', role: 'Opener', rate: 0.35, amount: 630, lenderPaidLabel: 'Not collected', collected: false })]);
+    expect(res.body.lines).toEqual([expect.objectContaining({ key: 'F2|Opener|base', segmentLabel: 'Initial', business: 'F2 Business', role: 'Opener', rate: 0.35, amount: 630, lenderPaidLabel: 'Not collected', collected: false, collectedKeys: [], uncollectedKeys: ['F2|Opener|base'], uncollectedAmount: 630, units: null })]);
     expect(res.body.clawbacks).toEqual([{ id: 'cb-1', dealId: 'F1', business: 'F1 Business', date: '2026-08-15', remaining: 250 }]);
     expect(res.body.outstandingClawback).toBe(250);
     expect(res.body.paidInRun.map((p: { role: string; amount: number }) => [p.role, p.amount])).toEqual([['Opener', 350], ['Clawback recovery', -100]]);
@@ -123,6 +123,33 @@ describe('POST pay', () => {
     expect((await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-ghost', selectedKeys: ['F2|Opener|base'] })).status).toBe(404);
     expect((await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: [] })).body.error).toMatch(/at least one/);
     expect((await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: ['F1|Closer|base'] })).body.error).toMatch(/not payable/);
+  });
+});
+
+describe('increments paid to reps', () => {
+  it('a consolidation pays per lender receipt; the row tracks 4/20 paid', async () => {
+    const { admin } = await harness();
+    // $100k consolidation on ROWAN (20 weekly increments), Julian opener 35%, no closer/override.
+    const created = await admin.post('/api/admin/deals').send({ business: 'Consol Co', fundedDate: today, lender: 'ROWAN', product: 'CONSOLIDATION - UPFRONT COMM', amount: 100_000, termDays: 200, factor: 1.3, commRate: 10, openerId: 'rep-julian-ribak', openerRate: 35, referralPartner: null });
+    expect(created.status).toBe(201);
+    const id = created.body.id as string;
+    await admin.post(`/api/admin/deals/${id}/collection`).send({ segmentKey: 'base', recordWeeks: 4 });
+    let detail = (await admin.get(`/api/admin/payroll/runs/run-4/reps/rep-julian-ribak`)).body;
+    const row = detail.lines.find((l: { dealId: string }) => l.dealId === id);
+    expect(row).toMatchObject({ amount: 3_500, collectedAmount: 700, uncollectedAmount: 2_800, collected: false, lenderPaidLabel: '4/20 wks', units: { paid: 0, total: 20, collected: 4 } });
+    expect(row.collectedKeys).toEqual([1, 2, 3, 4].map((n) => `${id}|Opener|base|u${n}`));
+    const pay = await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: row.collectedKeys });
+    expect(pay.body).toMatchObject({ gross: 700, lines: 4, uncollectedDealIds: [] });
+    detail = (await admin.get(`/api/admin/payroll/runs/run-4/reps/rep-julian-ribak`)).body;
+    expect(detail.lines.find((l: { dealId: string }) => l.dealId === id)).toMatchObject({ amount: 2_800, collectedAmount: 0, uncollectedAmount: 2_800, units: { paid: 4, total: 20, collected: 4 } });
+    expect(detail.paidInRun.filter((p: { dealId: string }) => p.dealId === id).map((p: { unitLabel: string }) => p.unitLabel)).toEqual(['Increment 1', 'Increment 2', 'Increment 3', 'Increment 4']);
+    // the drawer and the rep's own view agree
+    const deal = (await admin.get(`/api/admin/deals/${id}`)).body;
+    expect(deal.segments[0].schedule.paidToReps).toEqual([{ role: 'Opener', repId: 'rep-julian-ribak', name: 'Julian Ribak', paid: 4, total: 20 }]);
+    const mine = (await admin.get(`/api/me/deals/${id}`).set('X-View-As', 'rep-julian-ribak')).body;
+    expect(mine.lines[0]).toMatchObject({ role: 'Opener', amount: 3_500, paidAmount: 700, paid: false, units: { paid: 4, total: 20, collected: 4 } });
+    expect(mine.payments.map((p: { unit: string }) => p.unit)).toEqual(['Increment 1', 'Increment 2', 'Increment 3', 'Increment 4']);
+    expect((await admin.get('/api/me/wallet').set('X-View-As', 'rep-julian-ribak')).body).toMatchObject({ paid: 350 + 700 });
   });
 });
 

@@ -42,9 +42,9 @@ export function DealDrawer({ id, onClose }: { id: string; onClose: () => void })
             <div className="pl">
               {d.lines.map((l) => (
                 <div className="row" key={`${l.role}|${l.segmentKey}`}>
-                  <span>{l.segment} · {l.role} <span className="subtle num">{pct(l.rate)}</span></span>
-                  <span className="num">{money(l.amount)}</span>
-                  <Pill tone={l.paid ? 'teal' : 'amber'}>{l.paid ? 'Paid' : 'Owed'}</Pill>
+                  <span>{l.segment} · {l.role} <span className="subtle num">{pct(l.rate)}</span>{l.units && <div className="subtle num" style={{ fontSize: 11 }}>Lender paid {l.units.collected}/{l.units.total} · You paid {l.units.paid}/{l.units.total}</div>}</span>
+                  <span className="num">{money(l.amount)}{l.paidAmount > 0 && !l.paid && <div className="subtle" style={{ fontSize: 10.5 }}>{money(l.paidAmount)} paid</div>}</span>
+                  <Pill tone={l.paid ? 'teal' : l.paidAmount > 0 ? 'amber' : 'grey'}>{l.paid ? 'Paid' : l.paidAmount > 0 ? 'Partly paid' : 'Owed'}</Pill>
                 </div>
               ))}
             </div>
@@ -58,7 +58,7 @@ export function DealDrawer({ id, onClose }: { id: string; onClose: () => void })
               <div className="pl">
                 {d.payments.map((p, i) => (
                   <div className="row" key={i}>
-                    <span className={p.amount < 0 ? 'neg' : ''}>{p.role}{p.segmentKey && p.segmentKey !== 'base' ? ` · ${p.segmentKey}` : ''}</span>
+                    <span className={p.amount < 0 ? 'neg' : ''}>{p.role}{p.segmentKey && p.segmentKey !== 'base' ? ` · ${p.segmentKey}` : ''}{p.unit ? <span className="subtle"> · {p.unit}</span> : ''}</span>
                     <span className={`num ${p.amount < 0 ? 'neg' : 'pos'}`}>{money(p.amount)}</span>
                     <span className="subtle num">{day(p.paidAt)}</span>
                   </div>

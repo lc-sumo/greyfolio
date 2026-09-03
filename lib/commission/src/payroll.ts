@@ -1,6 +1,5 @@
 import { cents, sum } from './money.js';
 import { clawbackRecovered, clawbackStatus, clawbacksFor, repClawback } from './clawback.js';
-import { outstandingOf } from './collection.js';
 import { isDealFullyPaid, payableLines, type RepLine } from './splits.js';
 import type { Clawback, LedgerContext, PayoutLine } from './types.js';
 
@@ -139,7 +138,7 @@ export function planPayout(ctx: LedgerContext, req: PayoutRequest): PayoutPlan {
   const withheld = cents(-sum(recoveries.map((r) => r.amount)));
   const touched = new Set(selected.map((l) => l.dealId));
   const dealsFullyPaid = ctx.deals.filter((d) => touched.has(d.id) && !d.repPaid && isDealFullyPaid(d, after)).map((d) => d.id);
-  const uncollectedDealIds = [...new Set(selected.filter((l) => outstandingOf(l.segment) > 0).map((l) => l.dealId))];
+  const uncollectedDealIds = [...new Set(selected.filter((l) => !l.collected).map((l) => l.dealId))];
 
   return { repId: req.repId, runId: req.runId, lines, recoveries, clawbackUpdates, gross, withheld, net: cents(gross - withheld), dealsFullyPaid, uncollectedDealIds };
 }

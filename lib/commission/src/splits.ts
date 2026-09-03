@@ -1,10 +1,16 @@
+import { collectedOf as collectedOfSeg, scheduleEvents } from './collection.js';
 import { cents, sum } from './money.js';
 import { segments } from './segments.js';
 import type { Deal, PayoutLine, Rep, Role, Segment, SegmentKey, Team } from './types.js';
 
-/** Idempotency key for one role on one segment. */
+/** Idempotency key for one role on one segment (whole-segment payout). */
 export function lineKey(dealId: string, role: Role, sk: SegmentKey): string {
   return `${dealId}|${role}|${sk}`;
+}
+
+/** Idempotency key for one role on one lender receipt of an incremental segment: `F12|Opener|base|u3`. */
+export function unitKey(dealId: string, role: Role, sk: SegmentKey, unit: number): string {
+  return `${dealId}|${role}|${sk}|u${unit}`;
 }
 
 /** The rep and rate a deal assigns to each role. */
@@ -16,7 +22,12 @@ export function roleAssignments(deal: Deal): Array<{ role: Role; repId: string |
   ];
 }
 
-/** One role on one segment — the unit payroll pays. */
+/**
+ * The unit payroll pays: one role on one segment — or, when the lender pays
+ * that segment in increments, one role on ONE lender receipt (upfront,
+ * increment n, or the final). Paying receipt by receipt is how "4 of 20
+ * increments paid to the rep" stays a ledger fact.
+ */
 export interface RepLine {
   key: string;
   dealId: string;
@@ -27,17 +38,44 @@ export interface RepLine {
   rate: number;
   amount: number;
   segment: Segment;
+  /** Which lender receipt this unit follows; undefined for a whole-segment line. */
+  unit?: { n: number; kind: 'upfront' | 'increment' | 'remainder'; label: string; expected: string | null };
+  /** The lender has paid the commission this unit is priced on. */
+  collected: boolean;
 }
 
 /**
  * Every earned line on a deal: one per assigned role per segment, priced as
  * `segment.net × rate`. Zero-amount lines are omitted — there is nothing to pay.
  */
-export function dealLines(deal: Deal): RepLine[] {
+export function dealLines(deal: Deal, today = '9999-12-31'): RepLine[] {
   const out: RepLine[] = [];
   const roles = roleAssignments(deal).filter((r): r is { role: Role; repId: string; rate: number } => !!r.repId);
   for (const seg of segments(deal)) {
+    const events = seg.schedule ? scheduleEvents(seg, today).filter((e) => e.amount > 0) : [];
     for (const r of roles) {
+      if (events.length) {
+        // Incremental segment: one unit per lender receipt, priced on that receipt's share of NET.
+        const netRatio = seg.gross > 0 ? seg.net / seg.gross : 0;
+        for (const e of events) {
+          const amount = cents(e.amount * netRatio * r.rate);
+          if (amount <= 0) continue;
+          out.push({
+            key: unitKey(deal.id, r.role, seg.sk, e.n),
+            dealId: deal.id,
+            segmentKey: seg.sk,
+            segmentLabel: `${seg.label} · ${e.label}`,
+            role: r.role,
+            repId: r.repId,
+            rate: r.rate,
+            amount,
+            segment: seg,
+            unit: { n: e.n, kind: e.kind, label: e.label, expected: e.expected },
+            collected: e.received,
+          });
+        }
+        continue;
+      }
       const amount = cents(seg.net * r.rate);
       if (amount <= 0) continue;
       out.push({
@@ -50,10 +88,16 @@ export function dealLines(deal: Deal): RepLine[] {
         rate: r.rate,
         amount,
         segment: seg,
+        collected: outstandingOfSeg(seg) === 0,
       });
     }
   }
   return out;
+}
+
+function outstandingOfSeg(seg: Segment): number {
+  // local import avoidance: collectedOf lives in collection.ts which imports nothing from here
+  return Math.max(0, cents(seg.gross - collectedOfSeg(seg)));
 }
 
 /** The lines on a deal that belong to one rep (a rep can hold several roles). */
@@ -83,21 +127,29 @@ export function repDeals(deals: Deal[], repId: string): Deal[] {
   return deals.filter((d) => isRepOnDeal(d, repId));
 }
 
-/** Keys of positive ledger rows — what has been settled. */
+/**
+ * Keys of positive ledger rows — what has been settled. A whole-segment key
+ * (`F12|Opener|base`) on a segment that later became incremental counts as
+ * every unit of that segment paid, so history never reopens.
+ */
 export function paidKeys(lines: PayoutLine[]): Set<string> {
   const s = new Set<string>();
   for (const l of lines) if (l.amount > 0) s.add(l.key);
   return s;
 }
 
+export function isLinePaid(line: Pick<RepLine, 'key' | 'dealId' | 'role' | 'segmentKey'>, paid: Set<string>): boolean {
+  return paid.has(line.key) || paid.has(lineKey(line.dealId, line.role, line.segmentKey));
+}
+
 /** Earned lines not yet in the ledger. */
-export function payableLines(deals: Deal[], lines: PayoutLine[], repId?: string): RepLine[] {
+export function payableLines(deals: Deal[], lines: PayoutLine[], repId?: string, today?: string): RepLine[] {
   const paid = paidKeys(lines);
   const out: RepLine[] = [];
   for (const d of deals) {
-    for (const l of dealLines(d)) {
+    for (const l of dealLines(d, today)) {
       if (repId && l.repId !== repId) continue;
-      if (!paid.has(l.key)) out.push(l);
+      if (!isLinePaid(l, paid)) out.push(l);
     }
   }
   return out;
@@ -108,7 +160,21 @@ export function isDealFullyPaid(deal: Deal, lines: PayoutLine[]): boolean {
   const all = dealLines(deal);
   if (all.length === 0) return false;
   const paid = paidKeys(lines);
-  return all.every((l) => paid.has(l.key));
+  return all.every((l) => isLinePaid(l, paid));
+}
+
+/** How many payable units of a segment each rep has been paid — the "4 of 20 increments paid" figure. */
+export function unitsPaid(deal: Deal, lines: PayoutLine[], repId: string, sk: SegmentKey): { paid: number; total: number; collected: number } {
+  const paid = paidKeys(lines);
+  const mine = dealLines(deal).filter((l) => l.repId === repId && l.segmentKey === sk);
+  const byUnit = new Map<number, RepLine[]>();
+  for (const l of mine) byUnit.set(l.unit?.n ?? -1, [...(byUnit.get(l.unit?.n ?? -1) ?? []), l]);
+  const units = [...byUnit.values()];
+  return {
+    total: units.length,
+    paid: units.filter((ls) => ls.every((l) => isLinePaid(l, paid))).length,
+    collected: units.filter((ls) => ls.every((l) => l.collected)).length,
+  };
 }
 
 /**

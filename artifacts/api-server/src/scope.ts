@@ -18,9 +18,12 @@ import {
   repClawback,
   repDeals,
   repLedger,
+  isLinePaid,
+  paidKeys,
   repLines,
   repShare,
   segments,
+  unitsPaid,
   sum,
   totalFunded,
   type Clawback,
@@ -75,10 +78,13 @@ export interface RepRoleLine {
   role: Role;
   rate: number;
   amount: number;
-  /** `Initial` | `Draw 2` — one entry per segment the rep earns on. */
+  /** `Initial` | `Draw 2` — one entry per role per segment the rep earns on. */
   segment: string;
   segmentKey: string;
   paid: boolean;
+  paidAmount: number;
+  /** Incremental segments: how many lender receipts have been paid to the rep, and how many the lender has paid. */
+  units: { paid: number; total: number; collected: number } | null;
 }
 
 export type PayoutStatus = 'Paid' | 'Partially paid' | 'Owed';
@@ -115,8 +121,10 @@ function payoutStatus(share: number, paid: number): PayoutStatus {
 
 export function repDealView(deal: Deal, repId: string, lines: PayoutLine[], clawbacks: Clawback[] = []): RepDealView {
   const mine = repLines(deal, repId);
-  const paidKeys = new Set(lines.filter((l) => l.amount > 0 && l.repId === repId).map((l) => l.key));
+  const paidSet = paidKeys(lines.filter((l) => l.repId === repId));
   const share = repShare(deal, repId);
+  const grouped = new Map<string, typeof mine>();
+  for (const l of mine) grouped.set(`${l.role}|${l.segmentKey}`, [...(grouped.get(`${l.role}|${l.segmentKey}`) ?? []), l]);
   const paid = sum(lines.filter((l) => l.repId === repId && l.dealId === deal.id && l.amount > 0).map((l) => l.amount));
   const segs = segments(deal);
   const cb = clawbacks.find((c) => c.dealId === deal.id);
@@ -131,7 +139,20 @@ export function repDealView(deal: Deal, repId: string, lines: PayoutLine[], claw
     funded: totalFunded(deal),
     drawCount: deal.draws.length,
     roles: [...new Set(mine.map((l) => l.role))],
-    lines: mine.map((l) => ({ role: l.role, rate: l.rate, amount: l.amount, segment: l.segmentLabel, segmentKey: l.segmentKey, paid: paidKeys.has(l.key) })),
+    lines: [...grouped.values()].map((ls) => {
+      const f = ls[0]!;
+      const paidLs = ls.filter((l) => isLinePaid(l, paidSet));
+      return {
+        role: f.role,
+        rate: f.rate,
+        amount: sum(ls.map((l) => l.amount)),
+        segment: f.segment.label,
+        segmentKey: f.segmentKey,
+        paid: paidLs.length === ls.length,
+        paidAmount: sum(paidLs.map((l) => l.amount)),
+        units: f.unit ? unitsPaid(deal, lines, repId, f.segmentKey) : null,
+      };
+    }),
     share,
     paid,
     owed: Math.max(0, share - paid),

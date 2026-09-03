@@ -99,8 +99,9 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
               <div className="pips">{s.schedule.events.filter((e) => e.kind === 'increment').map((e) => <i key={e.n} className={e.received ? 'on' : e.overdue ? 'late' : ''} title={`${e.label} · ${e.expected ? fullDay(e.expected) : '—'}${e.amount ? ` · ${money(e.amount)}` : ''}${e.received ? ' · received' : e.overdue ? ' · overdue' : ''}`} />)}</div>
               <dl className="kv" style={{ marginTop: 12 }}>
                 {s.schedule.upfrontPct > 0 && <><dt>Upfront {money(s.schedule.upfrontAmount)}</dt><dd style={{ fontFamily: 'var(--sans)' }}>{s.schedule.upfrontReceived ? <span className="pos">received</span> : <button className="btn" style={{ height: 26, padding: '0 8px', fontSize: 11.5 }} onClick={() => void collect({ segmentKey: s.sk, markUpfront: true }, `${d.id} — upfront ${money(s.schedule!.upfrontAmount)} received`)}>Record upfront received</button>}</dd></>}
-                <dt>Increments received</dt><dd>{s.schedule.received}/{s.schedule.weeks}{s.schedule.remainder === 'spread' ? ` · ${money(s.schedule.perWeek * s.schedule.received)}` : ''}</dd>
+                <dt>Lender paid</dt><dd>{s.schedule.received}/{s.schedule.weeks} increments{s.schedule.remainder === 'spread' ? ` · ${money(s.schedule.perWeek * s.schedule.received)}` : ''}</dd>
                 <dt>Collected so far</dt><dd>{money(s.collected)} <span className="subtle">of {money(s.gross)}</span></dd>
+                {s.schedule.paidToReps.length > 0 && <><dt>Rep paid</dt><dd style={{ fontFamily: 'var(--sans)' }}>{s.schedule.paidToReps.map((r) => <div key={r.role}><span className="num">{r.paid}/{r.total}</span> <span className="subtle">{r.name} · {r.role}</span></div>)}</dd></>}
                 <dt>Still to come</dt><dd>{money(s.outstanding)}</dd>
                 <dt>Next expected</dt><dd>{s.schedule.nextExpected ? <>{s.schedule.nextExpected.expected ? day(s.schedule.nextExpected.expected) : '—'} <span className="subtle" style={{ fontFamily: 'var(--sans)' }}>· {s.schedule.nextExpected.label}{s.schedule.nextExpected.amount ? ` · ${money(s.schedule.nextExpected.amount)}` : ''}{s.schedule.nextExpected.overdue ? <b className="neg"> · overdue</b> : ''}</span></> : <span className="pos">Complete</span>}</dd>
                 {s.schedule.remainder === 'at-end' && <><dt>Final {money(s.schedule.remainderAmount)}</dt><dd style={{ fontFamily: 'var(--sans)' }}>{s.schedule.remainderReceived ? <span className="pos">received</span> : s.schedule.received >= s.schedule.weeks ? <button className="btn primary" style={{ height: 26, padding: '0 8px', fontSize: 11.5 }} onClick={() => void collect({ segmentKey: s.sk, markRemainder: true }, `${d.id} — final ${money(s.schedule!.remainderAmount)} received`)}>Record final received</button> : <span className="subtle">due when increments are done</span>}</dd></>}
@@ -190,7 +191,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
               <div className="pl">
                 {d.payments.map((p, i) => (
                   <div className="row" key={i}>
-                    <span className={p.amount < 0 ? 'neg' : ''}>{p.repName} · {p.role}{p.segmentKey && p.segmentKey !== 'base' ? ` · ${p.segmentKey}` : ''}</span>
+                    <span className={p.amount < 0 ? 'neg' : ''}>{p.repName} · {p.role}{p.segmentKey && p.segmentKey !== 'base' ? ` · ${p.segmentKey}` : ''}{p.unit ? <span className="subtle"> · {p.unit}</span> : ''}</span>
                     <span className={`num ${p.amount < 0 ? 'neg' : 'pos'}`}>{money(p.amount)}</span>
                     <span className="subtle num">{day(p.paidAt)}</span>
                   </div>

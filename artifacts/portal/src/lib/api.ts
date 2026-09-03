@@ -151,3 +151,7 @@ export interface RepRecord { id: string; name: string; email: string; role: 'rep
 export interface DealNoteView { id: string; dealId: string; authorRepId: string; author: string; body: string; createdAt: string }
 export interface DealFileView { id: string; dealId: string; name: string; mime: string; size: number; uploadedBy: string; uploadedByName: string; createdAt: string }
 export interface TotpStatus { enabled: boolean; pending: boolean }
+export interface RemittanceRow { line: number; ref: string; date: string; amount: number; dealId: string | null; business: string | null; plan: string; steps: Array<{ segmentKey: string; label: string; amount: number }>; unapplied: number; problems: string[] }
+export interface RemittancePreview { rows: RemittanceRow[]; problems: string[]; summary: { rows: number; matched: number; amount: number; applied: number; unapplied: number; problems: number } }
+export interface AnnualRow { repId: string; name: string; email: string; active: boolean; grossPaid: number; recovered: number; cash: number; payouts: number; deals: number }
+export interface AnnualReport { year: number; rows: AnnualRow[]; total: { grossPaid: number; recovered: number; cash: number; payouts: number; deals: number } }

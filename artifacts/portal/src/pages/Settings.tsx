@@ -2,11 +2,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Shell } from '../components/Shell';
 import { Card, Loading, Pill } from '../components/ui';
-import { api, post, type ClawbackBasis, type Lender, type ProductRule, type ReferralPartner, type RosterRep, type Settings as SettingsData, type Team, type Usage } from '../lib/api';
+import { api, post, type ClawbackBasis, type Lender, type ProductRule, type ReferralPartner, type RemittancePreview, type RosterRep, type Settings as SettingsData, type Team, type Usage } from '../lib/api';
 import { compact, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 
-type TabKey = 'lenders' | 'partners' | 'products' | 'teams' | 'reps' | 'crm' | 'import';
+type TabKey = 'lenders' | 'partners' | 'products' | 'teams' | 'reps' | 'crm' | 'import' | 'remittance';
 const TABS: Array<{ key: TabKey; label: string; hint: string }> = [
   { key: 'lenders', label: 'Lenders', hint: 'Each lender funds certain products and has its own clawback policy. Lenders that fund consolidations pay commission in increments; everyone else pays straight commission.' },
   { key: 'partners', label: 'Referral partners', hint: 'Fee % of gross commission and an optional monthly cap. Blank cap = uncapped.' },
@@ -15,6 +15,7 @@ const TABS: Array<{ key: TabKey; label: string; hint: string }> = [
   { key: 'reps', label: 'Reps', hint: 'Rates default onto new deals and can be overridden per deal. Deactivating never changes history.' },
   { key: 'crm', label: 'CRM & thresholds', hint: 'CRM deep link template and the day counts that drive at-risk, Prospecting and renewals.' },
   { key: 'import', label: 'Import from sheet', hint: 'Bring the FUNDED DEALS tab in from a CSV export. Preview first; nothing is written until the file is clean.' },
+  { key: 'remittance', label: 'Lender remittance', hint: 'Paste the lender’s weekly payment report. Each line is matched to a deal and marks the increments or dollars that arrived — no ticking receipts one by one.' },
 ];
 
 export function Settings() {
@@ -56,6 +57,7 @@ export function Settings() {
           {tab === 'reps' && <RepsTab reps={roster.data!.reps} teams={teams.data!.teams} run={run} onViewAs={(id) => setViewAs(id)} />}
           {tab === 'crm' && <CrmTab settings={settings.data!} run={run} />}
           {tab === 'import' && <ImportTab />}
+          {tab === 'remittance' && <RemittanceTab />}
         </>
       )}
     </Shell>
@@ -389,8 +391,8 @@ function tempPassword(): string {
 }
 
 /* ---------- Import from sheet ---------- */
-interface ImportRow { line: number; id: string; action: 'deal' | 'draw'; parentId: string | null; business: string; lender: string; product: string; amount: number; date: string; opener: string | null; closer: string | null; override: string | null; commissionStatus: string; repPaid: string | null; clawback: number | null; problems: string[]; warnings: string[] }
-interface ImportPreview { rows: ImportRow[]; skipped: number; problems: string[]; summary: { deals: number; draws: number; funded: number; withPayouts: number; warnings: number; clawbacks: number; problems: number } }
+interface ImportRow { line: number; id: string; action: 'deal' | 'draw' | 'skip'; parentId: string | null; business: string; lender: string; product: string; amount: number; date: string; opener: string | null; closer: string | null; override: string | null; commissionStatus: string; repPaid: string | null; clawback: number | null; problems: string[]; warnings: string[] }
+interface ImportPreview { rows: ImportRow[]; skipped: number; skippedExisting: number; problems: string[]; summary: { deals: number; draws: number; funded: number; withPayouts: number; warnings: number; clawbacks: number; problems: number } }
 function ImportTab() {
   const { notify } = useSession();
   const qc = useQueryClient();
@@ -398,18 +400,19 @@ function ImportTab() {
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [onlyProblems, setOnlyProblems] = useState(false);
+  const [skipExisting, setSkipExisting] = useState(false);
   const [done, setDone] = useState<{ deals: number; draws: number; clawbacks: number; payoutLines: number; runId: string | null } | null>(null);
   async function file(f: File | undefined) { if (!f) return; setCsv(await f.text()); setPreview(null); setDone(null); }
   async function run() {
     setBusy(true);
-    try { setPreview(await post<ImportPreview>('/api/admin/import/preview', { csv })); } catch (e) { notify(e instanceof Error ? e.message : 'Preview failed'); } finally { setBusy(false); }
+    try { setPreview(await post<ImportPreview>('/api/admin/import/preview', { csv, skipExisting })); } catch (e) { notify(e instanceof Error ? e.message : 'Preview failed'); } finally { setBusy(false); }
   }
   async function commit() {
     if (!preview || preview.summary.problems) return;
     if (!window.confirm(`Import ${preview.summary.deals} deals and ${preview.summary.draws} draws (${compact(preview.summary.funded)} funded)? Rows with a Rep Paid Date become paid ledger lines in a run called "Imported from sheet".`)) return;
     setBusy(true);
     try {
-      const r = await post<{ deals: number; draws: number; clawbacks: number; payoutLines: number; runId: string | null }>('/api/admin/import', { csv });
+      const r = await post<{ deals: number; draws: number; clawbacks: number; payoutLines: number; runId: string | null }>('/api/admin/import', { csv, skipExisting });
       setDone(r); setPreview(null); setCsv('');
       await qc.invalidateQueries();
       notify(`Imported ${r.deals} deals, ${r.draws} draws, ${r.payoutLines} paid lines`);
@@ -422,6 +425,7 @@ function ImportTab() {
         <div className="toolbar">
           <input type="file" accept=".csv,text/csv" onChange={(e) => void file(e.target.files?.[0])} />
           <span className="count">{csv ? `${csv.length.toLocaleString()} characters loaded` : 'or paste the CSV below'}</span>
+          <label className="subtle" style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }} title="Re-exporting the whole sheet? Deals and draws the portal already holds are left alone; only new rows come in."><input type="checkbox" className="big" checked={skipExisting} onChange={(e) => { setSkipExisting(e.target.checked); setPreview(null); }} /> skip rows already in the portal</label>
           <button className="btn primary" disabled={!csv.trim() || busy} onClick={() => void run()}>{busy ? 'Working…' : 'Preview'}</button>
         </div>
         <textarea rows={4} value={csv} onChange={(e) => { setCsv(e.target.value); setPreview(null); }} placeholder="Deal ID,Parent Deal,Date,Business Name,Lender,Product,…" style={{ border: '1px solid var(--border-strong)', borderRadius: 8, padding: '8px 10px', background: 'var(--input-bg)', color: 'inherit', font: 'inherit', fontFamily: 'var(--mono)', fontSize: 12.5, resize: 'vertical', outline: 'none' }} />
@@ -429,7 +433,7 @@ function ImportTab() {
         {preview && (
           <>
             <div className="grid-auto">
-              <section className="card"><div className="label">Deals</div><div className="metric">{preview.summary.deals}</div><div className="sub">{preview.summary.draws} draws · {preview.skipped} banner/total rows skipped</div></section>
+              <section className="card"><div className="label">Deals</div><div className="metric">{preview.summary.deals}</div><div className="sub">{preview.summary.draws} draws · {preview.skipped} banner/total rows skipped{preview.skippedExisting ? ` · ${preview.skippedExisting} already in the portal` : ''}</div></section>
               <section className="card"><div className="label">Funded</div><div className="metric">{compact(preview.summary.funded)}</div></section>
               <section className="card"><div className="label">Already paid to reps</div><div className="metric">{preview.summary.withPayouts}</div><div className="sub">rows with a Rep Paid Date → ledger</div></section>
               <section className="card"><div className="label">Problems</div><div className={`metric ${preview.summary.problems ? 'neg' : 'pos'}`}>{preview.summary.problems}</div><div className="sub">{preview.summary.warnings} warning{preview.summary.warnings === 1 ? '' : 's'} · {preview.summary.clawbacks} clawbacks</div></section>
@@ -447,7 +451,7 @@ function ImportTab() {
                   <div className={`tr ${r.problems.length ? 'tint' : ''}`} key={r.line}>
                     <div className="td num subtle">{r.line}</div>
                     <div className="td num">{r.id || <span className="subtle">new</span>}</div>
-                    <div className="td">{r.action === 'draw' ? <Pill tone="amber">draw of {r.parentId}</Pill> : <Pill tone="teal">deal</Pill>}</div>
+                    <div className="td">{r.action === 'skip' ? <Pill tone="grey">skip</Pill> : r.action === 'draw' ? <Pill tone="amber">draw of {r.parentId}</Pill> : <Pill tone="teal">deal</Pill>}</div>
                     <div className="td ellipsis">{r.business}</div>
                     <div className="td ellipsis">{r.lender}</div>
                     <div className="td ellipsis">{r.product}</div>
@@ -457,6 +461,76 @@ function ImportTab() {
                     <div className="td ellipsis" style={{ fontSize: 13 }}>{r.commissionStatus || '—'}</div>
                     <div className="td num">{r.repPaid ?? '—'}</div>
                     <div className="td" style={{ fontSize: 13 }}>{r.problems.map((p, i) => <div key={i} className="neg">{p}</div>)}{r.warnings.map((w, i) => <div key={`w${i}`} className="warn">{w}</div>)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+/* ---------- Lender remittance ---------- */
+function RemittanceTab() {
+  const { notify } = useSession();
+  const qc = useQueryClient();
+  const [csv, setCsv] = useState('');
+  const [preview, setPreview] = useState<RemittancePreview | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<{ applied: number; amount: number; deals: string[] } | null>(null);
+  async function file(f: File | undefined) { if (!f) return; setCsv(await f.text()); setPreview(null); setDone(null); }
+  async function run() {
+    setBusy(true);
+    try { setPreview(await post<RemittancePreview>('/api/admin/remittance/preview', { csv })); } catch (e) { notify(e instanceof Error ? e.message : 'Preview failed'); } finally { setBusy(false); }
+  }
+  async function commit() {
+    if (!preview || preview.summary.problems) return;
+    if (!window.confirm(`Apply ${money(preview.summary.applied)} across ${preview.summary.matched} deal line${preview.summary.matched === 1 ? '' : 's'}? Each one is recorded as a lender receipt and moves money into the reps' owed balances.`)) return;
+    setBusy(true);
+    try {
+      const r = await post<{ applied: number; amount: number; deals: string[] }>('/api/admin/remittance', { csv });
+      setDone(r); setPreview(null); setCsv('');
+      await qc.invalidateQueries();
+      notify(`${money(r.applied)} recorded across ${r.deals.length} deal${r.deals.length === 1 ? '' : 's'}`);
+    } catch (e) { notify(e instanceof Error ? e.message : 'Could not apply'); } finally { setBusy(false); }
+  }
+  return (
+    <Card title="Lender remittance report" extra="any CSV with a deal / business column, a date and an amount · increments are walked in order; straight commission adds to collected">
+      <div style={{ display: 'grid', gap: 10 }}>
+        <div className="toolbar">
+          <input type="file" accept=".csv,text/csv" onChange={(e) => void file(e.target.files?.[0])} />
+          <span className="count">{csv ? `${csv.length.toLocaleString()} characters loaded` : 'or paste the report below'}</span>
+          <button className="btn primary" disabled={!csv.trim() || busy} onClick={() => void run()}>{busy ? 'Working…' : 'Preview'}</button>
+        </div>
+        <textarea rows={4} value={csv} onChange={(e) => { setCsv(e.target.value); setPreview(null); }} placeholder={'Merchant,Payment Date,Commission Paid\nHarbor Street Logistics,9/1/2026,4550.90'} style={{ border: '1px solid var(--border-strong)', borderRadius: 8, padding: '8px 10px', background: 'var(--input-bg)', color: 'inherit', font: 'inherit', fontFamily: 'var(--mono)', fontSize: 12.5, resize: 'vertical', outline: 'none' }} />
+        {done && <div className="note" style={{ background: 'var(--teal-light)', borderColor: 'var(--teal-light-2)' }}>Recorded <b>{money(done.applied)}</b> of {money(done.amount)} across <b>{done.deals.length}</b> deal{done.deals.length === 1 ? '' : 's'}: {done.deals.join(', ')}.</div>}
+        {preview && (
+          <>
+            <div className="grid-auto">
+              <section className="card"><div className="label">Lines</div><div className="metric">{preview.summary.rows}</div><div className="sub">{preview.summary.matched} matched to a deal</div></section>
+              <section className="card"><div className="label">On the report</div><div className="metric">{money(preview.summary.amount)}</div></section>
+              <section className="card"><div className="label">Will be recorded</div><div className="metric pos">{money(preview.summary.applied)}</div><div className="sub">{preview.summary.unapplied ? `${money(preview.summary.unapplied)} does not fit a schedule` : 'every dollar lands'}</div></section>
+              <section className="card"><div className="label">Problems</div><div className={`metric ${preview.summary.problems ? 'neg' : 'pos'}`}>{preview.summary.problems}</div></section>
+            </div>
+            {preview.problems.map((p, i) => <div key={i} className="note" style={{ background: 'var(--amber-light, var(--sunken))' }}>{p}</div>)}
+            <div className="toolbar">
+              <span className="count">{preview.rows.length} lines</span>
+              <button className="btn primary" disabled={busy || preview.summary.problems > 0} title={preview.summary.problems ? 'Fix the lines in red first' : undefined} onClick={() => void commit()}>{busy ? 'Working…' : `Apply ${money(preview.summary.applied)}`}</button>
+            </div>
+            <div className="scroller">
+              <div className="table" style={{ ['--cols' as string]: '60px minmax(160px,1fr) 110px 120px 90px minmax(200px,1.2fr) minmax(200px,1.4fr)', minWidth: 1000 }}>
+                <div className="tr th"><div className="td">Line</div><div className="td">Reference</div><div className="td">Date</div><div className="td r">Amount</div><div className="td">Deal</div><div className="td">Will record</div><div className="td">Problems</div></div>
+                {preview.rows.map((r) => (
+                  <div className={`tr ${r.problems.length ? 'tint' : ''}`} key={r.line}>
+                    <div className="td num subtle">{r.line}</div>
+                    <div className="td ellipsis">{r.ref || <span className="subtle">blank</span>}{r.business && r.business !== r.ref ? <span className="subtle"> → {r.business}</span> : ''}</div>
+                    <div className="td num">{r.date}</div>
+                    <div className="td r num">{money(r.amount)}</div>
+                    <div className="td num">{r.dealId ?? '—'}</div>
+                    <div className="td" style={{ fontSize: 13.5 }}>{r.plan || '—'}{r.unapplied > 0 && !r.problems.length ? <span className="warn"> · {money(r.unapplied)} unapplied</span> : ''}</div>
+                    <div className="td" style={{ fontSize: 13 }}>{r.problems.map((p, i) => <div key={i} className="neg">{p}</div>)}</div>
                   </div>
                 ))}
               </div>

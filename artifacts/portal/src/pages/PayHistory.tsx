@@ -23,6 +23,23 @@ export function PayHistory() {
             <Metric label="Cash received" value={money(h.summary.cash)} sub="gross − recovered" />
             <Metric label="Payouts" value={String(h.summary.payouts)} sub="distinct payout dates" />
           </div>
+          {h.days.length > 1 && (() => {
+            const years = new Map<string, { gross: number; recovered: number; cash: number; payouts: number }>();
+            for (const d of h.days) {
+              const y = d.date.slice(0, 4);
+              const t = years.get(y) ?? { gross: 0, recovered: 0, cash: 0, payouts: 0 };
+              years.set(y, { gross: t.gross + d.grossPaid, recovered: t.recovered + d.recovered, cash: t.cash + d.cash, payouts: t.payouts + 1 });
+            }
+            return (
+              <Card title="By year" extra="for your records at tax time">
+                <div className="pl">
+                  {[...years.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([y, t]) => (
+                    <div className="row" key={y}><span>{y}<span className="subtle"> · {t.payouts} payout{t.payouts === 1 ? '' : 's'}</span></span><span className="subtle num">{t.recovered ? `${money(t.gross)} − ${money(t.recovered)}` : ''}</span><span className="num pos">{money(t.cash)}</span></div>
+                  ))}
+                </div>
+              </Card>
+            );
+          })()}
           {h.days.length === 0 ? <div className="note">No payouts yet — each time payroll pays one of your deal lines it appears here with the date, amount and deal.</div> : h.days.map((d) => (
             <Card key={d.date} title={fullDay(d.date)} extra={d.runLabel ?? undefined}>
               <div className="scroller">

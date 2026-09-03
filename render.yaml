@@ -1,0 +1,40 @@
+# Render blueprint: one web service (API + built portal) and a Postgres database.
+# Deploy: Render dashboard → New → Blueprint → point at this repo. After the first
+# deploy, set BASE_URL / APP_ORIGIN to the service URL (or your custom domain) and
+# add the mail keys. See docs/DEPLOY.md.
+services:
+  - type: web
+    name: greystone-portal
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "8080"
+      - key: SEED
+        value: workbook # first boot loads reps, lenders, products, partners from the tracker tabs; switch to "none" after
+      - key: DATABASE_URL
+        fromDatabase:
+          name: greystone-db
+          property: connectionString
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: BASE_URL
+        sync: false # e.g. https://portal.greystoneus.com
+      - key: APP_ORIGIN
+        sync: false # same as BASE_URL unless the portal is served elsewhere
+      - key: MAIL_PROVIDER
+        value: resend
+      - key: MAIL_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        value: Greystone Commission Portal <portal@greystoneus.com>
+      - key: RENEWAL_DIGEST_HOUR_UTC
+        value: "13" # 9am Eastern
+databases:
+  - name: greystone-db
+    plan: basic-256mb
+    postgresMajorVersion: "16"

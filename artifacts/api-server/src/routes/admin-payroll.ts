@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { HttpError, currentUser, requireRole } from '../auth/middleware.js';
-import { payableFor, payrollRepDetail, payrollReps, preview, runCsv, runSummary } from '../payroll-views.js';
+import { annualCsv, annualReport, payableFor, payrollRepDetail, payrollReps, preview, runCsv, runSummary } from '../payroll-views.js';
 import type { Repo } from '../repo.js';
 import { advanceRun, createRun, paySelected, voidPayout } from '../services/payroll.js';
 import { notifyRunApproved, type NotifyDeps } from '../services/notify.js';
@@ -53,6 +53,22 @@ export function adminPayrollRouter(repo: Repo, notify?: Omit<NotifyDeps, 'repo'>
     const [ctx, reps] = await Promise.all([repo.loadContext(), repo.listReps()]);
     const repId = typeof req.query.rep === 'string' ? req.query.rep : undefined;
     res.type('text/csv').attachment(`${String(req.params.id)}${repId ? `-${repId}` : ''}.csv`).send(runCsv(ctx, reps, String(req.params.id), repId));
+  });
+
+  /** Year-end totals per rep (JSON and CSV). Defaults to the current year. */
+  const yearOf = (req: Parameters<Router>[0]) => {
+    const y = Number(req.query.year ?? new Date().getUTCFullYear());
+    if (!Number.isInteger(y) || y < 2000 || y > 2100) throw new HttpError(400, 'year must be a four-digit year');
+    return y;
+  };
+  r.get('/reports/annual', async (req, res) => {
+    const [ctx, reps] = await Promise.all([repo.loadContext(), repo.listReps()]);
+    res.json(annualReport(ctx, reps, yearOf(req)));
+  });
+  r.get('/reports/annual.csv', async (req, res) => {
+    const [ctx, reps] = await Promise.all([repo.loadContext(), repo.listReps()]);
+    const y = yearOf(req);
+    res.type('text/csv').attachment(`rep-pay-${y}.csv`).send(annualCsv(ctx, reps, y));
   });
 
   r.get('/payroll/payable/:repId', async (req, res) => {

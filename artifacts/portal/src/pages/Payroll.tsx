@@ -4,6 +4,7 @@ import { AdminDealDrawer } from '../components/AdminDealDrawer';
 import { Shell } from '../components/Shell';
 import { Card, Contact, Loading, Pill, toneFor } from '../components/ui';
 import { DEMO, api, post, type PayResult, type PayableLineView, type PayrollOverview, type PayrollRepDetail, type Settings } from '../lib/api';
+import type { AnnualReport } from '../lib/api';
 import { compact, day, fullDay, initials, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 
@@ -159,6 +160,7 @@ export function Payroll() {
               </div>
               <button className="btn" style={{ marginTop: 10, width: '100%' }} onClick={() => void newRun()}>+ Open next run</button>
             </Card>
+            <YearEnd />
             <Card title="Reps" extra="sorted by amount owed">
               <div className="runs">
                 {reps.map((r) => (
@@ -278,5 +280,32 @@ export function Payroll() {
       )}
       {open && settings.data && <AdminDealDrawer id={open} settings={settings.data} editOptions={[]} onClose={() => setOpen(null)} />}
     </Shell>
+  );
+}
+
+/** Year-end totals per rep — what the accountant needs for 1099s, straight from the ledger's paid-at dates. */
+function YearEnd() {
+  const thisYear = new Date().getFullYear();
+  const [year, setYear] = useState(thisYear);
+  const q = useQuery({ queryKey: ['annual', year], queryFn: () => api<AnnualReport>(`/api/admin/reports/annual?year=${year}`) });
+  const r = q.data;
+  return (
+    <Card title="Year-end" extra={<select className="mini" value={year} onChange={(e) => setYear(Number(e.target.value))}>{[0, 1, 2, 3].map((i) => <option key={i} value={thisYear - i}>{thisYear - i}</option>)}</select>}>
+      {!r ? <Loading error={q.error} /> : r.rows.length === 0 ? <div className="muted">Nothing paid in {year}.</div> : (
+        <>
+          <div className="pl">
+            {r.rows.map((x) => (
+              <div className="row" key={x.repId}>
+                <span className="ellipsis">{x.name}{!x.active && <span className="subtle"> (inactive)</span>}<span className="subtle"> · {x.payouts} payout{x.payouts === 1 ? '' : 's'}</span></span>
+                <span className="num pos">{money(x.cash)}</span>
+              </div>
+            ))}
+            <div className="row" style={{ fontWeight: 700 }}><span>Total cash paid</span><span className="num">{money(r.total.cash)}</span></div>
+          </div>
+          <div className="subtle" style={{ fontSize: 13, marginTop: 8 }}>Gross {money(r.total.grossPaid)} − clawbacks recovered {money(r.total.recovered)}.</div>
+          {!DEMO && <a className="btn" style={{ marginTop: 10, width: '100%', display: 'grid', placeItems: 'center' }} href={`/api/admin/reports/annual.csv?year=${year}`}>Download {year} CSV</a>}
+        </>
+      )}
+    </Card>
   );
 }

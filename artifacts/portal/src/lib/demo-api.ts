@@ -16,8 +16,9 @@ import { addDraw, createDeal, deleteDeal, recordClawback, setCollection, setCrmI
 import { addFile, addNote, removeFile, removeNote } from '../../../api-server/src/services/notes';
 import { advanceRun, createRun, paySelected, voidPayout } from '../../../api-server/src/services/payroll';
 import { commitImport, previewImport } from '../../../api-server/src/services/import';
+import { commitRemittance, previewRemittance } from '../../../api-server/src/services/remittance';
 import { createRep, createTeam, deleteTeam, saveCrm, saveLenders, savePartners, savePayroll, saveProducts, saveThresholds, updateRep, updateTeam, usage } from '../../../api-server/src/services/settings';
-import { payrollRepDetail, payrollReps, preview, runSummary } from '../../../api-server/src/payroll-views';
+import { annualReport, payrollRepDetail, payrollReps, preview, runSummary } from '../../../api-server/src/payroll-views';
 import { ApiError, type SessionUser } from './api';
 
 let repo: ReturnType<typeof memoryRepo> | null = null;
@@ -234,8 +235,11 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     const tm = p.match(/^\/api\/admin\/teams\/([^/]+)$/);
     if (tm && method === 'PATCH') return json(await updateTeam(repo, decodeURIComponent(tm[1]!), body as never, me.repId));
     if (tm && method === 'DELETE') { await deleteTeam(repo, decodeURIComponent(tm[1]!), me.repId); return json(null); }
-    if (p === '/api/admin/import/preview' && method === 'POST') return json(await previewImport(repo, String(body.csv ?? '')));
-    if (p === '/api/admin/import' && method === 'POST') return json(await commitImport(repo, String(body.csv ?? ''), me.repId));
+    if (p === '/api/admin/import/preview' && method === 'POST') return json(await previewImport(repo, String(body.csv ?? ''), { skipExisting: !!body.skipExisting }));
+    if (p === '/api/admin/import' && method === 'POST') return json(await commitImport(repo, String(body.csv ?? ''), me.repId, { skipExisting: !!body.skipExisting }));
+    if (p === '/api/admin/remittance/preview' && method === 'POST') return json(await previewRemittance(repo, String(body.csv ?? '')));
+    if (p === '/api/admin/remittance' && method === 'POST') return json(await commitRemittance(repo, String(body.csv ?? ''), me.repId));
+    if (p === '/api/admin/reports/annual') return json(annualReport(ctx, d.reps, Number(q.get('year') ?? today.slice(0, 4))));
     if (p === '/api/admin/reps' && method === 'POST') return json(await createRep(repo, body as never, me.repId));
     const rm = p.match(/^\/api\/admin\/reps\/([^/]+)$/);
     if (rm && method === 'PATCH') return json(await updateRep(repo, decodeURIComponent(rm[1]!), body as never, me.repId));

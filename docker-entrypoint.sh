@@ -8,7 +8,9 @@ for i in $(seq 1 30); do
 done
 echo "Applying migrations"
 pnpm --filter @greystone/db migrate
-if [ "${SEED:-demo}" = "demo" ]; then
+# Default seed: the demo board in development, nothing in production (set SEED=workbook for the first real boot).
+if [ "$NODE_ENV" = "production" ]; then SEED="${SEED:-none}"; else SEED="${SEED:-demo}"; fi
+if [ "$SEED" = "demo" ]; then
   echo "Loading demo board (SEED=demo)"
   pnpm --filter @greystone/db seed:demo
 elif [ "${SEED}" = "workbook" ]; then

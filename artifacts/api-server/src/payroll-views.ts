@@ -1,5 +1,5 @@
 /** Admin payroll projections. Never served to reps. */
-import { clawbackQueue, collectionLabel, paidFigures, payableLines, payoutPreview, repLedger, sum, type LedgerContext, type PayrollRun, type Rep, unitsPaid, voidedKeys } from '@greystone/commission';
+import { clawbackQueue, collectionLabel, paidFigures, standingLines, payableLines, payoutPreview, repLedger, sum, type LedgerContext, type PayrollRun, type Rep, unitsPaid, voidedKeys } from '@greystone/commission';
 
 export interface RunSummary extends PayrollRun {
   /** Σ positive rows in this run. */
@@ -152,4 +152,45 @@ export function unitLabelOf(key: string): string | null {
   if (!m) return null;
   const n = Number(m[1]);
   return n === 0 ? 'Upfront' : `Increment ${n}`;
+}
+
+export interface AnnualRow {
+  repId: string;
+  name: string;
+  email: string;
+  active: boolean;
+  /** Standing (non-voided) positive rows: what was paid out. */
+  grossPaid: number;
+  /** Clawback dollars withheld from those payouts. */
+  recovered: number;
+  /** Cash that actually went to the rep: gross − recovered. */
+  cash: number;
+  payouts: number;
+  deals: number;
+}
+
+/** Year-end totals per rep for the accountant (1099s, reconciliation). Based on paid-at dates, like the ledger. */
+export function annualReport(ctx: LedgerContext, reps: Rep[], year: number): { year: number; rows: AnnualRow[]; total: Omit<AnnualRow, 'repId' | 'name' | 'email' | 'active'> } {
+  const prefix = `${year}-`;
+  const rows = reps
+    .map((rep) => {
+      const mine = ctx.lines.filter((l) => l.repId === rep.id && l.paidAt.startsWith(prefix));
+      const f = paidFigures(mine);
+      const standing = standingLines(mine);
+      return { repId: rep.id, name: rep.name, email: rep.email, active: rep.active, grossPaid: f.gross, recovered: f.recovered, cash: f.cash, payouts: new Set(standing.map((l) => l.paidAt)).size, deals: new Set(standing.filter((l) => l.amount > 0).map((l) => l.dealId)).size };
+    })
+    .filter((r) => r.grossPaid > 0 || r.recovered > 0)
+    .sort((a, b) => b.cash - a.cash);
+  const total = rows.reduce((t, r) => ({ grossPaid: t.grossPaid + r.grossPaid, recovered: t.recovered + r.recovered, cash: t.cash + r.cash, payouts: t.payouts + r.payouts, deals: t.deals + r.deals }), { grossPaid: 0, recovered: 0, cash: 0, payouts: 0, deals: 0 });
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  return { year, rows, total: { ...total, grossPaid: r2(total.grossPaid), recovered: r2(total.recovered), cash: r2(total.cash) } };
+}
+
+export function annualCsv(ctx: LedgerContext, reps: Rep[], year: number): string {
+  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const { rows, total } = annualReport(ctx, reps, year);
+  const head = ['Year', 'Rep', 'Email', 'Active', 'Gross paid', 'Clawback recovered', 'Cash paid', 'Payouts', 'Deals'].map(esc).join(',');
+  const body = rows.map((r) => [year, r.name, r.email, r.active ? 'yes' : 'no', r.grossPaid.toFixed(2), r.recovered.toFixed(2), r.cash.toFixed(2), r.payouts, r.deals].map(esc).join(','));
+  const foot = [year, 'TOTAL', '', '', total.grossPaid.toFixed(2), total.recovered.toFixed(2), total.cash.toFixed(2), total.payouts, total.deals].map(esc).join(',');
+  return [head, ...body, foot].join('\r\n') + '\r\n';
 }

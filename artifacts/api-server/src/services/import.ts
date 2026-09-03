@@ -31,7 +31,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 export interface ImportRowPreview {
   line: number;
   id: string;
-  action: 'deal' | 'draw';
+  action: 'deal' | 'draw' | 'skip';
   parentId: string | null;
   business: string;
   lender: string;
@@ -49,9 +49,16 @@ export interface ImportRowPreview {
   warnings: string[];
 }
 
+export interface ImportOptions {
+  /** Re-exporting the whole sheet: rows already in the portal are skipped instead of flagged. */
+  skipExisting?: boolean;
+}
+
 export interface ImportPreview {
   rows: ImportRowPreview[];
   skipped: number;
+  /** Rows left alone because the portal already has them (only with `skipExisting`). */
+  skippedExisting: number;
   problems: string[];
   summary: { deals: number; draws: number; funded: number; withPayouts: number; warnings: number; clawbacks: number; problems: number };
 }
@@ -63,7 +70,7 @@ function repByName(reps: Rep[], name: string): Rep | undefined {
 }
 
 /** Resolve every row against settings and the roster. Pure apart from reads. */
-export async function previewImport(repo: Repo, csv: string): Promise<ImportPreview> {
+export async function previewImport(repo: Repo, csv: string, opts: ImportOptions = {}): Promise<ImportPreview> {
   const [settings, reps, ctx] = await Promise.all([repo.getSettings(), repo.listReps(), repo.loadContext()]);
   const read = readFundedDealsCsv(csv);
   const existing = new Set(ctx.deals.map((d) => d.id));
@@ -91,9 +98,23 @@ export async function previewImport(repo: Repo, csv: string): Promise<ImportPrev
     const override = who('Override', r.override);
     const isDraw = !!r.parent && r.parent !== r.id && (rule?.basis === 'draw' || rule?.parent === true || ids.has(r.parent) || existing.has(r.parent));
     if (isDraw && !ids.has(r.parent) && !existing.has(r.parent)) problems.push(`Parent deal ${r.parent} is not in the file or the portal`);
+    let skip = false;
+    if (isDraw && opts.skipExisting) {
+      // The same draw re-exported: its parent already carries a draw on that date for that amount.
+      const parent = ctx.deals.find((d) => d.id === r.parent);
+      if (parent?.draws.some((x) => x.date === r.date && Math.abs(x.amount - r.amount) < 0.005)) {
+        skip = true;
+        warnings.push(`Already in the portal as a draw on ${r.parent} — skipped`);
+      }
+    }
     if (!isDraw) {
       if (r.id && !/^F\d+$/.test(r.id)) problems.push(`Deal ID "${r.id}" is not an F-number; leave it blank to let the portal assign one`);
-      if (r.id && existing.has(r.id)) problems.push(`${r.id} already exists in the portal`);
+      if (r.id && existing.has(r.id)) {
+        if (opts.skipExisting) {
+          skip = true;
+          warnings.push(`${r.id} is already in the portal — skipped`);
+        } else problems.push(`${r.id} already exists in the portal (tick "skip rows already in the portal" to re-import a full export)`);
+      }
       if (r.id && seen.has(r.id)) warnings.push(`${r.id} appears twice in the file — this copy gets the next free id`);
       if (r.id) seen.add(r.id);
     }
@@ -101,7 +122,7 @@ export async function previewImport(repo: Repo, csv: string): Promise<ImportPrev
     return {
       line: r.line,
       id: r.id,
-      action: isDraw ? 'draw' : 'deal',
+      action: skip ? 'skip' : isDraw ? 'draw' : 'deal',
       parentId: isDraw ? r.parent : null,
       business: r.business,
       lender: r.lender,
@@ -119,18 +140,20 @@ export async function previewImport(repo: Repo, csv: string): Promise<ImportPrev
     };
   });
   const problems = [...read.problems];
-  const deals = rows.filter((x) => x.action === 'deal');
+  const live = rows.filter((x) => x.action !== 'skip');
+  const deals = live.filter((x) => x.action === 'deal');
   return {
     rows,
     skipped: read.skipped,
+    skippedExisting: rows.length - live.length,
     problems,
     summary: {
       deals: deals.length,
-      draws: rows.length - deals.length,
-      funded: Math.round(rows.reduce((s, x) => s + x.amount, 0) * 100) / 100,
-      withPayouts: rows.filter((x) => x.repPaid).length,
+      draws: live.length - deals.length,
+      funded: Math.round(live.reduce((s, x) => s + x.amount, 0) * 100) / 100,
+      withPayouts: live.filter((x) => x.repPaid).length,
       warnings: rows.reduce((s, x) => s + x.warnings.length, 0),
-      clawbacks: rows.filter((x) => x.clawback).length,
+      clawbacks: live.filter((x) => x.clawback).length,
       problems: problems.length + rows.reduce((s, x) => s + x.problems.length, 0),
     },
   };
@@ -145,8 +168,8 @@ export interface ImportResult {
 }
 
 /** Commit a clean file. Refuses if the preview has any problem. */
-export async function commitImport(repo: Repo, csv: string, actorRepId: string): Promise<ImportResult> {
-  const preview = await previewImport(repo, csv);
+export async function commitImport(repo: Repo, csv: string, actorRepId: string, opts: ImportOptions = {}): Promise<ImportResult> {
+  const preview = await previewImport(repo, csv, opts);
   if (preview.summary.problems > 0) throw new HttpError(400, `Fix the ${preview.summary.problems} problem(s) in the preview before importing`);
   const [settings, reps, ctx] = await Promise.all([repo.getSettings(), repo.listReps(), repo.loadContext()]);
   const read = readFundedDealsCsv(csv);
@@ -257,7 +280,7 @@ export async function commitImport(repo: Repo, csv: string, actorRepId: string):
   const paidDeals = new Map<string, string>();
   for (const row of preview.rows) {
     const r = byLine.get(row.line)!;
-    if (!r.repPaid) continue;
+    if (!r.repPaid || row.action === 'skip') continue;
     const deal = row.action === 'deal' ? created.find((d) => d.business === r.business && d.date === r.date && d.funded === r.amount) : all.find((d) => d.id === row.parentId);
     if (!deal) continue;
     paidDeals.set(deal.id, r.repPaid);

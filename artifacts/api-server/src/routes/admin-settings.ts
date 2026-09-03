@@ -4,6 +4,7 @@ import type { Repo } from '../repo.js';
 import { createRep, createTeam, deleteTeam, saveCrm, saveLenders, savePartners, savePayroll, saveProducts, saveThresholds, updateRep, updateTeam, usage } from '../services/settings.js';
 import { setRepPassword } from '../services/passwords.js';
 import { commitImport, previewImport } from '../services/import.js';
+import { commitRemittance, previewRemittance } from '../services/remittance.js';
 
 /** Settings writes: lenders, partners, product rules, thresholds, CRM, teams, reps. Admin only. */
 export function adminSettingsRouter(repo: Repo): Router {
@@ -27,8 +28,12 @@ export function adminSettingsRouter(repo: Repo): Router {
   });
 
   /** Import the tracker's FUNDED DEALS tab (CSV text in the body). */
-  r.post('/import/preview', async (req, res) => res.json(await previewImport(repo, String(req.body?.csv ?? ''))));
-  r.post('/import', async (req, res) => res.status(201).json(await commitImport(repo, String(req.body?.csv ?? ''), actor(req))));
+  const importOpts = (req: Parameters<Router>[0]) => ({ skipExisting: !!req.body?.skipExisting });
+  r.post('/import/preview', async (req, res) => res.json(await previewImport(repo, String(req.body?.csv ?? ''), importOpts(req))));
+  r.post('/import', async (req, res) => res.status(201).json(await commitImport(repo, String(req.body?.csv ?? ''), actor(req), importOpts(req))));
+  /** Lender remittance report (CSV): match payments to deals and mark increments / dollars received. */
+  r.post('/remittance/preview', async (req, res) => res.json(await previewRemittance(repo, String(req.body?.csv ?? ''))));
+  r.post('/remittance', async (req, res) => res.status(201).json(await commitRemittance(repo, String(req.body?.csv ?? ''), actor(req))));
   r.post('/reps', async (req, res) => res.status(201).json(await createRep(repo, req.body ?? {}, actor(req))));
   r.patch('/reps/:id', async (req, res) => res.json(await updateRep(repo, String(req.params.id), req.body ?? {}, actor(req))));
   r.post('/reps/:id/password', async (req, res) => res.json(await setRepPassword(repo, String(req.params.id), req.body?.password === null ? null : req.body?.password, actor(req))));

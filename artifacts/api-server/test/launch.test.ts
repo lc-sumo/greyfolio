@@ -191,3 +191,79 @@ describe('statements and digests', () => {
     s.stop();
   });
 });
+
+describe('re-import, remittance and year-end', () => {
+  const HEADER = 'Deal ID,Parent Deal,Date,Business Name,Lender,Product,Funded / Draw Amount ($),Factor Rate,Term (bus. days),Payback ($),Frequency,Comm %,PSF (% or $),PSF $ (auto),Gross Commission ($),Referral Partner,Referral %,Referral Fee ($),Net Comm After Referral ($),Opener,Opener %,Opener $,Closer,Closer %,Closer $,Override,Override %,Override $,Total Rep Payout ($),House Net ($),Lead Source,Commission Collected ($),Outstanding ($),Lender Paid Date,Comm. Status,Rep Paid Date,Rep Paid,Deal Status,Clawback ($),Clawback Date,Notes,Credit Line,Draw Initial %,Draw Subsequent %,Merchant Contact,Merchant Email,Merchant Phone,CRM ID';
+  const L = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','AA','AB','AC','AD','AE','AF','AG','AH','AI','AJ','AK','AL','AM','AN','AO','AP','AQ','AR','AS','AT','AU','AV'];
+  const row = (cells: Record<string, string>) => L.map((l) => cells[l] ?? '').join(',');
+  it('skips rows the portal already holds when asked, instead of flagging them', async () => {
+    const { admin } = await harness();
+    const csv = [
+      HEADER,
+      row({ A: 'F1', B: 'F1', C: '6/5/2026', D: 'F1 Business', E: 'MBC', F: 'MCA', G: '10000', H: '1.3', I: '120', K: 'Daily', L: '10', T: 'Julian Ribak', U: '35', W: 'Zach Sanders', X: '40', Z: 'Raymond Amato', AA: '5', AM: 'Waiting for payment' }),
+      row({ A: 'F9', B: 'F9', C: '8/1/2026', D: 'New Co LLC', E: 'MBC', F: 'MCA', G: '50000', H: '1.3', I: '120', K: 'Daily', L: '10', T: 'Julian Ribak', U: '35', W: 'Zach Sanders', X: '40', Z: 'Raymond Amato', AA: '5', AM: 'Waiting for payment' }),
+    ].join('\n');
+    const flagged = await admin.post('/api/admin/import/preview').send({ csv });
+    expect(flagged.body.rows).toHaveLength(2);
+    expect(flagged.body.summary.problems).toBe(1);
+    expect(flagged.body.rows[0].problems[0]).toMatch(/already exists/);
+    const skipped = await admin.post('/api/admin/import/preview').send({ csv, skipExisting: true });
+    expect(skipped.body.summary.problems).toBe(0);
+    expect(skipped.body.skippedExisting).toBe(1);
+    expect(skipped.body.rows[0]).toMatchObject({ action: 'skip' });
+    expect(skipped.body.summary.deals).toBe(1);
+    const done = await admin.post('/api/admin/import').send({ csv, skipExisting: true });
+    expect(done.status).toBe(201);
+    expect(done.body.deals).toBe(1);
+    expect((await admin.get('/api/admin/deals/F9')).body.business).toBe('New Co LLC');
+  });
+  it('matches a lender remittance to deals and marks what arrived', async () => {
+    const { admin } = await harness();
+    // F2 (gross 2,000) and F3 (gross 500) have nothing collected; F1 is paid in full.
+    const csv = ['Merchant,Payment Date,Commission Paid', 'F2 Business,9/1/2026,1200', 'F2,9/2/2026,800', 'F3 Business,9/2/2026,999', 'F1 Business,9/2/2026,100', 'Nobody Inc,9/2/2026,10'].join('\n');
+    const pv = await admin.post('/api/admin/remittance/preview').send({ csv });
+    expect(pv.status).toBe(200);
+    const rows = pv.body.rows;
+    expect(rows[0]).toMatchObject({ dealId: 'F2', plan: '$1,200.00 collected', unapplied: 0, problems: [] });
+    expect(rows[1]).toMatchObject({ dealId: 'F2', plan: '$800.00 collected', unapplied: 0 });
+    expect(rows[2]).toMatchObject({ dealId: 'F3', plan: '$500.00 collected (rest exceeds gross)', unapplied: 499 });
+    expect(rows[3].problems[0]).toMatch(/already collected in full/);
+    expect(rows[4].problems[0]).toMatch(/not a deal id/);
+    expect(pv.body.summary).toMatchObject({ rows: 5, matched: 3, problems: 2 });
+    expect((await admin.post('/api/admin/remittance').send({ csv })).status).toBe(400);
+    const clean = csv.split('\n').slice(0, 4).join('\n');
+    const done = await admin.post('/api/admin/remittance').send({ csv: clean });
+    expect(done.body).toMatchObject({ applied: 2500, amount: 2999, deals: ['F2', 'F3'] });
+    const f2 = (await admin.get('/api/admin/deals/F2')).body;
+    expect(f2.collected).toBe(2000);
+    expect(f2.commissionStatus).toBe('YES - Paid In Full');
+  });
+  it('walks an incremental schedule in order', async () => {
+    const { admin } = await harness();
+    // A consolidation on a weekly lender: 4 increments of gross/4 on a 10,000 gross.
+    const created = await admin.post('/api/admin/deals').send({ business: 'Weekly Co', fundedDate: '2026-08-01', lender: 'Lendini', product: 'CONSOLIDATION - UPFRONT COMM', amount: 100_000, factor: 1.3, termDays: 120, frequency: 'Weekly', commRate: 0.1, openerId: 'rep-julian-ribak', openerRate: 0.35, commIncrements: 4, commUpfrontPct: 0, commRemainder: 'spread' });
+    expect(created.status).toBe(201);
+    const id = created.body.id;
+    const perInc = created.body.segments[0].schedule.events.find((e: { kind: string }) => e.kind === 'increment').amount;
+    const csv = ['Deal,Date,Amount', `${id},9/1/2026,${perInc * 2}`, `${id},9/8/2026,${perInc}`].join('\n');
+    const pv = await admin.post('/api/admin/remittance/preview').send({ csv });
+    expect(pv.body.rows[0]).toMatchObject({ plan: 'Increments 1–2', unapplied: 0 });
+    expect(pv.body.rows[1]).toMatchObject({ plan: 'Increment 3', unapplied: 0 });
+    await admin.post('/api/admin/remittance').send({ csv });
+    const after = (await admin.get(`/api/admin/deals/${id}`)).body;
+    expect(after.segments[0].schedule.received).toBe(3);
+    expect(after.increments.lenderPaid).toBe(3);
+  });
+  it('totals the year per rep and exports it as CSV', async () => {
+    const { admin } = await harness();
+    const r = await admin.get('/api/admin/reports/annual').query({ year: 2026 });
+    expect(r.body.year).toBe(2026);
+    expect(r.body.rows).toEqual([{ repId: 'rep-julian-ribak', name: 'Julian Ribak', email: 'julian.ribak@greystoneus.com', active: true, grossPaid: 350, recovered: 100, cash: 250, payouts: 1, deals: 1 }]);
+    expect(r.body.total).toMatchObject({ grossPaid: 350, recovered: 100, cash: 250 });
+    expect((await admin.get('/api/admin/reports/annual').query({ year: 2025 })).body.rows).toEqual([]);
+    expect((await admin.get('/api/admin/reports/annual').query({ year: 'abc' })).status).toBe(400);
+    const csv = await admin.get('/api/admin/reports/annual.csv').query({ year: 2026 });
+    expect(csv.headers['content-disposition']).toMatch(/rep-pay-2026\.csv/);
+    expect(csv.text.split('\r\n')[1]).toBe('"2026","Julian Ribak","julian.ribak@greystoneus.com","yes","350.00","100.00","250.00","1","1"');
+  });
+});

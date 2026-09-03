@@ -9,6 +9,7 @@
  */
 import {
   clawbackWindow,
+  dealPayback,
   disbursementOf,
   type ClawbackWindow,
   type Lender,
@@ -411,7 +412,7 @@ export function repRenewals(ctx: LedgerContext, repId: string, settings: Renewal
         product: d.product,
         date: d.date,
         funded: totalFunded(d),
-        payback: d.payback,
+        payback: dealPayback(d),
         termDays: d.termDays,
         frequency: d.frequency,
         factor: d.factor,

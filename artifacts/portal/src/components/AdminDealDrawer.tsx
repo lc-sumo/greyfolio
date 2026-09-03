@@ -37,7 +37,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
   return (
     <Drawer
       title={d ? <>{d.crmId ?? d.id} <span className="muted" style={{ fontWeight: 500 }}>· {d.business}</span>{d.crmUrl && <a className="crm" href={d.crmUrl} target="_blank" rel="noopener">Open in CRM ↗</a>}</> : id}
-      sub={d && <>{d.lender} · {d.product} · funded {fullDay(d.date)}<Contact name={d.merchantContact} email={d.merchantEmail} phone={d.merchantPhone} size="inline" /></>}
+      sub={d && <>{d.lender} · {d.product} · funded {fullDay(d.date)}{(d.merchantContact || d.merchantEmail || d.merchantPhone) && <Contact name={d.merchantContact} email={d.merchantEmail} phone={d.merchantPhone} size="inline" />}</>}
       onClose={onClose}
     >
       {!d ? (

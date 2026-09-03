@@ -5,7 +5,7 @@
  * "effective" plan is the increments that actually happened.
  */
 import { cents, clamp } from './money.js';
-import type { WeeklySchedule } from './types.js';
+import type { Deal, WeeklySchedule } from './types.js';
 
 /** Increments still in the plan: the planned count, or where the merchant stopped. */
 export function effectiveIncrements(s: WeeklySchedule): number {
@@ -57,4 +57,9 @@ export function disbursementOf(plannedAmount: number, s: WeeklySchedule | null |
   const total = effectiveIncrements(s);
   const count = clamp(s.received, 0, total);
   return { planned: plannedAmount, perIncrement, disbursed: cents(perIncrement * count), final: cents(plannedAmount * disbursedRatio(s)), count, total, stopped: isStopped(s) };
+}
+
+/** The deal's payback scaled to what was actually disbursed (the plan's payback while the plan stands). */
+export function dealPayback(deal: Pick<Deal, 'payback' | 'commSchedule'>): number | null {
+  return deal.payback === null || deal.payback === undefined ? null : cents(deal.payback * disbursedRatio(deal.commSchedule));
 }

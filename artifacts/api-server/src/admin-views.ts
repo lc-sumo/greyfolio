@@ -1,6 +1,7 @@
 /** Admin projections: everything, including house net, referral and every rep's name. Never served to reps. */
 import {
   clawbackWindow,
+  dealPayback,
   disbursementOf,
   effectiveIncrements,
   type ClawbackWindow,
@@ -131,7 +132,7 @@ export function adminDealRow(deal: Deal, ctx: LedgerContext, reps: Rep[], settin
     apr: deal.apr,
     termDays: deal.termDays,
     frequency: deal.frequency,
-    payback: deal.payback,
+    payback: dealPayback(deal),
     commRate: deal.commRate,
     psfPct: deal.psfPct,
     originationFee: deal.originationFee,
@@ -247,7 +248,7 @@ export function adminDealDetail(deal: Deal, ctx: LedgerContext, reps: Rep[], set
       lenderPaidLabel: collectionLabel(s),
       schedule: s.schedule ? scheduleView(s, today, deal, ctx, reps) : null,
       ...(s.sk === 'base'
-        ? { termDays: deal.termDays, factor: deal.factor, payback: deal.payback, payment: paymentFor({ payback: deal.payback, termDays: deal.termDays, frequency: deal.frequency }) }
+        ? { termDays: deal.termDays, factor: deal.factor, payback: dealPayback(deal), payment: paymentFor({ payback: dealPayback(deal), termDays: deal.termDays, frequency: deal.frequency }) }
         : termsOfDraw(deal, s.sk)),
     })),
     payments: ctx.lines
@@ -354,7 +355,7 @@ export function adminRenewals(ctx: LedgerContext, reps: Rep[], settings: Setting
         product: d.product,
         date: d.date,
         funded: totalFunded(d),
-        payback: d.payback,
+        payback: dealPayback(d),
         termDays: d.termDays,
         frequency: d.frequency,
         factor: d.factor,

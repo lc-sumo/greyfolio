@@ -63,6 +63,15 @@ describe('POST /api/admin/deals', () => {
     expect(res.body.segments[0].schedule.nextExpected).toMatchObject({ kind: 'increment', n: 1, amount: 725 });
     expect(res.body.lenderPaidLabel).toBe('0/20 wks');
   });
+  it('the referral cap is monthly: fees on same-month deals eat the room, and the typed % is ignored', async () => {
+    const { admin } = await harness();
+    const first = await admin.post('/api/admin/deals').send({ ...draft, amount: 1_000_000, referralPartner: 'MBC', referralRate: 50 });
+    expect(first.body.referralRate).toBe(0.15);
+    expect(first.body.referralFee).toBe(15_000); // 145,000 × 15% = 21,750 raw → capped at 15,000
+    const second = await admin.post('/api/admin/deals').send({ ...draft, business: 'Second Co', referralPartner: 'MBC' });
+    expect(second.body.referralFee).toBe(0); // the month's cap is spent
+    expect(second.body.net).toBe(second.body.gross);
+  });
   it('increments are a consolidation thing: MCAs, LOCs and LOC draws are paid upfront even on a weekly lender', async () => {
     const { admin } = await harness();
     const mca = await admin.post('/api/admin/deals').send({ ...draft, lender: 'ROWAN' });

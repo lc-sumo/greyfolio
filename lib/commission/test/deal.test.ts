@@ -34,6 +34,15 @@ describe('priceDeal', () => {
     expect(d.commSchedule).toMatchObject({ weeks: 12, upfrontPct: 0.5, upfrontReceived: false, remainder: 'at-end', remainderReceived: false, cadenceDays: 7, startDate: '2026-09-08' });
     expect(collectedOf(segments(d)[0]!)).toBe(0);
   });
+  it('referral % is locked to the partner settings: a typed rate is ignored, and the cap nets month-to-date fees', () => {
+    const mbc = { name: 'MBC', pct: 0.15, monthlyCap: 15_000 };
+    const d = priceDeal({ ...draft, referralPartner: 'MBC', referralRate: 3 }, ctx({ partner: mbc }));
+    expect(d.referralRate).toBe(0.15);
+    expect(d.referralFee).toBe(2_175); // 14,500 × 15%
+    const big = priceDeal({ ...draft, amount: 1_000_000, referralPartner: 'MBC' }, ctx({ partner: mbc, referralPaidThisMonth: 12_000 }));
+    expect(big.referralFee).toBe(3_000); // 145,000 × 15% = 21,750 raw, only 3,000 of cap room left this month
+    expect(priceDeal({ ...draft, referralPartner: 'MBC' }, ctx({ partner: mbc, referralPaidThisMonth: 15_000 })).referralFee).toBe(0);
+  });
   it('applies the partner rate and cap', () => {
     const d = priceDeal({ ...draft, referralPartner: 'MBC', referralRate: undefined }, ctx({ partner: { name: 'MBC', pct: 0.15, monthlyCap: 15_000 } }));
     expect(d.referralPartner).toBe('MBC');

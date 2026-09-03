@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { api, post, type AdminDealDetail, type MasterBoard, type RepOption, type Settings } from '../lib/api';
 import { compact, day, fullDay, money, pct, todayIso } from '../lib/format';
 import { addBusinessDays, liveMath, num } from '../lib/math';
@@ -9,7 +9,7 @@ import { Drawer, Pill, toneFor } from './ui';
 type F = Record<string, string>;
 const BASIS: Record<string, string> = { funded: 'funded amount', draw: 'draw amount', payback: 'payback amount' };
 
-function Field({ label, hint, children, span }: { label: string; hint?: string; children: React.ReactNode; span?: boolean }) {
+function Field({ label, hint, children, span }: { label: React.ReactNode; hint?: string; children: React.ReactNode; span?: boolean }) {
   return (
     <label className="field" style={span ? { gridColumn: '1 / -1' } : undefined}>
       <span className="label">{label}</span>
@@ -27,7 +27,7 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
   const first = settings.products[0];
   const [f, setF] = useState<F>({
     business: '', crmId: '', merchantContact: '', merchantEmail: '', merchantPhone: '', fundedDate: todayIso(), lender: '', product: first?.name ?? 'MCA', parentId: '',
-    amount: '', termDays: '120', factor: '1.35', apr: '', frequency: 'Daily', commRate: String((first?.comm ?? 0.12) * 100), psfPct: '0', originationFee: '0',
+    amount: '', termDays: '120', factor: '1.35', apr: '', frequency: 'Daily', commRate: String((first?.comm ?? 0.12) * 100), psfPct: '0', psfMode: '%', psfDollars: '', originationFee: '0',
     referralPartner: 'None', referralRate: '0', creditLine: '', drawInitialPct: '', drawSubsequentPct: '',
     openerId: '', openerRate: '', closerId: '', closerRate: '', overrideId: '', overrideRate: '',
     payout: 'lender', commIncrements: '', commUpfrontPct: '', commRemainder: 'spread', commCadenceDays: '7', commStartDate: '',
@@ -73,7 +73,13 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
     }));
   }, [f.openerId, f.closerId, reps.length, teams.data]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const m = useMemo(() => liveMath(f, rule, partner), [f, rule, partner]);
+  // Referral fees already owed to this partner on deals funded the same month — the monthly cap nets against them.
+  const referralPaidThisMonth = useMemo(() => {
+    if (!partner || partner.name === 'None') return 0;
+    const month = (f.fundedDate ?? '').slice(0, 7);
+    return board.deals.filter((d) => d.referralPartner === partner.name && d.date.startsWith(month)).reduce((s, d) => s + d.referralFee, 0);
+  }, [board.deals, partner, f.fundedDate]);
+  const m = useMemo(() => liveMath(f, rule, partner, referralPaidThisMonth), [f, rule, partner, referralPaidThisMonth]);
   const email = (f.merchantEmail ?? '').trim().toLowerCase();
   const priorDeals = useMemo(() => (email ? board.deals.filter((d) => d.merchantEmail && d.merchantEmail.toLowerCase() === email).sort((a, b) => b.date.localeCompare(a.date)) : []), [board.deals, email]);
   const client = priorDeals[0];
@@ -109,7 +115,7 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
       const saved = await post<AdminDealDetail>('/api/admin/deals', {
         business: f.business, crmId: f.crmId || null, merchantContact: f.merchantContact, merchantEmail: f.merchantEmail, merchantPhone: f.merchantPhone, fundedDate: f.fundedDate, lender: f.lender, product: f.product,
         parentId: f.parentId || null, amount: num(f.amount), termDays: rule?.term ? num(f.termDays) || null : null, factor: rule?.factor ? num(f.factor) || null : null, apr: rule && !rule.factor ? num(f.apr) || null : null,
-        frequency: f.frequency, commRate: num(f.commRate), psfPct: num(f.psfPct), originationFee: num(f.originationFee), referralPartner: f.referralPartner === 'None' ? null : f.referralPartner, referralRate: num(f.referralRate),
+        frequency: f.frequency, commRate: num(f.commRate), psfPct: m.psfRate * 100, originationFee: num(f.originationFee), referralPartner: f.referralPartner === 'None' ? null : f.referralPartner,
         creditLine: rule?.multiDraw ? num(f.creditLine) || null : null, drawInitialPct: rule?.multiDraw ? num(f.drawInitialPct) : null, drawSubsequentPct: rule?.multiDraw ? num(f.drawSubsequentPct) : null,
         openerId: f.openerId || null, openerRate: num(f.openerRate), closerId: f.closerId || null, closerRate: num(f.closerRate), overrideId: f.overrideId || null, overrideRate: num(f.overrideRate),
         leadSource: priorDeals.length ? 'Existing client' : 'Direct',
@@ -193,11 +199,15 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
           </>
         )}
         <Field label="Commission %"><input inputMode="decimal" value={f.commRate} onChange={set('commRate')} /></Field>
-        <Field label="PSF %"><input inputMode="decimal" value={f.psfPct} onChange={set('psfPct')} /></Field>
+        <Field label={<span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>PSF <span className="seg" role="group" aria-label="PSF entry mode"><button type="button" className={f.psfMode === '%' ? 'on' : ''} onClick={() => setF((s) => ({ ...s, psfMode: '%', psfPct: s.psfMode === '$' ? String(Math.round(m.psfRate * 10000) / 100) : s.psfPct ?? '' }))}>%</button><button type="button" className={f.psfMode === '$' ? 'on' : ''} onClick={() => setF((s) => ({ ...s, psfMode: '$', psfDollars: s.psfMode === '%' ? String(Math.round(m.psf)) : s.psfDollars ?? '' }))}>$</button></span></span>} hint={f.psfMode === '$' ? `= ${(m.psfRate * 100).toFixed(2)}% of the funded amount` : `= ${money(m.psf)}`}>
+          {f.psfMode === '$' ? <input inputMode="decimal" value={f.psfDollars} onChange={set('psfDollars')} placeholder="2500" /> : <input inputMode="decimal" value={f.psfPct} onChange={set('psfPct')} />}
+        </Field>
         <Field label="Total (comm + PSF)" hint="computed"><input readOnly value={money(m.commission + m.psf)} className="ro" /></Field>
         <Field label="Origination fee ($)"><input inputMode="decimal" value={f.originationFee} onChange={set('originationFee')} /></Field>
         <Field label="Referral partner"><select value={f.referralPartner} onChange={set('referralPartner')}>{settings.partners.map((p) => <option key={p.name}>{p.name}</option>)}</select></Field>
-        <Field label="Referral fee %"><input inputMode="decimal" value={f.referralRate} onChange={set('referralRate')} /></Field>
+        <Field label="Referral fee %" hint={partner && partner.name !== 'None' ? (partner.monthlyCap ? `Cap ${money(partner.monthlyCap)}/month · ${money(referralPaidThisMonth)} already owed this month${m.referralExcess ? ` · ${money(m.referralExcess)} over the cap is excess we do not pay` : ''}` : 'No cap') : 'Locked — set in Settings › Referral partners'}>
+          <input readOnly className="ro" value={partner && partner.name !== 'None' ? `${(partner.pct * 100).toFixed(partner.pct * 100 % 1 ? 2 : 0)}%` : '—'} title="Locked — change it in Settings › Referral partners" />
+        </Field>
         <div className="label" style={{ gridColumn: '1 / -1', marginTop: 6 }}>Commission payout from the lender</div>
         {!canIncrement && rule && <div className="note" style={{ gridColumn: '1 / -1' }}>{rule.name} commission is paid upfront by the lender. Increment structures (upfront share, number of increments, cadence) apply to consolidations only — not LOCs or LOC draws.</div>}
         {canIncrement && <Field label="Payout structure" span>
@@ -225,6 +235,7 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
           </>
         )}
         <Field label="Payback" hint="computed"><input readOnly className="ro" value={m.payback === null ? 'n/a for this product' : money(m.payback)} /></Field>
+        <Field label={`Payment (${f.frequency || 'Daily'})`} hint={m.payment === null ? 'needs amount, rate and term' : `payback ÷ ${f.frequency === 'Weekly' ? 'weeks' : f.frequency === 'Bi-Weekly' ? 'two-week periods' : f.frequency === 'Monthly' ? 'months' : 'business days'} in the term`}><input readOnly className="ro" value={m.payment === null ? '—' : money(m.payment)} /></Field>
         <Field label="Est. renewal date" hint="computed"><input readOnly className="ro" value={renewal ? fullDay(renewal) : 'Not renewal tracked'} /></Field>
 
         <div className="label" style={{ gridColumn: '1 / -1', marginTop: 6 }}>Splits · active reps only</div>
@@ -244,15 +255,36 @@ export function NewDealDrawer({ settings, board, onClose, onSaved }: { settings:
 
       <section className="share" style={{ position: 'sticky', top: 0 }}>
         <div className="label" style={{ color: 'var(--navy-text-3)' }}>Live math</div>
-        <dl className="kv navy">
-          <dt>Commission $</dt><dd>{money(m.commission)}</dd>
-          <dt>PSF $</dt><dd>{money(m.psf)}</dd>
+        <dl className="kv navy big-kv">
+          <dt className="grp">Merchant</dt><dd />
+          <dt>Funded</dt><dd>{money(num(f.amount))}</dd>
+          <dt>Payback{rule?.factor && num(f.factor) ? ` (×${num(f.factor)})` : ''}</dt><dd>{m.payback === null ? '—' : money(m.payback)}</dd>
+          <dt>Payment · {f.frequency || 'Daily'}</dt><dd>{m.payment === null ? '—' : money(m.payment)}</dd>
+          <dt>Term</dt><dd>{m.termDays ? `${m.termDays} business days` : '—'}</dd>
+          <dt className="grp">Commission</dt><dd />
+          <dt>Commission {num(f.commRate) ? `${num(f.commRate)}%` : ''}</dt><dd>{money(m.commission)}</dd>
+          <dt>PSF {m.psfRate ? `${(m.psfRate * 100).toFixed(2).replace(/\.?0+$/, '')}%` : ''}</dt><dd>{money(m.psf)}</dd>
           <dt>Origination fee</dt><dd>{money(m.originationFee)}</dd>
-          <dt>Gross (comm + PSF + orig)</dt><dd>{money(m.gross)}</dd>
-          <dt>Referral fee{m.referralCapped ? ' (capped)' : ''}</dt><dd style={{ color: 'var(--amber-bright)' }}>{money(-m.referralFee)}</dd>
-          <dt>Net commission</dt><dd>{money(m.net)}</dd>
+          <dt className="sum">Gross (comm + PSF + orig)</dt><dd className="sum">{money(m.gross)}</dd>
+          <dt className="grp">Referral{partner && partner.name !== 'None' ? ` · ${partner.name} ${Math.round(partner.pct * 100)}%` : ''}</dt><dd />
+          {partner && partner.name !== 'None' && partner.monthlyCap ? (
+            <>
+              <dt>Fee before cap</dt><dd>{money(m.referralRaw)}</dd>
+              <dt>Cap {money(partner.monthlyCap)}/mo · owed so far</dt><dd>{money(referralPaidThisMonth)}</dd>
+              <dt>Excess not paid</dt><dd style={{ color: m.referralExcess ? 'var(--teal-bright)' : undefined }}>{money(m.referralExcess)}</dd>
+            </>
+          ) : null}
+          <dt>Referral fee paid{m.referralCapped ? ' (capped)' : ''}</dt><dd style={{ color: 'var(--amber-bright)' }}>{money(-m.referralFee)}</dd>
+          <dt className="sum">Net commission</dt><dd className="sum">{money(m.net)}</dd>
+          <dt className="grp">Split</dt><dd />
+          {(['opener', 'closer', 'override'] as const).map((role) => {
+            const id = f[`${role}Id`];
+            const who = assign.find((o) => o.id === id)?.label ?? '—';
+            const amt = role === 'opener' ? m.openerPayout : role === 'closer' ? m.closerPayout : m.overridePayout;
+            return <React.Fragment key={role}><dt>{role === 'override' ? 'Override' : role[0]!.toUpperCase() + role.slice(1)} · {who}{id ? ` ${num(f[`${role}Rate`])}%` : ''}</dt><dd>{money(amt)}</dd></React.Fragment>;
+          })}
           <dt>Total rep payout</dt><dd style={{ color: 'var(--amber-bright)' }}>{money(m.totalRepPayout)}</dd>
-          <dt>House net</dt><dd style={{ color: 'var(--teal-bright)' }}>{money(m.houseNet)}</dd>
+          <dt className="sum">House net</dt><dd className="sum" style={{ color: 'var(--teal-bright)' }}>{money(m.houseNet)}</dd>
         </dl>
       </section>
       </div>

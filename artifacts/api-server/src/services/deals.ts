@@ -37,6 +37,13 @@ function bad(e: unknown): never {
 }
 
 /** Only admins reach this (routes enforce it). Reps never create deals. */
+/** Referral fees already owed to a partner on deals funded in the same month — what the monthly cap nets against. */
+export function referralPaidInMonth(deals: Deal[], partner: string | null | undefined, fundedDate: string | null | undefined): number {
+  if (!partner || partner === 'None' || !fundedDate) return 0;
+  const month = fundedDate.slice(0, 7);
+  return deals.filter((d) => d.referralPartner === partner && d.date.startsWith(month)).reduce((s, d) => s + d.referralFee, 0);
+}
+
 export async function createDeal(repo: Repo, draft: NewDealDraft, actorRepId: string): Promise<Deal> {
   const [settings, ctx, reps] = await Promise.all([repo.getSettings(), repo.loadContext(), repo.listReps()]);
   for (const [label, id] of [['Opener', draft.openerId], ['Closer', draft.closerId], ['Override', draft.overrideId]] as const) {
@@ -52,6 +59,7 @@ export async function createDeal(repo: Repo, draft: NewDealDraft, actorRepId: st
       rule: settings.products.find((p) => p.name === draft.product),
       lender: settings.lenders.find((l) => l.name === draft.lender),
       partner: settings.partners.find((p) => p.name === draft.referralPartner),
+      referralPaidThisMonth: referralPaidInMonth(ctx.deals, draft.referralPartner, draft.fundedDate),
     });
   } catch (e) {
     bad(e);

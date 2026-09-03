@@ -76,8 +76,8 @@ export function priceDeal(draft: NewDealDraft, ctx: PricingContext): Deal {
   const commRate = asRate(draft.commRate ?? (rule.multiDraw ? rule.drawInitial : rule.comm));
   const psfPct = asRate(draft.psfPct);
   const originationFee = cents(draft.originationFee ?? 0);
-  const partnerRate = ctx.partner ? ctx.partner.pct : 0;
-  const referralRate = draft.referralRate === null || draft.referralRate === undefined ? partnerRate : asRate(draft.referralRate);
+  // Referral % is locked to Settings › Referral partners; a rate typed on the deal is ignored.
+  const referralRate = ctx.partner ? ctx.partner.pct : 0;
   const openerRate = draft.openerId ? asRate(draft.openerRate) : 0;
   const closerRate = draft.closerId ? asRate(draft.closerRate) : 0;
   const overrideRate = draft.overrideId ? asRate(draft.overrideRate) : 0;

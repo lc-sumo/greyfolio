@@ -129,7 +129,7 @@ input.search:focus, select.filter:focus { border-color: var(--teal); }
 
 /* Drawer */
 .scrim { position: fixed; inset: 0; background: rgba(20,24,32,.42); z-index: 40; }
-.drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(1240px, 100%); background: var(--surface-alt); z-index: 41; box-shadow: -20px 0 60px rgba(20,24,32,.18); overflow-y: auto; padding: 24px; display: grid; gap: 16px; align-content: start; }
+.drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(1500px, 100%); background: var(--surface-alt); z-index: 41; box-shadow: -20px 0 60px rgba(20,24,32,.18); overflow-y: auto; padding: 24px; display: grid; gap: 16px; align-content: start; }
 .drawer h2 { margin: 0; font-size: 21px; font-weight: 700; letter-spacing: -.035em; }
 .drawer .close { position: absolute; top: 18px; right: 18px; }
 .share { background: var(--navy); color: var(--navy-text); border-radius: 12px; padding: 18px 20px; }
@@ -171,7 +171,18 @@ input.search:focus, select.filter:focus { border-color: var(--teal); }
 .drawer-cols .form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 900px) { .drawer-cols .form { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 560px) { .drawer-cols .form { grid-template-columns: 1fr; } }
-.drawer-cols { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(260px, 1fr); gap: 16px; align-items: start; }
+.drawer-cols { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(400px, 1fr); gap: 20px; align-items: start; }
+.drawer-cols .share { padding: 22px 24px; }
+.kv.big-kv { font-size: 13.5px; gap: 10px 18px; margin-top: 10px; }
+.kv.big-kv dd { font-size: 14px; }
+.kv.big-kv dt.grp { grid-column: 1 / -1; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--navy-text-3); margin-top: 8px; padding-bottom: 4px; border-bottom: 1px solid var(--navy-border); }
+.kv.big-kv dt.grp + dd { display: none; }
+.kv.big-kv .sum { font-weight: 700; color: #fff; }
+.kv.big-kv dd.sum { font-size: 15px; }
+/* %/$ entry toggle */
+.seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 6px; overflow: hidden; }
+.seg button { border: none; background: #fff; font: inherit; font-size: 10.5px; font-weight: 600; padding: 1px 8px; cursor: pointer; color: var(--ink-muted); }
+.seg button.on { background: var(--navy); color: #fff; }
 @media (max-width: 900px) { .drawer-cols { grid-template-columns: 1fr; } }
 .field { display: grid; gap: 5px; min-width: 0; }
 .field input, .field select { height: 36px; border: 1px solid var(--border-strong); border-radius: 8px; padding: 0 10px; background: #fff; outline: none; width: 100%; font-size: 13px; }

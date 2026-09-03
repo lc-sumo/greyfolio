@@ -8,7 +8,7 @@ import { useSession } from '../lib/session';
 
 type TabKey = 'lenders' | 'partners' | 'products' | 'teams' | 'reps' | 'crm';
 const TABS: Array<{ key: TabKey; label: string; hint: string }> = [
-  { key: 'lenders', label: 'Lenders', hint: 'Commission terms are a property of the lender: upfront, or paid in N weekly increments.' },
+  { key: 'lenders', label: 'Lenders', hint: 'Each lender funds certain products and has its own clawback policy. Lenders that fund consolidations pay commission in increments; everyone else pays straight commission.' },
   { key: 'partners', label: 'Referral partners', hint: 'Fee % of gross commission and an optional monthly cap. Blank cap = uncapped.' },
   { key: 'products', label: 'Product rules', hint: 'The product decides which fields the new-deal form shows and how commission is based.' },
   { key: 'teams', label: 'Teams', hint: 'A team has a leader who earns the override on the team’s deals. Set the leader here.' },

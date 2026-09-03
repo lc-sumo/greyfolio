@@ -95,7 +95,8 @@ export function authRouter(config: AppConfig, repo: Repo): Router {
         /* IdP has no end_session_endpoint — local logout is enough */
       }
     }
-    res.json({ ok: true, redirect: config.appOrigin });
+    // No IdP session to end: the portal simply re-renders the login screen.
+    res.json({ ok: true, redirect: null });
   });
 
   /** Public: which sign-in methods the login screen should offer. */

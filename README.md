@@ -33,6 +33,10 @@ docs/             Phase notes and review checklists.
 
 ## Getting started
 
+### Preview in GitHub Codespaces (nothing to install)
+
+On the repo page, switch the branch to `claude/new-session-kdfrhy`, then **Code → Codespaces → Create codespace on claude/new-session-kdfrhy**. The dev container installs dependencies, migrates and seeds the demo board, builds the portal, starts the API, and opens port 8080 in your browser. Sign in with `leor@greystoneus.com`. If the tab opens before the API is up, wait a few seconds and reload; `tail -f /tmp/api.log` in the Codespace terminal shows progress.
+
 ### One command with Docker (nothing else to install)
 
 ```bash

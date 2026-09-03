@@ -1,0 +1,23 @@
+{
+  "name": "Greystone commission portal",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "forwardPorts": [8080],
+  "portsAttributes": {
+    "8080": { "label": "Portal", "onAutoForward": "openBrowser" }
+  },
+  "remoteEnv": {
+    "DATABASE_URL": "postgres://postgres:postgres@db:5432/greystone",
+    "AUTH_MODE": "dev",
+    "SESSION_SECRET": "codespaces-dev-session-secret",
+    "PORTAL_DIST": "${containerWorkspaceFolder}/artifacts/portal/dist"
+  },
+  "postCreateCommand": "corepack enable && corepack prepare pnpm@10 --activate && pnpm install && pnpm db:migrate && pnpm db:seed:demo && pnpm portal:build",
+  "postStartCommand": "nohup pnpm api:dev > /tmp/api.log 2>&1 &",
+  "customizations": {
+    "vscode": {
+      "extensions": ["dbaeumer.vscode-eslint", "bradlc.vscode-tailwindcss"]
+    }
+  }
+}

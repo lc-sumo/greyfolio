@@ -45,11 +45,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [qc]);
 
   const logout = useCallback(async () => {
-    const r = await api<{ ok: boolean; redirect: string }>('/auth/logout', { method: 'POST' });
+    const r = await api<{ ok: boolean; redirect: string | null }>('/auth/logout', { method: 'POST' });
     setViewAs(null);
     setAuth(null);
     qc.clear();
-    if (r.redirect && !r.redirect.startsWith(window.location.origin)) window.location.href = r.redirect;
+    if (r.redirect) window.location.href = r.redirect;
   }, [qc, setViewAs]);
 
   const notify = useCallback((msg: string) => {

@@ -6,6 +6,8 @@ export interface OidcConfig {
   scope: string;
 }
 
+import { mailConfigFromEnv, type MailConfig } from './services/mail.js';
+
 export interface AppConfig {
   port: number;
   baseUrl: string;
@@ -21,6 +23,12 @@ export interface AppConfig {
   requestLog: boolean;
   /** Built portal directory to serve (SPA fallback). Optional. */
   portalDist: string | null;
+  /** Outbound email: forgot-password links, statements, clawback and renewal notices. */
+  mail: MailConfig;
+  /** Shown in emails and authenticator apps. */
+  appName: string;
+  /** Daily renewal digest to admins (UTC hour it goes out; -1 = off). */
+  digestHourUtc: number;
 }
 
 export function configFromEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -52,5 +60,8 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
     passwordAuth,
     requestLog: env.REQUEST_LOG !== 'off' && env.NODE_ENV !== 'test' && !env.VITEST && !process.env.VITEST,
     portalDist: env.PORTAL_DIST || null,
+    mail: mailConfigFromEnv(env, production),
+    appName: env.APP_NAME || 'Greystone Commission Portal',
+    digestHourUtc: env.RENEWAL_DIGEST_HOUR_UTC === 'off' ? -1 : Number(env.RENEWAL_DIGEST_HOUR_UTC ?? 13),
   };
 }

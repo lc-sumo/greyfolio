@@ -3,13 +3,14 @@ import { repDeals } from '@greystone/commission';
 import { HttpError, requireAuth, resolveScope, scopeOf } from '../auth/middleware.js';
 import type { Repo } from '../repo.js';
 import { changeOwnPassword } from '../services/passwords.js';
+import { beginTotp, disableTotp, enableTotp, totpStatus } from '../services/twofactor.js';
 import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repPayHistory, repRenewals, repStatements, repWallet } from '../scope.js';
 
 /**
  * The rep portal. Every handler reads `scopeOf(req).effectiveRepId` — the
  * signed-in rep, or the View-as target — and returns rep-safe projections only.
  */
-export function meRouter(repo: Repo): Router {
+export function meRouter(repo: Repo, appName = 'Greystone Commission Portal'): Router {
   const r = Router();
   r.use(requireAuth, resolveScope(repo));
 
@@ -30,6 +31,23 @@ export function meRouter(repo: Repo): Router {
     if (scope.viewAs) throw new HttpError(403, 'Passwords can only be changed by the account holder');
     await changeOwnPassword(repo, scope.actor.repId, req.body?.current, req.body?.next);
     res.json({ ok: true });
+  });
+
+  /** Two-factor sign-in — always the account holder, never under View as. */
+  const self = (req: Parameters<typeof scopeOf>[0]) => {
+    const scope = scopeOf(req);
+    if (scope.viewAs) throw new HttpError(403, 'Two-factor settings belong to the account holder');
+    return scope.actor.repId;
+  };
+  r.get('/totp', async (req, res) => res.json(await totpStatus(repo, self(req))));
+  r.post('/totp/setup', async (req, res) => res.json(await beginTotp(repo, self(req), appName)));
+  r.post('/totp/enable', async (req, res) => {
+    await enableTotp(repo, self(req), req.body?.code);
+    res.json({ ok: true, enabled: true });
+  });
+  r.post('/totp/disable', async (req, res) => {
+    await disableTotp(repo, self(req), req.body?.code);
+    res.json({ ok: true, enabled: false });
   });
 
   r.get('/wallet', async (req, res) => {

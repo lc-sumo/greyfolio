@@ -5,6 +5,9 @@ import type { Repo } from '../repo.js';
 import { HttpError, currentUser } from './middleware.js';
 import { clearLoginFailures, loginLocked, noteLoginFailure, verifyPassword } from './password.js';
 import { sessionUserFrom } from './session.js';
+import { verifyTotp } from './totp.js';
+import type { Mailer } from '../services/mail.js';
+import { beginPasswordReset, completePasswordReset, resetThrottled } from '../services/passwords.js';
 
 /** Lazily discovered OIDC configuration (issuer metadata is fetched once). */
 export function oidcClient(config: AppConfig) {
@@ -26,7 +29,7 @@ function safeReturnTo(v: unknown): string | undefined {
  * authorization-code + PKCE flow; the IdP's email must match a provisioned,
  * active `commission_reps` row or the login is refused.
  */
-export function authRouter(config: AppConfig, repo: Repo): Router {
+export function authRouter(config: AppConfig, repo: Repo, mailer: Mailer): Router {
   const r = Router();
   const client = oidcClient(config);
 
@@ -99,8 +102,54 @@ export function authRouter(config: AppConfig, repo: Repo): Router {
         throw new HttpError(401, 'That email and password do not match');
       }
       clearLoginFailures(email);
+      const totp = await repo.getTotp(rep.id);
+      if (totp.enabled) {
+        // Password is right; the authenticator code is still owed. Nothing is signed in yet.
+        req.session = { pending2fa: { repId: rep.id, email, at: Date.now() } };
+        return res.json({ ok: false, totp: true });
+      }
       await signIn(req, email);
       res.json({ ok: true, user: req.session?.user });
+    });
+
+    /** Second step for accounts with two-factor on. Five wrong codes lock the email like wrong passwords do. */
+    r.post('/totp', async (req, res) => {
+      const pending = req.session?.pending2fa;
+      if (!pending || Date.now() - pending.at > 5 * 60 * 1000) throw new HttpError(400, 'Start again with your email and password');
+      const key = `totp:${pending.email}`;
+      const wait = loginLocked(key);
+      if (wait) throw new HttpError(429, `Too many attempts — try again in ${wait} minute${wait === 1 ? '' : 's'}`);
+      const t = await repo.getTotp(pending.repId);
+      if (!t.enabled || !t.secret || !verifyTotp(t.secret, req.body?.code)) {
+        noteLoginFailure(key);
+        await repo.writeAudit({ actorRepId: pending.repId, action: 'login.failed', targetRepId: null, path: `${req.baseUrl}${req.path}`, detail: { email: pending.email, totp: true } });
+        throw new HttpError(401, 'That code is not right');
+      }
+      clearLoginFailures(key);
+      await signIn(req, pending.email);
+      res.json({ ok: true, user: req.session?.user });
+    });
+
+    /** Forgot password: always answers the same, so the form cannot be used to discover which emails exist. */
+    r.post('/forgot', async (req, res) => {
+      const email = String(req.body?.email ?? '').trim().toLowerCase();
+      if (!email) throw new HttpError(400, 'Email is required');
+      if (!mailer.live && mailer.kind !== 'log') throw new HttpError(503, 'Email is not set up on this portal yet — ask your admin to reset your password in Settings › Reps');
+      if (!resetThrottled(email)) {
+        const started = await beginPasswordReset(repo, email);
+        if (started) {
+          const link = `${config.appOrigin}/reset?token=${started.token}`;
+          const text = [`Hi ${started.name.split(' ')[0]},`, '', 'Someone asked to reset the password on your commission portal account. If that was you, choose a new one here within the hour:', '', link, '', 'If it was not you, ignore this email — nothing changes until the link is used.', '', `— ${config.appName}`].join('\n');
+          const sent = await mailer.send({ to: email, subject: `Reset your ${config.appName} password`, text });
+          await repo.writeAudit({ actorRepId: started.repId, action: 'mail.sent', targetRepId: null, path: `${req.baseUrl}${req.path}`, detail: { to: email, subject: 'password reset', ok: sent.ok, ...(sent.error ? { error: sent.error } : {}) } });
+        }
+      }
+      res.json({ ok: true, message: 'If that email is on the roster, a reset link is on its way. It works for one hour.' });
+    });
+
+    r.post('/reset', async (req, res) => {
+      const done = await completePasswordReset(repo, req.body?.token, req.body?.password);
+      res.json({ ok: true, email: done.email });
     });
   }
 

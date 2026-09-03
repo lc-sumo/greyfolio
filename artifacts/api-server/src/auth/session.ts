@@ -20,6 +20,8 @@ declare global {
     interface CookieSessionObject {
       user?: SessionUser;
       oidc?: OidcHandshake;
+      /** Password checked, authenticator code still owed. Cleared on success or after 5 minutes. */
+      pending2fa?: { repId: string; email: string; at: number };
     }
   }
 }

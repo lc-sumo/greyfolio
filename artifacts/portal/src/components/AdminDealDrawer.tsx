@@ -7,6 +7,7 @@ import { day, fullDay, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 import { ClawbackBar, Contact, Drawer, Loading, Pill, toneFor } from './ui';
 import { NewDealDrawer } from './NewDealDrawer';
+import { DealFiles, DealNotes, RecordClawback } from './DealExtras';
 
 export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: string; settings: Settings; editOptions: RepOption[]; onClose: () => void }) {
   const { notify } = useSession();
@@ -74,6 +75,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button className="btn" onClick={() => setEditing(true)} title="Correct amount, lender, product, dates, rates — the deal re-prices">Edit terms</button>
             <button className="btn" style={{ color: 'var(--red)' }} onClick={() => void remove()} title="Only a deal nothing was paid on can be deleted">Delete deal</button>
+            <RecordClawback dealId={d.id} gross={d.gross} onDone={(label) => run(label, async () => {})} />
           </div>
           <section className="card">
             <h3>Deal terms</h3>
@@ -233,6 +235,9 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
               </div>
             )}
           </section>
+
+          <DealNotes dealId={d.id} />
+          <DealFiles dealId={d.id} />
 
           {d.clawbacks.map((c) => (
             <div className="note" key={c.id} style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>

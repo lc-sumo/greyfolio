@@ -72,6 +72,9 @@ export const commissionReps = pgTable(
     active: boolean('active').notNull().default(true),
     /** scrypt hash for email + password sign-in; null = SSO / no password set. Never leaves the API. */
     passwordHash: text('password_hash'),
+    /** Base32 TOTP secret for two-factor sign-in; null = not enrolled. Enabled only once a code has been verified. */
+    totpSecret: text('totp_secret'),
+    totpEnabled: boolean('totp_enabled').notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -322,6 +325,64 @@ export const commissionAuditLog = pgTable(
 );
 
 /* ------------------------------------------------------------------ */
+/* Launch additions: password resets, deal notes, deal files           */
+/* ------------------------------------------------------------------ */
+
+/** One-time "forgot password" tokens. Only the sha256 of the token is stored. */
+export const commissionPasswordResets = pgTable(
+  'commission_password_resets',
+  {
+    id: text('id').primaryKey(),
+    repId: text('rep_id')
+      .notNull()
+      .references(() => commissionReps.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('commission_password_resets_token_idx').on(t.tokenHash), index('commission_password_resets_rep_idx').on(t.repId)],
+);
+
+/** Timestamped notes on a deal — a history, not one overwritten field. */
+export const commissionDealNotes = pgTable(
+  'commission_deal_notes',
+  {
+    id: text('id').primaryKey(),
+    dealId: text('deal_id')
+      .notNull()
+      .references(() => commissionDeals.id, { onDelete: 'cascade' }),
+    authorRepId: text('author_rep_id')
+      .notNull()
+      .references(() => commissionReps.id),
+    body: text('body').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('commission_deal_notes_deal_idx').on(t.dealId)],
+);
+
+/** Contracts, funding confirmations and the like, stored inline (capped at a few MB each). */
+export const commissionDealFiles = pgTable(
+  'commission_deal_files',
+  {
+    id: text('id').primaryKey(),
+    dealId: text('deal_id')
+      .notNull()
+      .references(() => commissionDeals.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    mime: text('mime').notNull(),
+    size: integer('size').notNull(),
+    /** Base64 of the bytes. Simpler than bytea across drivers; files are small. */
+    data: text('data').notNull(),
+    uploadedBy: text('uploaded_by')
+      .notNull()
+      .references(() => commissionReps.id),
+    createdAt: createdAt(),
+  },
+  (t) => [index('commission_deal_files_deal_idx').on(t.dealId)],
+);
+
+/* ------------------------------------------------------------------ */
 /* Relations                                                           */
 /* ------------------------------------------------------------------ */
 
@@ -375,3 +436,6 @@ export type ClawbackRow = typeof commissionClawbacks.$inferSelect;
 export type PayrollRunRow = typeof commissionPayrollRuns.$inferSelect;
 export type SettingRow = typeof commissionSettings.$inferSelect;
 export type AuditLogRow = typeof commissionAuditLog.$inferSelect;
+export type PasswordResetRow = typeof commissionPasswordResets.$inferSelect;
+export type DealNoteRow = typeof commissionDealNotes.$inferSelect;
+export type DealFileRow = typeof commissionDealFiles.$inferSelect;

@@ -2,15 +2,17 @@ import { Router } from 'express';
 import { repLedger, repOptions } from '@greystone/commission';
 import { HttpError, canViewAs, currentUser, requireRole } from '../auth/middleware.js';
 import type { Repo } from '../repo.js';
+import { resetTotp } from '../services/twofactor.js';
 
 /** Admin surface for Phase 2: roster, rep option lists, View-as targets, audit trail. Phase 4+ adds deals. */
 export function adminRouter(repo: Repo): Router {
   const r = Router();
 
   r.get('/reps', requireRole('admin'), async (_req, res) => {
-    const [ctx, reps, teams, withPw] = await Promise.all([repo.loadContext(), repo.listReps(), repo.listTeams(), repo.repsWithPassword()]);
+    const [ctx, reps, teams, withPw, withTotp] = await Promise.all([repo.loadContext(), repo.listReps(), repo.listTeams(), repo.repsWithPassword(), repo.repsWithTotp()]);
     const teamName = new Map(teams.map((t) => [t.id, t.name]));
     const hasPw = new Set(withPw);
+    const hasTotp = new Set(withTotp);
     res.json({
       reps: reps.map((rep) => {
         const l = repLedger(ctx, rep.id);
@@ -26,6 +28,7 @@ export function adminRouter(repo: Repo): Router {
           overrideRate: rep.overrideRate,
           active: rep.active,
           hasPassword: hasPw.has(rep.id),
+          hasTotp: hasTotp.has(rep.id),
           earned: l.earned,
           paid: l.paid,
           held: l.held,
@@ -34,6 +37,12 @@ export function adminRouter(repo: Repo): Router {
         };
       }),
     });
+  });
+
+  /** Lost phone: clear a rep's authenticator so they can sign in with the password alone and enrol again. */
+  r.delete('/reps/:id/totp', requireRole('admin'), async (req, res) => {
+    await resetTotp(repo, String(req.params.id), currentUser(req)!.repId);
+    res.json({ ok: true, hasTotp: false });
   });
 
   r.get('/teams', requireRole('admin', 'manager'), async (_req, res) => {

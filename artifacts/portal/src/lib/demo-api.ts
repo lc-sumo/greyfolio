@@ -12,7 +12,8 @@ import { adminDealDetail, adminDealRow, adminRenewals } from '../../../api-serve
 import { adminMerchants, adminOverview } from '../../../api-server/src/analytics-views';
 import { memoryRepo } from '../../../api-server/src/repo.memory';
 import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repPayHistory, repRenewals, repStatements, repWallet } from '../../../api-server/src/scope';
-import { addDraw, createDeal, deleteDeal, setCollection, setCrmId, setDealStatus, updateSplits, updateTerms } from '../../../api-server/src/services/deals';
+import { addDraw, createDeal, deleteDeal, recordClawback, setCollection, setCrmId, setDealStatus, updateSplits, updateTerms } from '../../../api-server/src/services/deals';
+import { addFile, addNote, removeFile, removeNote } from '../../../api-server/src/services/notes';
 import { advanceRun, createRun, paySelected, voidPayout } from '../../../api-server/src/services/payroll';
 import { commitImport, previewImport } from '../../../api-server/src/services/import';
 import { createRep, createTeam, deleteTeam, saveCrm, saveLenders, savePartners, savePayroll, saveProducts, saveThresholds, updateRep, updateTeam, usage } from '../../../api-server/src/services/settings';
@@ -55,6 +56,8 @@ function user(): SessionUser | null {
 }
 /** Demo only: passwords set in Settings live in memory for this tab. */
 const demoPasswords = new Map<string, string>();
+/** Demo only: two-factor is a flag — any 6 digits enrol, and sign-in skips the code step. */
+const demoTotp = new Set<string>();
 function setUser(u: SessionUser | null) {
   memoryUser = u;
   store.set(KEY, u ? JSON.stringify(u) : null);
@@ -117,6 +120,9 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     setUser(su);
     return json({ ok: true, user: su });
   }
+  if (p === '/auth/forgot' && method === 'POST') return json({ ok: true, message: 'Demo: no email goes out here. On a real portal a one-hour reset link lands in that inbox.' });
+  if (p === '/auth/reset' && method === 'POST') throw new ApiError(400, 'Demo: reset links only work on a real portal with email configured');
+  if (p === '/auth/totp' && method === 'POST') throw new ApiError(400, 'Start again with your email and password');
   if (p === '/auth/logout' && method === 'POST') {
     setUser(null);
     return json({ ok: true, redirect: null });
@@ -130,6 +136,14 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     demoPasswords.set(u.repId, nx);
     return json({ ok: true });
   }
+  if (p === '/api/me/totp') return json({ enabled: demoTotp.has(u.repId), pending: false });
+  if (p === '/api/me/totp/setup' && method === 'POST') return json({ secret: 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP', otpauth: `otpauth://totp/Greystone%20(demo):${encodeURIComponent(u.email)}?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=Greystone%20(demo)` });
+  if (p === '/api/me/totp/enable' && method === 'POST') {
+    if (!/^\d{6}$/.test(String(body.code ?? '').replace(/\s/g, ''))) throw new ApiError(400, 'Enter the 6-digit code');
+    demoTotp.add(u.repId);
+    return json({ ok: true, enabled: true });
+  }
+  if (p === '/api/me/totp/disable' && method === 'POST') { demoTotp.delete(u.repId); return json({ ok: true, enabled: false }); }
   const me = u;
 
   let effective = me.repId;
@@ -198,7 +212,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     return json({
       reps: d.reps.map((rep) => {
         const l = repLedger(ctx, rep.id);
-        return { id: rep.id, name: rep.name, email: rep.email, role: rep.role, teamId: rep.teamId, team: rep.teamId ? teamName.get(rep.teamId) ?? null : null, openerRate: rep.openerRate, closerRate: rep.closerRate, overrideRate: rep.overrideRate, active: rep.active, hasPassword: demoPasswords.has(rep.id), earned: l.earned, paid: l.paid, held: l.held, owed: l.owed, dealCount: l.deals.length };
+        return { id: rep.id, name: rep.name, email: rep.email, role: rep.role, teamId: rep.teamId, team: rep.teamId ? teamName.get(rep.teamId) ?? null : null, openerRate: rep.openerRate, closerRate: rep.closerRate, overrideRate: rep.overrideRate, active: rep.active, hasPassword: demoPasswords.has(rep.id), hasTotp: demoTotp.has(rep.id), earned: l.earned, paid: l.paid, held: l.held, owed: l.owed, dealCount: l.deals.length };
       }),
     });
   }
@@ -225,6 +239,8 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     if (p === '/api/admin/reps' && method === 'POST') return json(await createRep(repo, body as never, me.repId));
     const rm = p.match(/^\/api\/admin\/reps\/([^/]+)$/);
     if (rm && method === 'PATCH') return json(await updateRep(repo, decodeURIComponent(rm[1]!), body as never, me.repId));
+    const tm2 = p.match(/^\/api\/admin\/reps\/([^/]+)\/totp$/);
+    if (tm2 && method === 'DELETE') { demoTotp.delete(decodeURIComponent(tm2[1]!)); return json({ ok: true, hasTotp: false }); }
     const pm = p.match(/^\/api\/admin\/reps\/([^/]+)\/password$/);
     if (pm && method === 'POST') {
       const id = decodeURIComponent(pm[1]!);
@@ -290,6 +306,28 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     if (p === '/api/admin/deals' && method === 'POST') {
       const deal = await createDeal(repo, body as never, me.repId);
       return json(await detail(deal.id));
+    }
+    const xm = p.match(/^\/api\/admin\/deals\/([^/]+)\/(clawbacks|notes|files)(?:\/([^/]+))?$/);
+    if (xm) {
+      const id = decodeURIComponent(xm[1]!);
+      const kind = xm[2]!;
+      const sub = xm[3];
+      const names = new Map(d.reps.map((r) => [r.id, r.name]));
+      if (kind === 'clawbacks' && method === 'POST') {
+        await recordClawback(repo, id, body as never, me.repId);
+        return json({ ...(await detail(id)), notified: 0 });
+      }
+      if (kind === 'notes') {
+        if (method === 'POST') await addNote(repo, id, body.body, me.repId);
+        if (method === 'DELETE' && sub) await removeNote(repo, id, sub, me.repId);
+        return json({ notes: (await repo.listNotes(id)).map((n) => ({ ...n, author: names.get(n.authorRepId) ?? n.authorRepId })) });
+      }
+      if (kind === 'files') {
+        if (method === 'POST') await addFile(repo, id, body as never, me.repId);
+        if (method === 'DELETE' && sub) await removeFile(repo, id, sub, me.repId);
+        if (method === 'GET' && sub) throw new ApiError(400, 'Demo: downloads work on a real portal');
+        return json({ files: (await repo.listFiles(id)).map((f) => ({ ...f, uploadedByName: names.get(f.uploadedBy) ?? f.uploadedBy })) });
+      }
     }
     const m = p.match(/^\/api\/admin\/deals\/([^/]+)(?:\/(splits|status|draws|collection|crm|terms))?$/);
     if (m) {

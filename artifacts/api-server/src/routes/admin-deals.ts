@@ -4,7 +4,9 @@ import { HttpError, currentUser, requireRole } from '../auth/middleware.js';
 import { adminDealDetail, adminDealRow, adminRenewals } from '../admin-views.js';
 import { adminMerchants, adminOverview } from '../analytics-views.js';
 import type { Repo } from '../repo.js';
-import { addDraw, createDeal, deleteDeal, setCollection, setCrmId, setDealStatus, updateSplits, updateTerms } from '../services/deals.js';
+import { addDraw, createDeal, deleteDeal, recordClawback, setCollection, setCrmId, setDealStatus, updateSplits, updateTerms } from '../services/deals.js';
+import { addFile, addNote, fetchFile, removeFile, removeNote } from '../services/notes.js';
+import { notifyClawback, type NotifyDeps } from '../services/notify.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -13,7 +15,7 @@ const today = () => new Date().toISOString().slice(0, 10);
  * carry house net, referral fees and every rep's name. Reps cannot add
  * their own deals — there is no rep-facing write route at all.
  */
-export function adminDealsRouter(repo: Repo): Router {
+export function adminDealsRouter(repo: Repo, notify?: Omit<NotifyDeps, 'repo'>): Router {
   const r = Router();
   r.use(requireRole('admin'));
 
@@ -104,6 +106,53 @@ export function adminDealsRouter(repo: Repo): Router {
   r.post('/deals/:id/collection', async (req, res) => {
     await setCollection(repo, String(req.params.id), req.body, currentUser(req)!.repId);
     res.json(await detailOf(String(req.params.id)));
+  });
+
+  /** Record a clawback; every rep with a slice gets an email when mail is on. */
+  r.post('/deals/:id/clawbacks', async (req, res) => {
+    const actor = currentUser(req)!.repId;
+    const cb = await recordClawback(repo, String(req.params.id), req.body ?? {}, actor);
+    const mailed = notify ? await notifyClawback({ repo, ...notify }, cb, actor) : { sent: 0 };
+    res.status(201).json({ ...(await detailOf(String(req.params.id))), notified: mailed.sent });
+  });
+
+  /* ---- Notes: a history, newest first ---- */
+  const notesOf = async (id: string) => {
+    const [notes, reps] = await Promise.all([repo.listNotes(id), repo.listReps()]);
+    const name = new Map(reps.map((x) => [x.id, x.name]));
+    return notes.map((n) => ({ ...n, author: name.get(n.authorRepId) ?? n.authorRepId }));
+  };
+  r.get('/deals/:id/notes', async (req, res) => res.json({ notes: await notesOf(String(req.params.id)) }));
+  r.post('/deals/:id/notes', async (req, res) => {
+    await addNote(repo, String(req.params.id), req.body?.body, currentUser(req)!.repId);
+    res.status(201).json({ notes: await notesOf(String(req.params.id)) });
+  });
+  r.delete('/deals/:id/notes/:noteId', async (req, res) => {
+    await removeNote(repo, String(req.params.id), String(req.params.noteId), currentUser(req)!.repId);
+    res.json({ notes: await notesOf(String(req.params.id)) });
+  });
+
+  /* ---- Files: contracts and confirmations, inline and capped ---- */
+  const filesOf = async (id: string) => {
+    const [files, reps] = await Promise.all([repo.listFiles(id), repo.listReps()]);
+    const name = new Map(reps.map((x) => [x.id, x.name]));
+    return files.map((f) => ({ ...f, uploadedByName: name.get(f.uploadedBy) ?? f.uploadedBy }));
+  };
+  r.get('/deals/:id/files', async (req, res) => res.json({ files: await filesOf(String(req.params.id)) }));
+  r.post('/deals/:id/files', async (req, res) => {
+    await addFile(repo, String(req.params.id), req.body ?? {}, currentUser(req)!.repId);
+    res.status(201).json({ files: await filesOf(String(req.params.id)) });
+  });
+  r.get('/deals/:id/files/:fileId', async (req, res) => {
+    const f = await fetchFile(repo, String(req.params.id), String(req.params.fileId));
+    res.setHeader('content-type', f.mime);
+    res.setHeader('content-disposition', `${req.query.inline === '1' ? 'inline' : 'attachment'}; filename="${encodeURIComponent(f.name)}"`);
+    res.setHeader('cache-control', 'private, max-age=0');
+    res.send(Buffer.from(f.data, 'base64'));
+  });
+  r.delete('/deals/:id/files/:fileId', async (req, res) => {
+    await removeFile(repo, String(req.params.id), String(req.params.fileId), currentUser(req)!.repId);
+    res.json({ files: await filesOf(String(req.params.id)) });
   });
 
   return r;

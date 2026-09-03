@@ -36,6 +36,13 @@
       "when": 1788471024243,
       "tag": "0004_payout_voids",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788478317515,
+      "tag": "0005_launch_notes_files_2fa",
+      "breakpoints": true
     }
   ]
 }

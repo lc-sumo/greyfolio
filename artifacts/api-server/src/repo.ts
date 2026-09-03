@@ -2,7 +2,7 @@ import type { Clawback, Deal, DealDraw, Lender, LedgerContext, PayoutLine, Payro
 
 export interface AuditEntry {
   actorRepId: string;
-  action: 'login' | 'logout' | 'view-as' | 'deal.create' | 'deal.update' | 'deal.draw' | 'deal.collection' | 'payroll.run' | 'payroll.pay' | 'settings.update' | 'team.update' | 'rep.update' | 'rep.password' | 'login.failed' | 'deal.delete' | 'payroll.void' | 'deal.import';
+  action: 'login' | 'logout' | 'view-as' | 'deal.create' | 'deal.update' | 'deal.draw' | 'deal.collection' | 'payroll.run' | 'payroll.pay' | 'settings.update' | 'team.update' | 'rep.update' | 'rep.password' | 'login.failed' | 'deal.delete' | 'payroll.void' | 'deal.import' | 'password.reset' | 'rep.totp' | 'deal.note' | 'deal.file' | 'deal.clawback' | 'deal.remittance' | 'mail.sent';
   targetRepId: string | null;
   path: string | null;
   detail?: Record<string, unknown>;
@@ -25,6 +25,14 @@ export interface Settings {
   crm: { urlTemplate: string };
   payroll: { cycle: string };
 }
+
+/** A "forgot password" token on file (only its hash). */
+export interface PasswordReset { id: string; repId: string; tokenHash: string; expiresAt: string; usedAt: string | null }
+/** Two-factor state for a rep. `enabled` flips only after a code has been verified. */
+export interface TotpState { secret: string | null; enabled: boolean }
+export interface DealNote { id: string; dealId: string; authorRepId: string; body: string; createdAt: string }
+export interface DealFileMeta { id: string; dealId: string; name: string; mime: string; size: number; uploadedBy: string; createdAt: string }
+export interface DealFile extends DealFileMeta { data: string }
 
 /** Stored deal columns that a service may patch (never draws — those have their own methods). */
 export type DealPatch = Partial<Omit<Deal, 'id' | 'draws'>>;
@@ -69,6 +77,22 @@ export interface Repo {
   getPasswordHash(repId: string): Promise<string | null>;
   setPasswordHash(repId: string, hash: string | null): Promise<void>;
   repsWithPassword(): Promise<string[]>;
+  /* Forgot-password tokens */
+  createPasswordReset(r: PasswordReset): Promise<void>;
+  findPasswordReset(tokenHash: string): Promise<PasswordReset | null>;
+  consumePasswordReset(id: string): Promise<void>;
+  /* Two-factor */
+  getTotp(repId: string): Promise<TotpState>;
+  setTotp(repId: string, state: TotpState): Promise<void>;
+  repsWithTotp(): Promise<string[]>;
+  /* Deal notes and files */
+  listNotes(dealId: string): Promise<DealNote[]>;
+  insertNote(n: DealNote): Promise<void>;
+  deleteNote(id: string): Promise<void>;
+  listFiles(dealId: string): Promise<DealFileMeta[]>;
+  getFile(id: string): Promise<DealFile | null>;
+  insertFile(f: DealFile): Promise<void>;
+  deleteFile(id: string): Promise<void>;
 }
 
 export interface PayoutCommit {

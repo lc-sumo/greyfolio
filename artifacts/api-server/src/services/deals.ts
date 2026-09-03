@@ -20,6 +20,7 @@ import {
   type NewDealDraft,
   type SegmentKey,
 } from '@greystone/commission';
+import { totalGross, type Clawback } from '@greystone/commission';
 import { HttpError } from '../http-error.js';
 import type { Repo } from '../repo.js';
 
@@ -285,4 +286,33 @@ export async function setCrmId(repo: Repo, id: string, crmId: string | null, act
   await repo.updateDeal(id, { crmId: value });
   await repo.writeAudit({ actorRepId, action: 'deal.update', targetRepId: null, path: `/api/admin/deals/${id}/crm`, detail: { crmId: value } });
   return { ...deal, crmId: value };
+}
+
+export interface ClawbackInput {
+  amount: unknown;
+  date?: unknown;
+  reason?: unknown;
+}
+
+/**
+ * Record a clawback against a deal. The dollar figure is the lender's
+ * clawback on commission; each rep's slice follows from the domain rule in
+ * `repClawback` and nets against their next payout, never twice.
+ */
+export async function recordClawback(repo: Repo, dealId: string, input: ClawbackInput, actorRepId: string): Promise<Clawback> {
+  const deal = await requireDeal(repo, dealId);
+  const amount = Number(input.amount);
+  if (!Number.isFinite(amount) || amount <= 0) throw new HttpError(400, 'Clawback amount must be more than zero');
+  const gross = totalGross(deal);
+  if (amount > gross + 0.005) throw new HttpError(400, `A clawback cannot exceed the deal's gross commission (${gross.toLocaleString('en-US', { style: 'currency', currency: 'USD' })})`);
+  const date = String(input.date ?? today()).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new HttpError(400, 'Clawback date must be YYYY-MM-DD');
+  if (date > today()) throw new HttpError(400, 'Clawback date cannot be in the future');
+  if (date < deal.date) throw new HttpError(400, `Clawback date is before the deal funded (${deal.date})`);
+  const ctx = await repo.loadContext();
+  const n = ctx.clawbacks.filter((c) => c.dealId === dealId).length + 1;
+  const clawback: Clawback = { id: `cb-${dealId}-${n}`, dealId, date, amount: Math.round(amount * 100) / 100, recovered: 0, reason: String(input.reason ?? '').trim().slice(0, 500), status: 'open' };
+  await repo.insertClawback(clawback);
+  await repo.writeAudit({ actorRepId, action: 'deal.clawback', targetRepId: null, path: `/api/admin/deals/${dealId}/clawbacks`, detail: { clawbackId: clawback.id, amount: clawback.amount, date } });
+  return clawback;
 }

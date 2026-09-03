@@ -4,7 +4,10 @@ import {
   commissionAuditLog,
   commissionClawbacks,
   commissionDealDraws,
+  commissionDealFiles,
+  commissionDealNotes,
   commissionDeals,
+  commissionPasswordResets,
   commissionPayoutLines,
   commissionPayrollRuns,
   commissionPayrollRuns as runsTable,
@@ -18,7 +21,7 @@ import {
   toTeam,
   type Database,
 } from '@greystone/db';
-import type { AuditEntry, DealPatch, PayoutCommit, Repo, Settings } from './repo.js';
+import type { AuditEntry, DealFile, DealNote, DealPatch, PasswordReset, PayoutCommit, Repo, Settings, TotpState } from './repo.js';
 
 export function dbRepo(db: Database): Repo {
   return {
@@ -126,6 +129,57 @@ export function dbRepo(db: Database): Repo {
     async repsWithPassword() {
       const rows = await db.select({ id: commissionReps.id }).from(commissionReps).where(sql`${commissionReps.passwordHash} is not null`);
       return rows.map((r) => r.id);
+    },
+    async createPasswordReset(r: PasswordReset) {
+      await db.insert(commissionPasswordResets).values({ id: r.id, repId: r.repId, tokenHash: r.tokenHash, expiresAt: new Date(r.expiresAt), usedAt: r.usedAt ? new Date(r.usedAt) : null });
+    },
+    async findPasswordReset(tokenHash: string) {
+      const rows = await db.select().from(commissionPasswordResets).where(eq(commissionPasswordResets.tokenHash, tokenHash)).limit(1);
+      const r = rows[0];
+      return r ? { id: r.id, repId: r.repId, tokenHash: r.tokenHash, expiresAt: r.expiresAt.toISOString(), usedAt: r.usedAt ? r.usedAt.toISOString() : null } : null;
+    },
+    async consumePasswordReset(id: string) {
+      await db.update(commissionPasswordResets).set({ usedAt: sql`now()` }).where(eq(commissionPasswordResets.id, id));
+    },
+    async getTotp(repId: string): Promise<TotpState> {
+      const rows = await db.select({ secret: commissionReps.totpSecret, enabled: commissionReps.totpEnabled }).from(commissionReps).where(eq(commissionReps.id, repId)).limit(1);
+      return rows[0] ? { secret: rows[0].secret, enabled: rows[0].enabled } : { secret: null, enabled: false };
+    },
+    async setTotp(repId: string, state: TotpState) {
+      await db.update(commissionReps).set({ totpSecret: state.secret, totpEnabled: !!state.secret && state.enabled, updatedAt: sql`now()` }).where(eq(commissionReps.id, repId));
+    },
+    async repsWithTotp() {
+      const rows = await db.select({ id: commissionReps.id }).from(commissionReps).where(eq(commissionReps.totpEnabled, true));
+      return rows.map((r) => r.id);
+    },
+    async listNotes(dealId: string): Promise<DealNote[]> {
+      const rows = await db.select().from(commissionDealNotes).where(eq(commissionDealNotes.dealId, dealId)).orderBy(desc(commissionDealNotes.createdAt));
+      return rows.map((n) => ({ id: n.id, dealId: n.dealId, authorRepId: n.authorRepId, body: n.body, createdAt: n.createdAt.toISOString() }));
+    },
+    async insertNote(n: DealNote) {
+      await db.insert(commissionDealNotes).values({ id: n.id, dealId: n.dealId, authorRepId: n.authorRepId, body: n.body, createdAt: new Date(n.createdAt) });
+    },
+    async deleteNote(id: string) {
+      await db.delete(commissionDealNotes).where(eq(commissionDealNotes.id, id));
+    },
+    async listFiles(dealId: string) {
+      const rows = await db
+        .select({ id: commissionDealFiles.id, dealId: commissionDealFiles.dealId, name: commissionDealFiles.name, mime: commissionDealFiles.mime, size: commissionDealFiles.size, uploadedBy: commissionDealFiles.uploadedBy, createdAt: commissionDealFiles.createdAt })
+        .from(commissionDealFiles)
+        .where(eq(commissionDealFiles.dealId, dealId))
+        .orderBy(desc(commissionDealFiles.createdAt));
+      return rows.map((f) => ({ ...f, createdAt: f.createdAt.toISOString() }));
+    },
+    async getFile(id: string): Promise<DealFile | null> {
+      const rows = await db.select().from(commissionDealFiles).where(eq(commissionDealFiles.id, id)).limit(1);
+      const f = rows[0];
+      return f ? { ...f, createdAt: f.createdAt.toISOString() } : null;
+    },
+    async insertFile(f: DealFile) {
+      await db.insert(commissionDealFiles).values({ id: f.id, dealId: f.dealId, name: f.name, mime: f.mime, size: f.size, data: f.data, uploadedBy: f.uploadedBy, createdAt: new Date(f.createdAt) });
+    },
+    async deleteFile(id: string) {
+      await db.delete(commissionDealFiles).where(eq(commissionDealFiles.id, id));
     },
     async insertRun(run: PayrollRun) {
       await db.insert(commissionPayrollRuns).values({ id: run.id, label: run.label, start: run.start, end: run.end, status: run.status });

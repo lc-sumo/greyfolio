@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { StrictMode } from 'react';
+import { StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, HashRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { api, DEMO } from './lib/api';
@@ -8,7 +8,7 @@ import { SessionProvider, useSession } from './lib/session';
 import { Clawbacks } from './pages/Clawbacks';
 import { Dashboard } from './pages/Dashboard';
 import { Deals } from './pages/Deals';
-import { Login } from './pages/Login';
+import { Login, ResetPassword } from './pages/Login';
 import { MasterDeals } from './pages/MasterDeals';
 import { Merchants } from './pages/Merchants';
 import { Overview } from './pages/Overview';
@@ -58,6 +58,11 @@ function App() {
 
 function LoginGate() {
   const [oidc, devAuth, password] = [Boolean(window.__GS_OIDC__), Boolean(window.__GS_DEV__), window.__GS_PW__ !== false];
+  // The reset link from the "forgot password" email lands here signed out: /reset?token=…
+  const here = DEMO ? window.location.hash.replace(/^#/, '') : window.location.pathname + window.location.search;
+  const token = here.startsWith('/reset') ? new URLSearchParams(here.slice(here.indexOf('?'))).get('token') : null;
+  const [resetting, setResetting] = useState(!!token);
+  if (resetting && token) return <ResetPassword token={token} onDone={() => { setResetting(false); window.history.replaceState(null, '', DEMO ? '#/' : '/'); }} />;
   return <Login oidc={oidc} devAuth={devAuth} password={password} />;
 }
 

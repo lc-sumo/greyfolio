@@ -1,8 +1,8 @@
 import { PALETTES, applyPalette, applyTheme, readPalette, readTheme, type Palette, type Theme } from '../lib/theme';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { api, post, type MeInfo } from '../lib/api';
+import { api, post, type MeInfo, type TotpStatus } from '../lib/api';
 import { initials, type Period } from '../lib/format';
 import { useSession } from '../lib/session';
 
@@ -88,6 +88,7 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
             </div>
           </div>
           {!viewAs && <ChangePassword />}
+          {!viewAs && <TwoFactor />}
           <button className="linkish" onClick={() => void logout()}>Sign out</button>
         </div>
       </aside>
@@ -123,6 +124,55 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
 }
 
 /** Change my own password from the sidebar. Hidden under View as. */
+function TwoFactor() {
+  const { notify } = useSession();
+  const qc = useQueryClient();
+  const status = useQuery({ queryKey: ['me-totp'], queryFn: () => api<TotpStatus>('/api/me/totp') });
+  const [open, setOpen] = useState(false);
+  const [setup, setSetup] = useState<{ secret: string; otpauth: string } | null>(null);
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const enabled = !!status.data?.enabled;
+  async function go(fn: () => Promise<void>, ok: string) {
+    setBusy(true);
+    try { await fn(); await qc.invalidateQueries({ queryKey: ['me-totp'] }); notify(ok); setCode(''); } catch (x) { notify(x instanceof Error ? x.message : 'Something went wrong'); } finally { setBusy(false); }
+  }
+  if (!open) return <button className="linkish" onClick={() => setOpen(true)}>Two-factor sign-in{enabled ? ' · on' : ''}</button>;
+  return (
+    <div className="pwform">
+      {enabled ? (
+        <>
+          <div style={{ fontSize: 13, color: 'var(--navy-text-3)' }}>Two-factor is <b style={{ color: '#fff' }}>on</b>. Enter a current code to turn it off.</div>
+          <input inputMode="numeric" placeholder="Code from your app" value={code} onChange={(e) => setCode(e.target.value)} />
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button className="btn" style={{ height: 30, padding: '0 10px' }} disabled={busy || code.replace(/\s/g, '').length !== 6} onClick={() => go(() => post('/api/me/totp/disable', { code }).then(() => undefined), 'Two-factor turned off')}>Turn off</button>
+            <button type="button" className="btn" style={{ height: 30, padding: '0 10px' }} onClick={() => setOpen(false)}>Close</button>
+          </div>
+        </>
+      ) : setup ? (
+        <>
+          <div style={{ fontSize: 13, color: 'var(--navy-text-3)' }}>In Google Authenticator, 1Password or Authy, add an account with this key, then enter the code it shows.</div>
+          <a href={setup.otpauth} style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>Open in authenticator app ↗</a>
+          <code style={{ fontSize: 12.5, wordBreak: 'break-all', color: '#fff', background: 'var(--navy-raised)', padding: '6px 8px', borderRadius: 6, userSelect: 'all' }}>{setup.secret.replace(/(.{4})/g, '$1 ').trim()}</code>
+          <input inputMode="numeric" placeholder="6-digit code" value={code} onChange={(e) => setCode(e.target.value)} autoFocus />
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button className="btn primary" style={{ height: 30, padding: '0 10px' }} disabled={busy || code.replace(/\s/g, '').length !== 6} onClick={() => go(() => post('/api/me/totp/enable', { code }).then(() => { setSetup(null); }), 'Two-factor is on — you will be asked for a code at sign-in')}>Verify & turn on</button>
+            <button type="button" className="btn" style={{ height: 30, padding: '0 10px' }} onClick={() => { setSetup(null); setOpen(false); }}>Cancel</button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div style={{ fontSize: 13, color: 'var(--navy-text-3)' }}>Add a second step at sign-in: a code from an authenticator app on your phone.</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button className="btn primary" style={{ height: 30, padding: '0 10px' }} disabled={busy} onClick={async () => { setBusy(true); try { setSetup(await post('/api/me/totp/setup', {})); } catch (x) { notify(x instanceof Error ? x.message : 'Could not start'); } finally { setBusy(false); } }}>Set up</button>
+            <button type="button" className="btn" style={{ height: 30, padding: '0 10px' }} onClick={() => setOpen(false)}>Close</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ChangePassword() {
   const { notify } = useSession();
   const [open, setOpen] = useState(false);

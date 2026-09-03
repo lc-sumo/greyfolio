@@ -1,5 +1,6 @@
 /** Password writes. Server-only: pulls in node:crypto, so it stays out of the browser demo bundle. */
-import { hashPassword, passwordProblem, verifyPassword } from '../auth/password.js';
+import { createHash, randomBytes } from 'node:crypto';
+import { clearLoginFailures, hashPassword, passwordProblem, verifyPassword } from '../auth/password.js';
 import { HttpError } from '../http-error.js';
 import type { Repo } from '../repo.js';
 
@@ -30,4 +31,47 @@ export async function changeOwnPassword(repo: Repo, repId: string, current: unkn
   if (problem) throw new HttpError(400, problem);
   await repo.setPasswordHash(repId, await hashPassword(next as string));
   await audit(repo, repId, 'rep.password', '/api/me/password', { self: true });
+}
+
+const RESET_TTL_MS = 60 * 60 * 1000;
+const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
+
+/** Per-email cap on reset emails: 3 an hour, so the form cannot be used to flood an inbox. */
+const resetAsks = new Map<string, number[]>();
+export function resetThrottled(email: string, now = Date.now()): boolean {
+  const recent = (resetAsks.get(email) ?? []).filter((t) => now - t < RESET_TTL_MS);
+  resetAsks.set(email, recent);
+  if (recent.length >= 3) return true;
+  recent.push(now);
+  return false;
+}
+
+/**
+ * Start a "forgot password" reset. Returns the one-time token to put in the
+ * email link, or null when there is nothing to send (unknown or inactive
+ * email) — the caller answers the same either way so emails cannot be probed.
+ */
+export async function beginPasswordReset(repo: Repo, email: string): Promise<{ token: string; repId: string; name: string } | null> {
+  const rep = await repo.findRepByEmail(email);
+  if (!rep || !rep.active) return null;
+  const token = randomBytes(32).toString('base64url');
+  await repo.createPasswordReset({ id: `pr-${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`, repId: rep.id, tokenHash: sha256(token), expiresAt: new Date(Date.now() + RESET_TTL_MS).toISOString(), usedAt: null });
+  await repo.writeAudit({ actorRepId: rep.id, action: 'password.reset', targetRepId: null, path: '/auth/forgot', detail: { requested: true } });
+  return { token, repId: rep.id, name: rep.name };
+}
+
+/** Finish a reset: the token must be unused and inside its hour; the new password must pass the same rules as everywhere else. */
+export async function completePasswordReset(repo: Repo, token: unknown, password: unknown): Promise<{ email: string }> {
+  const t = String(token ?? '').trim();
+  const reset = t ? await repo.findPasswordReset(sha256(t)) : null;
+  if (!reset || reset.usedAt || new Date(reset.expiresAt).getTime() < Date.now()) throw new HttpError(400, 'That reset link is invalid or has expired — ask for a new one');
+  const problem = passwordProblem(password);
+  if (problem) throw new HttpError(400, problem);
+  const rep = await repo.findRep(reset.repId);
+  if (!rep || !rep.active) throw new HttpError(400, 'That account is no longer active');
+  await repo.setPasswordHash(rep.id, await hashPassword(password as string));
+  await repo.consumePasswordReset(reset.id);
+  clearLoginFailures(rep.email.toLowerCase());
+  await repo.writeAudit({ actorRepId: rep.id, action: 'password.reset', targetRepId: null, path: '/auth/reset', detail: { completed: true } });
+  return { email: rep.email };
 }

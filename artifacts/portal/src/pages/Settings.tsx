@@ -313,6 +313,7 @@ function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Tea
                       <Pill tone={r.hasPassword ? 'teal' : 'grey'}>{r.hasPassword ? 'Password set' : 'No password'}</Pill>
                       <button className="btn" style={{ height: 30, padding: '0 8px' }} title="Set or reset the password this rep signs in with" onClick={() => setPw({ id: r.id, value: tempPassword() })}>{r.hasPassword ? 'Reset' : 'Set password'}</button>
                       {r.hasPassword && <button className="btn" style={{ height: 30, padding: '0 8px' }} title="Remove the password — SSO only" onClick={() => run(`${r.name} — password removed`, () => post(`/api/admin/reps/${r.id}/password`, { password: null }))}>✕</button>}
+                      {r.hasTotp && <button className="btn" style={{ height: 30, padding: '0 8px' }} title="Two-factor is on for this rep. Reset it if they lost their phone — they sign in with the password alone until they enrol again." onClick={() => { if (window.confirm(`Reset two-factor for ${r.name}? They will sign in with just their password until they set it up again.`)) void run(`${r.name} — two-factor reset`, () => post(`/api/admin/reps/${r.id}/totp`, {}, 'DELETE')); }}>2FA on · reset</button>}
                     </span>
                   )}
                 </span>

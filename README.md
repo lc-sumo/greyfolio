@@ -33,6 +33,17 @@ docs/             Phase notes and review checklists.
 
 ## Getting started
 
+### One command with Docker (nothing else to install)
+
+```bash
+git clone https://github.com/lc-sumo/greyfolio -b claude/new-session-kdfrhy && cd greyfolio
+docker compose up --build
+```
+
+Open http://localhost:8080 and sign in with `leor@greystoneus.com` (admin), `julian.ribak@greystoneus.com` (rep) or `raymond.amato@greystoneus.com` (team lead). The container applies migrations and loads the demo board on every start (`SEED=demo`); set `SEED=none` in `docker-compose.yml` to keep your data between restarts. `docker compose down -v` wipes the database.
+
+### Manual setup
+
 ```bash
 pnpm install
 pnpm test          # domain + seed tests

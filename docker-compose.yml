@@ -1,0 +1,32 @@
+# One command to run the whole portal: `docker compose up --build`
+# then open http://localhost:8080 and sign in with e.g. leor@greystoneus.com
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: greystone
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/greystone
+      AUTH_MODE: dev            # dev email sign-in; set OIDC_ISSUER etc. for real SSO
+      SESSION_SECRET: local-docker-session-secret-change-me
+      BASE_URL: http://localhost:8080
+      SEED: demo                # demo | workbook | none  (demo wipes deal data on every start)
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata:

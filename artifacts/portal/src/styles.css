@@ -201,3 +201,8 @@ select.mini { height: 28px; border: 1px solid var(--border-strong); border-radiu
 .draw-math b { font-size: 15px; letter-spacing: -.02em; }
 .draw-math .subtle { font-size: 10.5px; }
 @media (max-width: 700px) { .draw-math { grid-template-columns: 1fr 1fr; } }
+
+/* Renewals */
+.bar { position: relative; height: 8px; background: var(--border-light-2); border-radius: 4px; overflow: visible; width: 150px; }
+.bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; }
+.bar i.mark { left: 40%; width: 2px; background: var(--ink); opacity: .45; border-radius: 1px; }

@@ -38,8 +38,9 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
               <div className="nav-group label" style={{ color: 'var(--navy-text-3)' }}>{viewAs ? 'Rep portal (view as)' : 'My portal'}</div>
               <NavLink to="/"><i className="dot" />My dashboard</NavLink>
               <NavLink to="/deals"><i className="dot" />My deals</NavLink>
+              <NavLink to="/renewals"><i className="dot" />My renewals</NavLink>
               <NavLink to="/clawbacks"><i className="dot" />Clawbacks</NavLink>
-              <NavLink to="/statements"><i className="dot" />Statements</NavLink>
+              <NavLink to="/payments"><i className="dot" />Pay history</NavLink>
             </>
           ) : (
             <>
@@ -47,7 +48,7 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
               <NavLink to="/"><i className="dot" />Rep roster</NavLink>
               {user.role === 'admin' && <NavLink to="/deals"><i className="dot" />Master deals</NavLink>}
               {user.role === 'admin' && <NavLink to="/payroll"><i className="dot" />Run payroll</NavLink>}
-              <NavLink to="/soon/renewals"><i className="dot" />Renewals</NavLink>
+              {user.role === 'admin' && <NavLink to="/renewals"><i className="dot" />Renewals</NavLink>}
               <NavLink to="/soon/settings"><i className="dot" />Settings</NavLink>
             </>
           )}

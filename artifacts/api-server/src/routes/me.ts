@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { repDeals } from '@greystone/commission';
 import { HttpError, requireAuth, resolveScope, scopeOf } from '../auth/middleware.js';
 import type { Repo } from '../repo.js';
-import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repStatements, repWallet } from '../scope.js';
+import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repPayHistory, repRenewals, repStatements, repWallet } from '../scope.js';
 
 /**
  * The rep portal. Every handler reads `scopeOf(req).effectiveRepId` — the
@@ -70,6 +70,18 @@ export function meRouter(repo: Repo): Router {
   r.get('/statements', async (req, res) => {
     const [ctx, runs] = await Promise.all([repo.loadContext(), repo.listRuns()]);
     res.json({ statements: repStatements(ctx, runs, scopeOf(req).effectiveRepId) });
+  });
+
+  /** Pay history: every ledger row — when, how much, which deal. */
+  r.get('/payments', async (req, res) => {
+    const [ctx, runs] = await Promise.all([repo.loadContext(), repo.listRuns()]);
+    res.json(repPayHistory(ctx, runs, scopeOf(req).effectiveRepId));
+  });
+
+  /** The rep's own renewals, so they know when to follow up. Merchant contact included; other reps' names are not. */
+  r.get('/renewals', async (req, res) => {
+    const [ctx, thresholds] = await Promise.all([repo.loadContext(), repo.getSetting<{ renewalMark: number }>('thresholds')]);
+    res.json({ renewals: repRenewals(ctx, scopeOf(req).effectiveRepId, { renewalMark: thresholds?.renewalMark ?? 0.4 }, new Date().toISOString().slice(0, 10)) });
   });
 
   r.get('/leaderboard', async (req, res) => {

@@ -127,6 +127,17 @@ describe('collection is one writer', () => {
   });
 });
 
+describe('admin renewals', () => {
+  it('buckets every deal with who calls it, admin-only', async () => {
+    const { admin, rep } = await harness();
+    expect((await rep.get('/api/admin/renewals')).status).toBe(403);
+    const res = await admin.get('/api/admin/renewals');
+    expect(res.status).toBe(200);
+    expect(res.body.renewals).toHaveLength(3);
+    expect(res.body.renewals.find((r: { id: string }) => r.id === 'F1')).toMatchObject({ whoCalls: 'Zach', bucket: 'due', estRenewalGross: 1_000, merchantContact: 'Daniel Reyes' });
+  });
+});
+
 describe('master board', () => {
   it('searches merchant fields and filters by rep', async () => {
     const { admin } = await harness();

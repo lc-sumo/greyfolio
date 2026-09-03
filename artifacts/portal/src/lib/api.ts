@@ -109,3 +109,11 @@ export interface PayrollRepDetail {
   paidSummary: { gross: number; recovered: number; cash: number; lineCount: number };
 }
 export interface PayResult { repId: string; runId: string; gross: number; withheld: number; net: number; lines: number; recoveries: number; dealsFullyPaid: string[]; uncollectedDealIds: string[] }
+
+/* ---- Renewals + pay history (Phase 6) ---- */
+export type RenewalBucket = 'due' | 'soon' | 'building' | 'risk' | 'refinanced';
+export interface RenewalBase { id: string; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string; lender: string; product: string; date: string; funded: number; payback: number | null; termDays: number | null; frequency: string; factor: number | null; pctPaidIn: number; markDate: string | null; maturityDate: string | null; daysToMark: number | null; bucket: RenewalBucket; bucketLabel: string; dealStatus: string }
+export interface RepRenewalView extends RenewalBase { roles: Role[]; whoCalls: 'You' | 'Closer' | 'Opener'; estRenewalShare: number }
+export interface AdminRenewalRow extends RenewalBase { whoCalls: string; estRenewalGross: number; crmUrl: string }
+export interface PayHistoryRow { key: string; paidAt: string; dealId: string; business: string; role: string; segmentKey: string | null; segmentLabel: string; amount: number; runId: string | null; runLabel: string | null }
+export interface PayHistory { rows: PayHistoryRow[]; days: Array<{ date: string; runLabel: string | null; grossPaid: number; recovered: number; cash: number; rows: PayHistoryRow[] }>; summary: { grossPaid: number; recovered: number; cash: number; payouts: number } }

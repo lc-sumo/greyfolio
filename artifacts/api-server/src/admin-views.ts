@@ -12,6 +12,8 @@ import {
   outstandingGross,
   outstandingOf,
   paymentFor,
+  renewalOf,
+  RENEWAL_BUCKET_LABEL,
   segmentStatus,
   segments,
   sum,
@@ -23,6 +25,7 @@ import {
   type Deal,
   type LedgerContext,
   type Rep,
+  type RenewalBucket,
   type Role,
 } from '@greystone/commission';
 import type { Settings } from './repo.js';
@@ -198,4 +201,69 @@ export function adminDealDetail(deal: Deal, ctx: LedgerContext, reps: Rep[], set
       .filter((c) => c.dealId === deal.id)
       .map((c) => ({ ...c, slices: clawbackSlices(c, deal, ctx.lines).map((s) => ({ ...s, name: name(s.repId) })) })),
   };
+}
+
+/* ---------- renewals (admin) ---------- */
+
+const BUCKET_ORDER: Record<RenewalBucket, number> = { due: 0, soon: 1, building: 2, risk: 3, refinanced: 4 };
+
+export interface AdminRenewalRow {
+  id: string;
+  business: string;
+  merchantContact: string;
+  merchantEmail: string;
+  merchantPhone: string;
+  lender: string;
+  product: string;
+  date: string;
+  funded: number;
+  payback: number | null;
+  termDays: number | null;
+  frequency: string;
+  factor: number | null;
+  pctPaidIn: number;
+  markDate: string | null;
+  maturityDate: string | null;
+  daysToMark: number | null;
+  bucket: RenewalBucket;
+  bucketLabel: string;
+  /** Closer first name, else opener first name. */
+  whoCalls: string;
+  estRenewalGross: number;
+  dealStatus: string;
+  crmUrl: string;
+}
+
+export function adminRenewals(ctx: LedgerContext, reps: Rep[], settings: Settings, today: string): AdminRenewalRow[] {
+  const first = (id: string | null) => (id ? (reps.find((r) => r.id === id)?.name ?? id).split(' ')[0]! : '—');
+  return ctx.deals
+    .map((d) => {
+      const r = renewalOf(d, { renewalMark: settings.thresholds.renewalMark }, today);
+      return {
+        id: d.id,
+        business: d.business,
+        merchantContact: d.merchantContact,
+        merchantEmail: d.merchantEmail,
+        merchantPhone: d.merchantPhone,
+        lender: d.lender,
+        product: d.product,
+        date: d.date,
+        funded: totalFunded(d),
+        payback: d.payback,
+        termDays: d.termDays,
+        frequency: d.frequency,
+        factor: d.factor,
+        pctPaidIn: r.pctPaidIn,
+        markDate: r.markDate,
+        maturityDate: r.maturityDate,
+        daysToMark: r.daysToMark,
+        bucket: r.bucket,
+        bucketLabel: RENEWAL_BUCKET_LABEL[r.bucket],
+        whoCalls: d.closerId ? first(d.closerId) : first(d.openerId),
+        estRenewalGross: r.estRenewalGross,
+        dealStatus: d.dealStatus,
+        crmUrl: crmUrl(settings.crm.urlTemplate, d),
+      };
+    })
+    .sort((a, b) => BUCKET_ORDER[a.bucket] - BUCKET_ORDER[b.bucket] || (a.daysToMark ?? 9e9) - (b.daysToMark ?? 9e9));
 }

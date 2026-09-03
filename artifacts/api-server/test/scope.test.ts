@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assertRepSafe, leaderboard, repClawbackViews, repDashboard, repDealView, repStatements, repWallet } from '../src/scope.js';
+import { assertRepSafe, leaderboard, repClawbackViews, repDashboard, repDealView, repPayHistory, repRenewals, repStatements, repWallet } from '../src/scope.js';
 import { clawbacks, deals, lines, reps, runs } from './memory-repo.js';
 
 const ctx = { deals, lines, clawbacks };
@@ -95,5 +95,30 @@ describe('repDashboard', () => {
   });
   it('YTD includes June', () => {
     expect(repDashboard(ctx, reps, runs, JULIAN, '2026-01-01', '2026-09-02').period.earned).toBe(980);
+  });
+});
+
+describe('repRenewals', () => {
+  it('lists only the rep\'s deals with merchant contact, bucket, and their own est. share — no other rep names', () => {
+    const rows = repRenewals(ctx, JULIAN, { renewalMark: 0.4 }, '2026-09-02');
+    assertRepSafe(rows);
+    expect(rows.map((r) => r.id).sort()).toEqual(['F1', 'F2']);
+    const f1 = rows.find((r) => r.id === 'F1')!;
+    expect(f1).toMatchObject({ merchantContact: 'Daniel Reyes', roles: ['Opener'], whoCalls: 'Closer', estRenewalShare: 350, funded: 10_000 });
+    expect(f1.bucket).toBe('due'); // funded Jun 5, 120-day term → 40% mark ≈ Jul 31
+    for (const r of rows) for (const rep of reps) if (rep.id !== JULIAN) expect(JSON.stringify(r)).not.toContain(rep.name);
+    expect(repRenewals(ctx, 'rep-zach-sanders', { renewalMark: 0.4 }, '2026-09-02').find((r) => r.id === 'F3')?.whoCalls).toBe('You');
+  });
+});
+
+describe('repPayHistory', () => {
+  it('is every ledger row, newest first, grouped by day with gross − recovered = cash', () => {
+    const h = repPayHistory(ctx, runs, JULIAN);
+    assertRepSafe(h);
+    expect(h.rows.map((r) => [r.dealId, r.role, r.segmentLabel, r.amount])).toEqual([['F1', 'Opener', 'Initial', 350], ['F1', 'Clawback recovery', 'Clawback', -100]]);
+    expect(h.days).toHaveLength(1);
+    expect(h.days[0]).toMatchObject({ date: '2026-08-31', runLabel: 'Aug 16 – Aug 31, 2026', grossPaid: 350, recovered: 100, cash: 250 });
+    expect(h.summary).toEqual({ grossPaid: 350, recovered: 100, cash: 250, payouts: 1 });
+    expect(repPayHistory(ctx, runs, 'rep-zach-sanders')).toMatchObject({ rows: [], days: [], summary: { grossPaid: 0, recovered: 0, cash: 0, payouts: 0 } });
   });
 });

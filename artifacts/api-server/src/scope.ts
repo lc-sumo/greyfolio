@@ -13,6 +13,8 @@ import {
   linesInPeriod,
   monthlySeries,
   paidFigures,
+  renewalOf,
+  RENEWAL_BUCKET_LABEL,
   repClawback,
   repDeals,
   repLedger,
@@ -28,6 +30,8 @@ import {
   type PayoutLine,
   type PayrollRun,
   type Rep,
+  type RenewalBucket,
+  type RenewalSettings,
   type Role,
 } from '@greystone/commission';
 
@@ -308,4 +312,133 @@ export function repDashboard(ctx: LedgerContext, reps: Rep[], runs: PayrollRun[]
     leaderboard: leaderboard(ctx, reps, repId),
     owedToMe,
   };
+}
+
+/* ---------- renewals (rep-scoped) ---------- */
+
+export interface RepRenewalView {
+  id: string;
+  business: string;
+  /** The rep needs these to follow up — they are the merchant's, not another rep's. */
+  merchantContact: string;
+  merchantEmail: string;
+  merchantPhone: string;
+  lender: string;
+  product: string;
+  date: string;
+  funded: number;
+  payback: number | null;
+  termDays: number | null;
+  frequency: string;
+  factor: number | null;
+  pctPaidIn: number;
+  markDate: string | null;
+  maturityDate: string | null;
+  daysToMark: number | null;
+  bucket: RenewalBucket;
+  bucketLabel: string;
+  roles: Role[];
+  /** "You" when this rep is the closer; otherwise the role that calls it, never a name. */
+  whoCalls: 'You' | 'Closer' | 'Opener';
+  /** The rep's share if the merchant renews at the same size and rate. */
+  estRenewalShare: number;
+  dealStatus: string;
+}
+
+export function repRenewals(ctx: LedgerContext, repId: string, settings: RenewalSettings, today: string): RepRenewalView[] {
+  return repDeals(ctx.deals, repId)
+    .map((d) => {
+      const r = renewalOf(d, settings, today);
+      const mine = repLines(d, repId);
+      const roles = [...new Set(mine.map((l) => l.role))];
+      const rate = sum(mine.filter((l) => l.segmentKey === 'base').map((l) => l.rate));
+      const whoCalls: RepRenewalView['whoCalls'] = d.closerId === repId ? 'You' : d.closerId ? 'Closer' : d.openerId === repId ? 'You' : 'Opener';
+      return {
+        id: d.id,
+        business: d.business,
+        merchantContact: d.merchantContact,
+        merchantEmail: d.merchantEmail,
+        merchantPhone: d.merchantPhone,
+        lender: d.lender,
+        product: d.product,
+        date: d.date,
+        funded: totalFunded(d),
+        payback: d.payback,
+        termDays: d.termDays,
+        frequency: d.frequency,
+        factor: d.factor,
+        pctPaidIn: r.pctPaidIn,
+        markDate: r.markDate,
+        maturityDate: r.maturityDate,
+        daysToMark: r.daysToMark,
+        bucket: r.bucket,
+        bucketLabel: RENEWAL_BUCKET_LABEL[r.bucket],
+        roles,
+        whoCalls,
+        estRenewalShare: sum([r.estRenewalGross * rate]),
+        dealStatus: d.dealStatus,
+      };
+    })
+    .sort((a, b) => order(a.bucket) - order(b.bucket) || (a.daysToMark ?? 9e9) - (b.daysToMark ?? 9e9));
+}
+
+function order(b: RenewalBucket): number {
+  return { due: 0, soon: 1, building: 2, risk: 3, refinanced: 4 }[b];
+}
+
+/* ---------- pay history (rep-scoped) ---------- */
+
+export interface PayHistoryRow {
+  key: string;
+  paidAt: string;
+  dealId: string;
+  business: string;
+  role: string;
+  segmentKey: string | null;
+  segmentLabel: string;
+  amount: number;
+  runId: string | null;
+  runLabel: string | null;
+}
+
+export interface PayHistory {
+  rows: PayHistoryRow[];
+  /** Grouped by payout date, newest first, each with gross / recovered / cash. */
+  days: Array<{ date: string; runLabel: string | null; grossPaid: number; recovered: number; cash: number; rows: PayHistoryRow[] }>;
+  summary: { grossPaid: number; recovered: number; cash: number; payouts: number };
+}
+
+/** Every ledger row for the rep: when they were paid, how much, and for which deal. */
+export function repPayHistory(ctx: LedgerContext, runs: PayrollRun[], repId: string): PayHistory {
+  const byDeal = new Map(ctx.deals.map((d) => [d.id, d]));
+  const runLabel = new Map(runs.map((r) => [r.id, r.label]));
+  const rows: PayHistoryRow[] = ctx.lines
+    .filter((l) => l.repId === repId)
+    .map((l) => ({
+      key: l.key,
+      paidAt: l.paidAt,
+      dealId: l.dealId,
+      business: byDeal.get(l.dealId)?.business ?? l.dealId,
+      role: l.role,
+      segmentKey: l.segmentKey,
+      segmentLabel: !l.segmentKey ? 'Clawback' : l.segmentKey === 'base' ? 'Initial' : `Draw ${l.segmentKey.slice(1)}`,
+      amount: l.amount,
+      runId: l.runId,
+      runLabel: l.runId ? runLabel.get(l.runId) ?? l.runId : null,
+    }))
+    .sort((a, b) => b.paidAt.localeCompare(a.paidAt) || (b.amount > 0 ? 1 : 0) - (a.amount > 0 ? 1 : 0) || a.dealId.localeCompare(b.dealId, undefined, { numeric: true }));
+  const days: PayHistory['days'] = [];
+  for (const r of rows) {
+    let day = days.find((d) => d.date === r.paidAt);
+    if (!day) days.push((day = { date: r.paidAt, runLabel: r.runLabel, grossPaid: 0, recovered: 0, cash: 0, rows: [] }));
+    day.rows.push(r);
+  }
+  for (const d of days) {
+    const f = paidFigures(ctx.lines.filter((l) => l.repId === repId && l.paidAt === d.date));
+    d.grossPaid = f.gross;
+    d.recovered = f.recovered;
+    d.cash = f.cash;
+  }
+  const f = paidFigures(ctx.lines.filter((l) => l.repId === repId));
+  return { rows, days, summary: { grossPaid: f.gross, recovered: f.recovered, cash: f.cash, payouts: days.length } };
 }

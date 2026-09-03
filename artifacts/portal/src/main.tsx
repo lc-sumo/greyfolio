@@ -12,7 +12,8 @@ import { MasterDeals } from './pages/MasterDeals';
 import { Payroll } from './pages/Payroll';
 import { Roster } from './pages/Roster';
 import { Soon } from './pages/Soon';
-import { Statements } from './pages/Statements';
+import { PayHistory } from './pages/PayHistory';
+import { Renewals } from './pages/Renewals';
 import './styles.css';
 
 // The hosted demo runs at an arbitrary path, so it routes by hash.
@@ -36,8 +37,10 @@ function App() {
       <Route path="/" element={repMode ? <Dashboard /> : <Roster />} />
       <Route path="/deals" element={repMode ? <Deals /> : auth.user.role === 'admin' ? <MasterDeals /> : <Navigate to="/" replace />} />
       <Route path="/payroll" element={!repMode && auth.user.role === 'admin' ? <Payroll /> : <Navigate to="/" replace />} />
-      <Route path="/clawbacks" element={<Clawbacks />} />
-      <Route path="/statements" element={<Statements />} />
+      <Route path="/clawbacks" element={repMode ? <Clawbacks /> : <Navigate to="/" replace />} />
+      <Route path="/payments" element={repMode ? <PayHistory /> : <Navigate to="/" replace />} />
+      <Route path="/statements" element={<Navigate to="/payments" replace />} />
+      <Route path="/renewals" element={repMode ? <Renewals admin={false} /> : auth.user.role === 'admin' ? <Renewals admin /> : <Navigate to="/" replace />} />
       <Route path="/soon/:what" element={<Soon />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

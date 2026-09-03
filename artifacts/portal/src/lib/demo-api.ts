@@ -8,9 +8,9 @@
 import { repDeals, repLedger, repOptions, type Rep, type Team } from '@greystone/commission';
 import { buildDemo, type DemoData } from '@greystone/db/seed/demo';
 import { LENDERS, LISTS, PARTNERS, PRODUCTS, THRESHOLDS } from '@greystone/db/seed';
-import { adminDealDetail, adminDealRow } from '../../../api-server/src/admin-views';
+import { adminDealDetail, adminDealRow, adminRenewals } from '../../../api-server/src/admin-views';
 import { memoryRepo } from '../../../api-server/src/repo.memory';
-import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repStatements, repWallet } from '../../../api-server/src/scope';
+import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repPayHistory, repRenewals, repStatements, repWallet } from '../../../api-server/src/scope';
 import { addDraw, createDeal, setCollection, setDealStatus, updateSplits } from '../../../api-server/src/services/deals';
 import { advanceRun, createRun, paySelected } from '../../../api-server/src/services/payroll';
 import { payrollRepDetail, payrollReps, preview, runSummary } from '../../../api-server/src/payroll-views';
@@ -144,6 +144,8 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
   }
   if (p === '/api/me/clawbacks') return json({ clawbacks: repClawbackViews(ctx, effective) });
   if (p === '/api/me/statements') return json({ statements: repStatements(ctx, d.runs, effective) });
+  if (p === '/api/me/payments') return json(repPayHistory(ctx, d.runs, effective));
+  if (p === '/api/me/renewals') return json({ renewals: repRenewals(ctx, effective, { renewalMark: settings.thresholds.renewalMark }, today) });
   if (p === '/api/me/leaderboard') return json({ rows: leaderboard(ctx, d.reps, effective) });
   if (p === '/api/me/monthly') return json({ series: repMonthly(ctx, effective, (q.get('months') ?? '').split(',').filter(Boolean)) });
 
@@ -178,6 +180,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
   }
   if (p === '/api/admin/audit') return json({ entries: await repo.listAudit(100) });
   if (p === '/api/admin/settings') return json(settings);
+  if (p === '/api/admin/renewals') return json({ renewals: adminRenewals(ctx, d.reps, settings, today) });
 
   const detail = async (id: string) => {
     const c = await repo.loadContext();

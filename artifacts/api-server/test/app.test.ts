@@ -67,7 +67,7 @@ describe('rep scoping is server-side', () => {
     expect(res.status).toBe(200);
     expect(res.body.deals.map((d: { id: string }) => d.id)).toEqual(['F1', 'F2']);
     assertRepSafe(res.body);
-    for (const path of ['/api/me', '/api/me/dashboard?from=2026-01-01&to=2026-09-02', '/api/me/wallet', '/api/me/clawbacks', '/api/me/statements', '/api/me/leaderboard', '/api/me/deals/F1', '/api/me/monthly?months=2026-06,2026-07']) {
+    for (const path of ['/api/me', '/api/me/dashboard?from=2026-01-01&to=2026-09-02', '/api/me/renewals', '/api/me/payments', '/api/me/wallet', '/api/me/clawbacks', '/api/me/statements', '/api/me/leaderboard', '/api/me/deals/F1', '/api/me/monthly?months=2026-06,2026-07']) {
       const r = await agent.get(path);
       expect(r.status, path).toBe(200);
       assertRepSafe(r.body);
@@ -106,7 +106,7 @@ describe('admin View-as', () => {
     const { login, repo } = harness();
     const julian = (await login('julian.ribak@greystoneus.com')).agent;
     const admin = (await login('leor@greystoneus.com')).agent;
-    for (const path of ['/api/me/wallet', '/api/me/deals', '/api/me/clawbacks', '/api/me/statements', '/api/me/leaderboard']) {
+    for (const path of ['/api/me/wallet', '/api/me/deals', '/api/me/clawbacks', '/api/me/statements', '/api/me/payments', '/api/me/renewals', '/api/me/leaderboard']) {
       const own = await julian.get(path);
       const viewed = await admin.get(path).set('X-View-As', 'rep-julian-ribak');
       expect(viewed.status, path).toBe(200);
@@ -115,9 +115,9 @@ describe('admin View-as', () => {
     const me = await admin.get('/api/me').set('X-View-As', 'rep-julian-ribak');
     expect(me.body).toMatchObject({ rep: { id: 'rep-julian-ribak' }, viewAs: true, actor: { id: 'rep-leor', role: 'admin' } });
     const audit = repo.audit.filter((a) => a.action === 'view-as');
-    expect(audit).toHaveLength(6);
+    expect(audit).toHaveLength(8);
     expect(audit[0]).toMatchObject({ actorRepId: 'rep-leor', targetRepId: 'rep-julian-ribak', path: '/api/me/wallet' });
-    expect((await admin.get('/api/admin/audit')).body.entries.filter((e: { action: string }) => e.action === 'view-as')).toHaveLength(6);
+    expect((await admin.get('/api/admin/audit')).body.entries.filter((e: { action: string }) => e.action === 'view-as')).toHaveLength(8);
   });
   it('admins can open an inactive rep to settle a final balance', async () => {
     const { login } = harness();

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { repOptions } from '@greystone/commission';
 import { HttpError, currentUser, requireRole } from '../auth/middleware.js';
-import { adminDealDetail, adminDealRow } from '../admin-views.js';
+import { adminDealDetail, adminDealRow, adminRenewals } from '../admin-views.js';
 import type { Repo } from '../repo.js';
 import { addDraw, createDeal, setCollection, setDealStatus, updateSplits } from '../services/deals.js';
 
@@ -18,6 +18,11 @@ export function adminDealsRouter(repo: Repo): Router {
 
   r.get('/settings', async (_req, res) => {
     res.json(await repo.getSettings());
+  });
+
+  r.get('/renewals', async (_req, res) => {
+    const [ctx, reps, settings] = await Promise.all([repo.loadContext(), repo.listReps(), repo.getSettings()]);
+    res.json({ renewals: adminRenewals(ctx, reps, settings, today()) });
   });
 
   r.get('/deals', async (req, res) => {

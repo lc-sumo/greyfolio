@@ -1,5 +1,5 @@
 import type { Clawback, Deal, DealDraw, LedgerContext, PayoutLine, PayrollRun, Rep, Team, WeeklySchedule } from '@greystone/commission';
-import type { AuditEntry, DealPatch, Repo, Settings } from './repo.js';
+import type { AuditEntry, DealPatch, PayoutCommit, Repo, Settings } from './repo.js';
 
 export interface MemoryData {
   reps: Rep[];
@@ -65,6 +65,26 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
       const d = data.deals.find((x) => x.id === dealId);
       if (!d) throw new Error(`No deal ${dealId}`);
       d.draws = d.draws.map((x) => (x.ref === ref ? { ...x, ...patch } : x));
+    },
+    async insertRun(run: PayrollRun) {
+      data.runs.unshift({ ...run });
+    },
+    async updateRun(id, patch) {
+      const i = data.runs.findIndex((r) => r.id === id);
+      if (i < 0) throw new Error(`No run ${id}`);
+      data.runs[i] = { ...data.runs[i]!, ...(patch.status ? { status: patch.status } : {}), ...(patch.label ? { label: patch.label } : {}) };
+    },
+    async commitPayout(c: PayoutCommit) {
+      for (const l of c.lines) if (data.lines.some((x) => x.key === l.key)) throw new Error(`Ledger key ${l.key} already exists`);
+      data.lines.push(...c.lines);
+      for (const u of c.clawbackUpdates) {
+        const i = data.clawbacks.findIndex((x) => x.id === u.id);
+        if (i >= 0) data.clawbacks[i] = { ...data.clawbacks[i]!, recovered: u.recovered, status: u.status };
+      }
+      for (const id of c.dealsFullyPaid) {
+        const i = data.deals.findIndex((d) => d.id === id);
+        if (i >= 0 && !data.deals[i]!.repPaid) data.deals[i] = { ...data.deals[i]!, repPaid: c.paidAt };
+      }
     },
   };
 }

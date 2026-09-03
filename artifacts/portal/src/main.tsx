@@ -9,6 +9,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Deals } from './pages/Deals';
 import { Login } from './pages/Login';
 import { MasterDeals } from './pages/MasterDeals';
+import { Payroll } from './pages/Payroll';
 import { Roster } from './pages/Roster';
 import { Soon } from './pages/Soon';
 import { Statements } from './pages/Statements';
@@ -34,6 +35,7 @@ function App() {
     <Routes>
       <Route path="/" element={repMode ? <Dashboard /> : <Roster />} />
       <Route path="/deals" element={repMode ? <Deals /> : auth.user.role === 'admin' ? <MasterDeals /> : <Navigate to="/" replace />} />
+      <Route path="/payroll" element={!repMode && auth.user.role === 'admin' ? <Payroll /> : <Navigate to="/" replace />} />
       <Route path="/clawbacks" element={<Clawbacks />} />
       <Route path="/statements" element={<Statements />} />
       <Route path="/soon/:what" element={<Soon />} />

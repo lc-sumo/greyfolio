@@ -1,8 +1,8 @@
-import type { Deal, DealDraw, Lender, LedgerContext, PayrollRun, ProductRule, ReferralPartner, Rep, Team, WeeklySchedule } from '@greystone/commission';
+import type { Clawback, Deal, DealDraw, Lender, LedgerContext, PayoutLine, PayrollRun, ProductRule, ReferralPartner, Rep, Team, WeeklySchedule } from '@greystone/commission';
 
 export interface AuditEntry {
   actorRepId: string;
-  action: 'login' | 'logout' | 'view-as' | 'deal.create' | 'deal.update' | 'deal.draw' | 'deal.collection';
+  action: 'login' | 'logout' | 'view-as' | 'deal.create' | 'deal.update' | 'deal.draw' | 'deal.collection' | 'payroll.run' | 'payroll.pay';
   targetRepId: string | null;
   path: string | null;
   detail?: Record<string, unknown>;
@@ -50,4 +50,16 @@ export interface Repo {
   updateDeal(id: string, patch: DealPatch): Promise<void>;
   insertDraw(dealId: string, draw: DealDraw): Promise<void>;
   updateDraw(dealId: string, ref: string, patch: { collected: number | null; schedule: WeeklySchedule | null }): Promise<void>;
+  // Payroll (admin only — enforced by the routes)
+  insertRun(run: PayrollRun): Promise<void>;
+  updateRun(id: string, patch: Partial<Pick<PayrollRun, 'status' | 'label'>> & { approvedAt?: string | null; paidAt?: string | null }): Promise<void>;
+  /** One transaction: append ledger rows, roll up clawbacks, stamp repPaid on fully paid deals. */
+  commitPayout(commit: PayoutCommit): Promise<void>;
+}
+
+export interface PayoutCommit {
+  lines: PayoutLine[];
+  clawbackUpdates: Array<Pick<Clawback, 'id' | 'recovered' | 'status'>>;
+  dealsFullyPaid: string[];
+  paidAt: string;
 }

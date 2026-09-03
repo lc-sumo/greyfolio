@@ -7,6 +7,7 @@ import {
   commissionDeals,
   commissionPayoutLines,
   commissionPayrollRuns,
+  commissionPayrollRuns as runsTable,
   commissionReps,
   commissionSettings,
   commissionTeams,
@@ -17,7 +18,7 @@ import {
   toTeam,
   type Database,
 } from '@greystone/db';
-import type { AuditEntry, DealPatch, Repo, Settings } from './repo.js';
+import type { AuditEntry, DealPatch, PayoutCommit, Repo, Settings } from './repo.js';
 
 export function dbRepo(db: Database): Repo {
   return {
@@ -84,6 +85,29 @@ export function dbRepo(db: Database): Repo {
     },
     async updateDraw(dealId: string, ref: string, patch: { collected: number | null; schedule: WeeklySchedule | null }) {
       await db.update(commissionDealDraws).set(patch).where(sql`${commissionDealDraws.dealId} = ${dealId} and ${commissionDealDraws.ref} = ${ref}`);
+    },
+    async insertRun(run: PayrollRun) {
+      await db.insert(commissionPayrollRuns).values({ id: run.id, label: run.label, start: run.start, end: run.end, status: run.status });
+    },
+    async updateRun(id, patch) {
+      await db
+        .update(runsTable)
+        .set({
+          ...(patch.status ? { status: patch.status } : {}),
+          ...(patch.label ? { label: patch.label } : {}),
+          ...(patch.approvedAt !== undefined ? { approvedAt: patch.approvedAt ? new Date(patch.approvedAt) : null } : {}),
+          ...(patch.paidAt !== undefined ? { paidAt: patch.paidAt ? new Date(patch.paidAt) : null } : {}),
+        })
+        .where(eq(runsTable.id, id));
+    },
+    async commitPayout(c: PayoutCommit) {
+      await db.transaction(async (tx) => {
+        for (const l of c.lines) {
+          await tx.insert(commissionPayoutLines).values({ key: l.key, dealId: l.dealId, segmentKey: l.segmentKey, role: l.role, repId: l.repId, amount: l.amount, runId: l.runId, clawbackId: l.clawbackId, paidAt: l.paidAt });
+        }
+        for (const u of c.clawbackUpdates) await tx.update(commissionClawbacks).set({ recovered: u.recovered, status: u.status }).where(eq(commissionClawbacks.id, u.id));
+        for (const id of c.dealsFullyPaid) await tx.update(commissionDeals).set({ repPaid: c.paidAt, updatedAt: sql`now()` }).where(sql`${commissionDeals.id} = ${id} and ${commissionDeals.repPaid} is null`);
+      });
     },
     async writeAudit(entry: AuditEntry) {
       await db.insert(commissionAuditLog).values({

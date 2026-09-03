@@ -1,0 +1,210 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useMemo, useState } from 'react';
+import { AdminDealDrawer } from '../components/AdminDealDrawer';
+import { Shell } from '../components/Shell';
+import { Card, Loading, Pill, toneFor } from '../components/ui';
+import { DEMO, api, post, type PayResult, type PayrollOverview, type PayrollRepDetail, type Settings } from '../lib/api';
+import { compact, day, fullDay, initials, money, pct } from '../lib/format';
+import { useSession } from '../lib/session';
+
+const COLS = '44px 90px 90px minmax(170px,1.2fr) minmax(170px,1.1fr) 120px 110px 90px 70px 110px minmax(0,1fr)';
+
+export function Payroll() {
+  const { notify } = useSession();
+  const qc = useQueryClient();
+  const overview = useQuery({ queryKey: ['payroll'], queryFn: () => api<PayrollOverview>('/api/admin/payroll') });
+  const settings = useQuery({ queryKey: ['settings'], queryFn: () => api<Settings>('/api/admin/settings') });
+  const [runId, setRunId] = useState<string | null>(null);
+  /** Pinned on commit — never re-derived from "whoever is owed most" after a payment. */
+  const [repId, setRepId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Record<string, true>>({});
+  const [search, setSearch] = useState('');
+  const [open, setOpen] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const runs = overview.data?.runs ?? [];
+  const reps = overview.data?.reps ?? [];
+  const activeRun = runs.find((r) => r.id === runId) ?? runs.find((r) => r.status !== 'paid') ?? runs[0] ?? null;
+  const payRepId = repId ?? reps.find((r) => r.owed > 0)?.id ?? reps[0]?.id ?? null;
+  useEffect(() => { if (!repId && payRepId) setRepId(payRepId); }, [payRepId, repId]);
+
+  const detail = useQuery({
+    queryKey: ['payroll-rep', activeRun?.id, payRepId],
+    queryFn: () => api<PayrollRepDetail>(`/api/admin/payroll/runs/${activeRun!.id}/reps/${payRepId}`),
+    enabled: !!activeRun && !!payRepId,
+  });
+  const d = detail.data;
+  const q = search.trim().toLowerCase();
+  const shown = useMemo(() => (d?.lines ?? []).filter((l) => !q || `${l.dealId} ${l.business} ${l.merchantContact} ${l.merchantEmail} ${l.merchantPhone} ${l.lender}`.toLowerCase().includes(q)), [d, q]);
+  const selLines = (d?.lines ?? []).filter((l) => selected[l.key]);
+  const selGross = selLines.reduce((s, l) => s + l.amount, 0);
+  const withheld = Math.min(d?.outstandingClawback ?? 0, selGross);
+  const uncollected = [...new Set(selLines.filter((l) => !l.collected).map((l) => l.dealId))];
+  const allShown = shown.length > 0 && shown.every((l) => selected[l.key]);
+
+  async function pay() {
+    if (!activeRun || !payRepId || !selLines.length) { notify('Select at least one deal line to pay'); return; }
+    setBusy(true);
+    try {
+      const r = await post<PayResult>(`/api/admin/payroll/runs/${activeRun.id}/pay`, { repId: payRepId, selectedKeys: selLines.map((l) => l.key) });
+      setRepId(r.repId); // pin
+      setSelected({});
+      await qc.invalidateQueries();
+      notify(`Paid ${money(r.net)} to ${d?.rep.name} across ${r.lines} deal line(s)${r.recoveries ? ` — ${money(r.withheld)} clawback recovered` : ''} — statement updated`);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Could not pay');
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function advance() {
+    if (!activeRun || activeRun.status === 'paid') return;
+    try {
+      const r = await post<{ status: string; label: string }>(`/api/admin/payroll/runs/${activeRun.id}/advance`, {});
+      await qc.invalidateQueries();
+      notify(`${r.label} — ${r.status === 'approved' ? 'approved, statements released to reps' : 'marked paid and locked'}`);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Could not update run');
+    }
+  }
+  async function newRun() {
+    try {
+      const r = await post<{ id: string; label: string }>('/api/admin/payroll/runs', {});
+      await qc.invalidateQueries();
+      setRunId(r.id);
+      notify(`${r.label} opened as a draft run`);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Could not open a run');
+    }
+  }
+  async function exportCsv() {
+    if (!activeRun) return;
+    const path = `/api/admin/payroll/runs/${activeRun.id}/export.csv${payRepId ? `?rep=${payRepId}` : ''}`;
+    if (DEMO) { notify('CSV export runs against the real API — the preview has no downloads'); return; }
+    window.open(path, '_blank');
+  }
+
+  return (
+    <Shell eyebrow="Admin" title="Run payroll">
+      {!overview.data ? <Loading error={overview.error} /> : (
+        <div className="payroll">
+          <div className="pay-left">
+            <Card title="Runs" extra={settings.data?.payroll.cycle}>
+              <div className="runs">
+                {runs.map((r) => (
+                  <button key={r.id} className={`run ${activeRun?.id === r.id ? 'on' : ''}`} onClick={() => { setRunId(r.id); setSelected({}); }}>
+                    <span className="ellipsis"><b>{r.label}</b><span className="subtle">{r.lineCount ? `${compact(r.paidGross)} · ${r.repCount} rep${r.repCount === 1 ? '' : 's'}` : 'nothing paid yet'}</span></span>
+                    <Pill tone={toneFor(r.status)}>{r.status === 'paid' ? 'Paid' : r.status === 'approved' ? 'Approved' : 'Draft'}</Pill>
+                  </button>
+                ))}
+              </div>
+              <button className="btn" style={{ marginTop: 10, width: '100%' }} onClick={() => void newRun()}>+ Open next run</button>
+            </Card>
+            <Card title="Reps" extra="sorted by amount owed">
+              <div className="runs">
+                {reps.map((r) => (
+                  <button key={r.id} className={`run ${payRepId === r.id ? 'on' : ''}`} onClick={() => { setRepId(r.id); setSelected({}); }}>
+                    <span className="avatar sm">{initials(r.name)}</span>
+                    <span className="ellipsis"><b>{r.name}{!r.active && <span className="subtle"> (inactive)</span>}</b><span className="subtle">{r.lineCount ? `${r.lineCount} deal line${r.lineCount === 1 ? '' : 's'}` : 'nothing owed'}</span></span>
+                    <span className="num" style={{ color: r.owed ? 'var(--amber)' : 'var(--ink-subtle)' }}>{r.owed ? money(r.owed) : '—'}</span>
+                  </button>
+                ))}
+              </div>
+            </Card>
+          </div>
+
+          <div className="pay-right">
+            {!activeRun ? <Card><div className="empty">No payroll runs yet — open the next run to start.</div></Card> : (
+              <>
+                <Card>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                    <div>
+                      <div className="label">{activeRun.label}</div>
+                      <h2 style={{ margin: '4px 0 0', fontSize: 21, letterSpacing: '-.035em' }}>{d?.rep.name ?? '—'}</h2>
+                      <div className="muted">pays {fullDay(activeRun.end)} · {activeRun.status}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button className="btn" onClick={() => void exportCsv()}>Export CSV</button>
+                      <button className="btn primary" disabled={activeRun.status === 'paid'} onClick={() => void advance()}>{activeRun.status === 'draft' ? 'Approve run' : activeRun.status === 'approved' ? 'Mark as paid' : 'Locked'}</button>
+                    </div>
+                  </div>
+                  <div className="grid-auto" style={{ marginTop: 16 }}>
+                    <div><div className="label">Paid in this run</div><div className="metric">{money(activeRun.paidGross)}</div><div className="sub">{activeRun.lineCount} line{activeRun.lineCount === 1 ? '' : 's'} · {activeRun.repCount} rep{activeRun.repCount === 1 ? '' : 's'}</div></div>
+                    <div><div className="label">Clawback recovered</div><div className={`metric ${activeRun.recovered ? 'neg' : ''}`}>{money(activeRun.recovered)}</div><div className="sub">netted from payouts</div></div>
+                    <div><div className="label">Cash paid</div><div className="metric pos">{money(activeRun.cash)}</div><div className="sub">gross − recovered</div></div>
+                    <div><div className="label">Still owed to reps</div><div className="metric warn">{money(overview.data.outstanding)}</div><div className="sub">across every rep</div></div>
+                  </div>
+                </Card>
+
+                <Card title="Select deals to pay" extra={d ? `${d.lines.length} outstanding line${d.lines.length === 1 ? '' : 's'} for ${d.rep.name}` : ''}>
+                  <div className="toolbar" style={{ marginBottom: 12 }}>
+                    <input className="search" placeholder="Search deal ID, business, merchant contact, email or phone" value={search} onChange={(e) => setSearch(e.target.value)} style={{ minWidth: 340 }} />
+                    <button className="btn" disabled={!shown.length} onClick={() => setSelected((s) => { const n = { ...s }; shown.forEach((l) => { if (allShown) delete n[l.key]; else n[l.key] = true; }); return n; })}>{allShown ? 'Clear selection' : 'Select all shown'}</button>
+                    <span className="count">{selLines.length} of {d?.lines.length ?? 0} selected</span>
+                  </div>
+                  {!d ? <Loading error={detail.error} /> : shown.length === 0 ? (
+                    <div className="empty">{d.lines.length === 0 ? `${d.rep.name} has nothing outstanding.` : `No deal lines match “${search}”.`}</div>
+                  ) : (
+                    <div className="scroller">
+                      <div className="table" style={{ ['--cols' as string]: COLS, minWidth: 1180 }}>
+                        <div className="tr th"><div className="td">Pay</div><div className="td">Deal</div><div className="td">Line</div><div className="td">Business</div><div className="td">Merchant contact</div><div className="td">Lender</div><div className="td r">Funded</div><div className="td">Role</div><div className="td r">Rate</div><div className="td r">Payout</div><div className="td">Lender paid comm</div></div>
+                        {shown.map((l) => (
+                          <div className="tr" key={l.key} style={{ background: selected[l.key] ? '#f6faf8' : !l.collected ? '#fdfaf5' : undefined }}>
+                            <div className="td"><input type="checkbox" checked={!!selected[l.key]} onChange={() => setSelected((s) => { const n = { ...s }; if (n[l.key]) delete n[l.key]; else n[l.key] = true; return n; })} /></div>
+                            <div className="td num" style={{ cursor: 'pointer' }} onClick={() => setOpen(l.dealId)}>{l.dealId}</div>
+                            <div className="td"><span className={l.segmentKey === 'base' ? 'muted' : 'warn'}>{l.segmentLabel}</span></div>
+                            <div className="td ellipsis">{l.business}</div>
+                            <div className="td ellipsis"><div className="ellipsis">{l.merchantContact || '—'}</div><div className="subtle ellipsis" style={{ fontSize: 11 }}>{[l.merchantEmail, l.merchantPhone].filter(Boolean).join(' · ')}</div></div>
+                            <div className="td ellipsis">{l.lender}</div>
+                            <div className="td r num">{compact(l.funded)}</div>
+                            <div className="td"><Pill tone={l.role === 'Override' ? 'amber' : 'teal'}>{l.role}</Pill></div>
+                            <div className="td r num">{pct(l.rate)}</div>
+                            <div className="td r num">{money(l.amount)}</div>
+                            <div className="td"><Pill tone={l.collected ? 'teal' : l.lenderPaidLabel === 'Not collected' ? 'grey' : 'amber'}>{l.lenderPaidLabel}</Pill></div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="payfoot">
+                    <div><span className="label">Selected</span><b>{selLines.length} of {d?.lines.length ?? 0}</b></div>
+                    <div><span className="label">Gross</span><b>{money(selGross)}</b></div>
+                    <div><span className="label">Clawbacks netted</span><b style={{ color: withheld ? 'var(--red-bright)' : undefined }}>{withheld ? money(-withheld) : '$0'}</b></div>
+                    <div><span className="label">Net to pay</span><b style={{ color: 'var(--teal-bright)' }}>{money(selGross - withheld)}</b></div>
+                    <button className="btn primary big" disabled={busy || !selLines.length || activeRun.status === 'paid'} onClick={() => void pay()}>{busy ? 'Recording…' : 'Pay selected & record'}</button>
+                  </div>
+                  {uncollected.length > 0 && <div className="note" style={{ marginTop: 10, background: 'var(--amber-light)', borderColor: 'var(--amber-light-3)', color: 'var(--amber-deep)' }}>{uncollected.length} selected deal line(s) sit on commission the lender has not paid yet ({uncollected.slice(0, 4).join(', ')}{uncollected.length > 4 ? '…' : ''}). Paying now advances the rep against uncollected commission.</div>}
+                  {d && d.outstandingClawback > 0 && <div className="note" style={{ marginTop: 10, background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>Outstanding clawback balance for {d.rep.name}: <b>{money(d.outstandingClawback)}</b> across {d.clawbacks.length} deal(s){withheld ? <> — <b>{money(withheld)}</b> recovers on this payout, leaving {money(d.outstandingClawback - withheld)}.</> : '. It nets against the next payout that has gross to withhold from.'}</div>}
+                </Card>
+
+                <Card title="Paid in this run" extra={d && d.paidInRun.length ? `${d.paidSummary.lineCount} deal line(s) · cash ${money(d.paidSummary.cash)}` : ''}>
+                  {!d || d.paidInRun.length === 0 ? <div className="muted">Nothing recorded for {d?.rep.name ?? 'this rep'} in {activeRun.label} yet.</div> : (
+                    <>
+                      <div className="scroller">
+                        <div className="table" style={{ ['--cols' as string]: '90px minmax(170px,1.2fr) minmax(150px,1fr) 170px 120px minmax(0,1fr)', minWidth: 800 }}>
+                          <div className="tr th"><div className="td">Deal</div><div className="td">Business</div><div className="td">Merchant</div><div className="td">Role</div><div className="td r">Amount</div><div className="td">Date</div></div>
+                          {d.paidInRun.map((p) => (
+                            <div className="tr" key={p.key}>
+                              <div className="td num" style={{ cursor: 'pointer' }} onClick={() => setOpen(p.dealId)}>{p.dealId}</div>
+                              <div className="td ellipsis">{p.business}</div>
+                              <div className="td ellipsis">{p.merchantContact}</div>
+                              <div className={`td ${p.amount < 0 ? 'neg' : ''}`}>{p.role}{p.segmentKey && p.segmentKey !== 'base' ? ` · ${p.segmentKey}` : ''}</div>
+                              <div className={`td r num ${p.amount < 0 ? 'neg' : 'pos'}`}>{money(p.amount)}</div>
+                              <div className="td num">{day(p.paidAt)}</div>
+                            </div>
+                          ))}
+                          <div className="tr total"><div className="td" style={{ gridColumn: '1 / 5' }}>Gross {money(d.paidSummary.gross)}{d.paidSummary.recovered ? ` − clawback recovered ${money(d.paidSummary.recovered)}` : ''} = cash paid {money(d.paidSummary.cash)}</div><div className="td r num">{money(d.paidSummary.cash)}</div><div className="td" /></div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </Card>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+      {open && settings.data && <AdminDealDrawer id={open} settings={settings.data} editOptions={[]} onClose={() => setOpen(null)} />}
+    </Shell>
+  );
+}

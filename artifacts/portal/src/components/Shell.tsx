@@ -46,7 +46,7 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
               <div className="nav-group label" style={{ color: 'var(--navy-text-3)' }}>Admin</div>
               <NavLink to="/"><i className="dot" />Rep roster</NavLink>
               {user.role === 'admin' && <NavLink to="/deals"><i className="dot" />Master deals</NavLink>}
-              <NavLink to="/soon/payroll"><i className="dot" />Run payroll</NavLink>
+              {user.role === 'admin' && <NavLink to="/payroll"><i className="dot" />Run payroll</NavLink>}
               <NavLink to="/soon/renewals"><i className="dot" />Renewals</NavLink>
               <NavLink to="/soon/settings"><i className="dot" />Settings</NavLink>
             </>

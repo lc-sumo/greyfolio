@@ -94,3 +94,18 @@ export interface NewDealDraft {
   openerId?: string | null; openerRate?: number | null; closerId?: string | null; closerRate?: number | null; overrideId?: string | null; overrideRate?: number | null; leadSource?: string | null; notes?: string | null;
 }
 export const post = <T,>(path: string, body: unknown, method = 'POST') => api<T>(path, { method, body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
+
+/* ---- Payroll (Phase 5). Admin only. ---- */
+export interface RunSummary { id: string; label: string; start: string; end: string; status: 'draft' | 'approved' | 'paid'; paidGross: number; recovered: number; cash: number; repCount: number; lineCount: number }
+export interface PayrollRepRow { id: string; name: string; active: boolean; owed: number; held: number; lineCount: number }
+export interface PayrollOverview { runs: RunSummary[]; reps: PayrollRepRow[]; outstanding: number }
+export interface PayableLineView { key: string; dealId: string; segmentKey: string; segmentLabel: string; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string; lender: string; funded: number; role: string; rate: number; amount: number; lenderPaidLabel: string; collected: boolean }
+export interface PayrollRepDetail {
+  rep: { id: string; name: string; active: boolean };
+  lines: PayableLineView[];
+  clawbacks: Array<{ id: string; dealId: string; business: string; date: string; remaining: number }>;
+  outstandingClawback: number;
+  paidInRun: Array<{ key: string; dealId: string; business: string; merchantContact: string; role: string; segmentKey: string | null; amount: number; paidAt: string }>;
+  paidSummary: { gross: number; recovered: number; cash: number; lineCount: number };
+}
+export interface PayResult { repId: string; runId: string; gross: number; withheld: number; net: number; lines: number; recoveries: number; dealsFullyPaid: string[]; uncollectedDealIds: string[] }

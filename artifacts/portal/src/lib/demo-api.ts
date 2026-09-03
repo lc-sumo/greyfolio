@@ -12,6 +12,8 @@ import { adminDealDetail, adminDealRow } from '../../../api-server/src/admin-vie
 import { memoryRepo } from '../../../api-server/src/repo.memory';
 import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repStatements, repWallet } from '../../../api-server/src/scope';
 import { addDraw, createDeal, setCollection, setDealStatus, updateSplits } from '../../../api-server/src/services/deals';
+import { advanceRun, createRun, paySelected } from '../../../api-server/src/services/payroll';
+import { payrollRepDetail, payrollReps, preview, runSummary } from '../../../api-server/src/payroll-views';
 import { ApiError, type SessionUser } from './api';
 
 let repo: ReturnType<typeof memoryRepo> | null = null;
@@ -184,6 +186,24 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     return adminDealDetail(deal, c, d.reps, settings, today);
   };
   try {
+    if (p === '/api/admin/payroll') {
+      const rows = payrollReps(ctx, d.reps);
+      return json({ runs: [...d.runs].sort((a, b) => b.start.localeCompare(a.start)).map((run) => runSummary(run, ctx)), reps: rows, outstanding: rows.reduce((s2, x) => s2 + x.owed, 0) });
+    }
+    if (p === '/api/admin/payroll/runs' && method === 'POST') return json(await createRun(repo, me.repId, body.start && body.end ? { start: String(body.start), end: String(body.end) } : undefined));
+    if (p === '/api/admin/payroll/preview' && method === 'POST') return json(preview(ctx, String(body.repId ?? ''), Array.isArray(body.selectedKeys) ? (body.selectedKeys as string[]) : []));
+    const pr = p.match(/^\/api\/admin\/payroll\/runs\/([^/]+)\/(advance|pay|reps\/([^/]+))$/);
+    if (pr) {
+      const runId = decodeURIComponent(pr[1]!);
+      if (pr[2] === 'advance') return json(await advanceRun(repo, runId, me.repId));
+      if (pr[2] === 'pay') {
+        const plan = await paySelected(repo, { runId, repId: String(body.repId ?? ''), selectedKeys: Array.isArray(body.selectedKeys) ? (body.selectedKeys as string[]) : [] }, me.repId);
+        return json({ repId: plan.repId, runId: plan.runId, gross: plan.gross, withheld: plan.withheld, net: plan.net, lines: plan.lines.length, recoveries: plan.recoveries.length, dealsFullyPaid: plan.dealsFullyPaid, uncollectedDealIds: plan.uncollectedDealIds });
+      }
+      const rep = d.reps.find((r) => r.id === decodeURIComponent(pr[3]!));
+      if (!rep) throw new ApiError(404, 'Rep not found');
+      return json(payrollRepDetail(await repo.loadContext(), rep, runId));
+    }
     if (p === '/api/admin/deals' && method === 'GET') {
       const s = (q.get('search') ?? '').trim().toLowerCase();
       const rep = q.get('rep') ?? '';

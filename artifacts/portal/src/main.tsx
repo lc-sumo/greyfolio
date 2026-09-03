@@ -13,6 +13,7 @@ import { Merchants } from './pages/Merchants';
 import { Overview } from './pages/Overview';
 import { Payroll } from './pages/Payroll';
 import { Roster } from './pages/Roster';
+import { Settings } from './pages/Settings';
 import { Soon } from './pages/Soon';
 import { PayHistory } from './pages/PayHistory';
 import { Renewals } from './pages/Renewals';
@@ -45,6 +46,7 @@ function App() {
       <Route path="/payments" element={repMode ? <PayHistory /> : <Navigate to="/" replace />} />
       <Route path="/statements" element={<Navigate to="/payments" replace />} />
       <Route path="/renewals" element={repMode ? <Renewals admin={false} /> : auth.user.role === 'admin' ? <Renewals admin /> : <Navigate to="/" replace />} />
+      <Route path="/settings" element={!repMode && auth.user.role === 'admin' ? <Settings /> : <Navigate to="/" replace />} />
       <Route path="/soon/:what" element={<Soon />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

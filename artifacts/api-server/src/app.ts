@@ -8,6 +8,7 @@ import type { Repo } from './repo.js';
 import { adminRouter } from './routes/admin.js';
 import { adminDealsRouter } from './routes/admin-deals.js';
 import { adminPayrollRouter } from './routes/admin-payroll.js';
+import { adminSettingsRouter } from './routes/admin-settings.js';
 import { healthRouter } from './routes/health.js';
 import { meRouter } from './routes/me.js';
 
@@ -33,6 +34,7 @@ export function createApp(config: AppConfig, repo: Repo): express.Express {
   app.use('/api/admin', adminRouter(repo));
   app.use('/api/admin', adminDealsRouter(repo));
   app.use('/api/admin', adminPayrollRouter(repo));
+  app.use('/api/admin', adminSettingsRouter(repo));
 
   if (config.portalDist) {
     const dist = path.resolve(config.portalDist);

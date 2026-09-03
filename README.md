@@ -13,7 +13,7 @@ lib/db/           @greystone/db — Postgres schema (Drizzle), migrations, row�
                   and the workbook seed (REPS / SETTINGS / PARTNERS / FUNDED DEALS column map).
 artifacts/api-server/   @greystone/api-server — Express API: OIDC sign-in, roles, server-side rep
                         scoping, audit-logged admin View-as.
-artifacts/portal/       @greystone/portal — React/Vite portal (rep and admin screens through Phase 6; Settings arrives in Phase 7).
+artifacts/portal/       @greystone/portal — React/Vite portal (every screen through Phase 7; Sheets and QuickBooks arrive in Phases 8–9).
 docs/             Phase notes and review checklists.
 ```
 
@@ -26,8 +26,8 @@ docs/             Phase notes and review checklists.
 | 3 | Rep portal | Done ([notes](docs/PHASE-3-REVIEW.md)) |
 | 4 | Admin master board and deal entry | Done ([notes](docs/PHASE-4-REVIEW.md)) |
 | 5 | Payroll | Done ([notes](docs/PHASE-5-REVIEW.md)) |
-| 6 | Renewals, merchants, analytics | **Done — awaiting review** ([notes](docs/PHASE-6-REVIEW.md)) |
-| 7 | Settings | Not started |
+| 6 | Renewals, merchants, analytics | Done ([notes](docs/PHASE-6-REVIEW.md)) |
+| 7 | Settings | **Done — awaiting review** ([notes](docs/PHASE-7-REVIEW.md)) |
 | 8 | Google Sheets | Not started |
 | 9 | QuickBooks | Not started |
 

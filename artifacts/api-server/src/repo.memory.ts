@@ -74,6 +74,29 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
       if (i < 0) throw new Error(`No run ${id}`);
       data.runs[i] = { ...data.runs[i]!, ...(patch.status ? { status: patch.status } : {}), ...(patch.label ? { label: patch.label } : {}) };
     },
+    async putSetting(key, value) {
+      (data.settings as unknown as Record<string, unknown>)[key] = value;
+    },
+    async insertTeam(team) {
+      data.teams.push({ ...team });
+    },
+    async updateTeam(id, patch) {
+      const i = data.teams.findIndex((t) => t.id === id);
+      if (i < 0) throw new Error(`No team ${id}`);
+      data.teams[i] = { ...data.teams[i]!, ...patch };
+    },
+    async deleteTeam(id) {
+      const i = data.teams.findIndex((t) => t.id === id);
+      if (i >= 0) data.teams.splice(i, 1);
+    },
+    async insertRep(rep) {
+      data.reps.push({ ...rep });
+    },
+    async updateRep(id, patch) {
+      const i = data.reps.findIndex((r) => r.id === id);
+      if (i < 0) throw new Error(`No rep ${id}`);
+      data.reps[i] = { ...data.reps[i]!, ...patch };
+    },
     async commitPayout(c: PayoutCommit) {
       for (const l of c.lines) if (data.lines.some((x) => x.key === l.key)) throw new Error(`Ledger key ${l.key} already exists`);
       data.lines.push(...c.lines);

@@ -2,7 +2,7 @@ import type { Clawback, Deal, DealDraw, Lender, LedgerContext, PayoutLine, Payro
 
 export interface AuditEntry {
   actorRepId: string;
-  action: 'login' | 'logout' | 'view-as' | 'deal.create' | 'deal.update' | 'deal.draw' | 'deal.collection' | 'payroll.run' | 'payroll.pay';
+  action: 'login' | 'logout' | 'view-as' | 'deal.create' | 'deal.update' | 'deal.draw' | 'deal.collection' | 'payroll.run' | 'payroll.pay' | 'settings.update' | 'team.update' | 'rep.update';
   targetRepId: string | null;
   path: string | null;
   detail?: Record<string, unknown>;
@@ -55,6 +55,13 @@ export interface Repo {
   updateRun(id: string, patch: Partial<Pick<PayrollRun, 'status' | 'label'>> & { approvedAt?: string | null; paidAt?: string | null }): Promise<void>;
   /** One transaction: append ledger rows, roll up clawbacks, stamp repPaid on fully paid deals. */
   commitPayout(commit: PayoutCommit): Promise<void>;
+  // Settings, teams, reps (admin only — enforced by the routes)
+  putSetting(key: string, value: unknown): Promise<void>;
+  insertTeam(team: Team): Promise<void>;
+  updateTeam(id: string, patch: Partial<Omit<Team, 'id'>>): Promise<void>;
+  deleteTeam(id: string): Promise<void>;
+  insertRep(rep: Rep): Promise<void>;
+  updateRep(id: string, patch: Partial<Omit<Rep, 'id'>>): Promise<void>;
 }
 
 export interface PayoutCommit {

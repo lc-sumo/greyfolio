@@ -229,3 +229,17 @@ input.mini-input:focus { border-color: var(--teal); }
 .paidin { position: relative; height: 8px; width: 150px; background: var(--border-light-2); border-radius: 4px; }
 .paidin i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; }
 .paidin i.mark { width: 2px; background: var(--ink); opacity: .45; border-radius: 1px; }
+
+/* Settings */
+.srow { display: grid; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border-light); }
+.srow:last-of-type { border-bottom: none; }
+.srow.head { padding: 6px 0; border-bottom: 1px solid var(--border-light-2); }
+.srow.head span { font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-subtle); }
+.srow input, .srow select { height: 32px; border: 1px solid var(--border); border-radius: 7px; padding: 0 8px; background: #fff; font-size: 12.5px; width: 100%; min-width: 0; outline: none; }
+.srow input:focus, .srow select:focus { border-color: var(--teal); }
+.srow input[inputmode] { font-family: var(--mono); text-align: right; }
+.srow input:disabled { background: var(--sunken); color: var(--ink-subtle); }
+.tog { width: 34px; height: 20px; border-radius: 10px; border: none; background: var(--border-strong); position: relative; cursor: pointer; padding: 0; }
+.tog i { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .15s ease; }
+.tog.on { background: var(--teal); } .tog.on i { left: 16px; }
+.tog:disabled { opacity: .5; cursor: default; }

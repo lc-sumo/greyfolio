@@ -51,7 +51,7 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
               {user.role === 'admin' && <NavLink to="/payroll"><i className="dot" />Run payroll</NavLink>}
               {user.role === 'admin' && <NavLink to="/renewals"><i className="dot" />Renewals</NavLink>}
               {user.role === 'admin' && <NavLink to="/roster"><i className="dot" />Rep roster</NavLink>}
-              <NavLink to="/soon/settings"><i className="dot" />Settings</NavLink>
+              {user.role === 'admin' && <NavLink to="/settings"><i className="dot" />Settings</NavLink>}
             </>
           )}
         </nav>

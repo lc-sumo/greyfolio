@@ -26,7 +26,7 @@ export interface RepDashboard {
 export interface RepClawbackView { id: string; dealId: string; date: string; business: string; dealClawback: number; chargedToMe: number; recovered: number; remaining: number; reason: string; status: 'open' | 'recovered' }
 export interface RepStatement { runId: string; period: string; status: 'draft' | 'approved' | 'paid'; dealCount: number; grossPaid: number; clawbacks: number; netPaid: number }
 export interface MeInfo { rep: { id: string; name: string; email: string; role: string; active: boolean }; viewAs: boolean; actor: { id: string; name: string; role: string } | null }
-export interface RosterRep { id: string; name: string; email: string; role: string; team: string | null; openerRate: number; closerRate: number; overrideRate: number | null; active: boolean; earned: number; paid: number; held: number; owed: number; dealCount: number }
+export interface RosterRep { id: string; name: string; email: string; role: string; teamId: string | null; team: string | null; openerRate: number; closerRate: number; overrideRate: number | null; active: boolean; earned: number; paid: number; held: number; owed: number; dealCount: number }
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -133,3 +133,8 @@ export interface Overview {
   renewals: Array<{ id: string; crmId: string | null; business: string; lender: string; funded: number; markDate: string | null; whoCalls: string; estRenewalGross: number }>;
   clawbacks: Array<{ id: string; dealId: string; business: string; amount: number; repTotal: number; recovered: number; remaining: number; date: string }>;
 }
+
+/* ---- Settings (Phase 7). Admin only. ---- */
+export interface Usage { lenders: Record<string, number>; partners: Record<string, number>; products: Record<string, number>; teams: Record<string, number> }
+export interface Team { id: string; name: string; leaderRepId: string | null; overrideRate: number }
+export interface RepRecord { id: string; name: string; email: string; role: 'rep' | 'manager' | 'admin'; teamId: string | null; openerRate: number; closerRate: number; overrideRate: number | null; active: boolean }

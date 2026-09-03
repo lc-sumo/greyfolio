@@ -14,6 +14,7 @@ import { memoryRepo } from '../../../api-server/src/repo.memory';
 import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repPayHistory, repRenewals, repStatements, repWallet } from '../../../api-server/src/scope';
 import { addDraw, createDeal, setCollection, setCrmId, setDealStatus, updateSplits } from '../../../api-server/src/services/deals';
 import { advanceRun, createRun, paySelected } from '../../../api-server/src/services/payroll';
+import { createRep, createTeam, deleteTeam, saveCrm, saveLenders, savePartners, savePayroll, saveProducts, saveThresholds, updateRep, updateTeam, usage } from '../../../api-server/src/services/settings';
 import { payrollRepDetail, payrollReps, preview, runSummary } from '../../../api-server/src/payroll-views';
 import { ApiError, type SessionUser } from './api';
 
@@ -181,6 +182,28 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
   }
   if (p === '/api/admin/audit') return json({ entries: await repo.listAudit(100) });
   if (p === '/api/admin/settings') return json(settings);
+  if (p === '/api/admin/settings/usage') return json(await usage(repo));
+  try {
+    const sm = p.match(/^\/api\/admin\/settings\/(lenders|partners|products|thresholds|crm|payroll)$/);
+    if (sm && method === 'PUT') {
+      const k = sm[1]!;
+      if (k === 'lenders') return json({ lenders: await saveLenders(repo, body.lenders, me.repId) });
+      if (k === 'partners') return json({ partners: await savePartners(repo, body.partners, me.repId) });
+      if (k === 'products') return json({ products: await saveProducts(repo, body.products, me.repId) });
+      if (k === 'thresholds') return json({ thresholds: await saveThresholds(repo, body, me.repId) });
+      if (k === 'crm') return json({ crm: await saveCrm(repo, body, me.repId) });
+      return json({ payroll: await savePayroll(repo, body, me.repId) });
+    }
+    if (p === '/api/admin/teams' && method === 'POST') return json(await createTeam(repo, body as never, me.repId));
+    const tm = p.match(/^\/api\/admin\/teams\/([^/]+)$/);
+    if (tm && method === 'PATCH') return json(await updateTeam(repo, decodeURIComponent(tm[1]!), body as never, me.repId));
+    if (tm && method === 'DELETE') { await deleteTeam(repo, decodeURIComponent(tm[1]!), me.repId); return json(null); }
+    if (p === '/api/admin/reps' && method === 'POST') return json(await createRep(repo, body as never, me.repId));
+    const rm = p.match(/^\/api\/admin\/reps\/([^/]+)$/);
+    if (rm && method === 'PATCH') return json(await updateRep(repo, decodeURIComponent(rm[1]!), body as never, me.repId));
+  } catch (e) {
+    rethrow(e);
+  }
   if (p === '/api/admin/renewals') return json({ renewals: adminRenewals(ctx, d.reps, settings, today) });
   if (p === '/api/admin/merchants') return json({ merchants: adminMerchants(ctx, settings, today) });
   if (p === '/api/admin/overview') {

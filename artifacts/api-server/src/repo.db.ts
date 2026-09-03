@@ -86,6 +86,27 @@ export function dbRepo(db: Database): Repo {
     async updateDraw(dealId: string, ref: string, patch: { collected: number | null; schedule: WeeklySchedule | null }) {
       await db.update(commissionDealDraws).set(patch).where(sql`${commissionDealDraws.dealId} = ${dealId} and ${commissionDealDraws.ref} = ${ref}`);
     },
+    async putSetting(key: string, value: unknown) {
+      await db
+        .insert(commissionSettings)
+        .values({ key, value: value as never })
+        .onConflictDoUpdate({ target: commissionSettings.key, set: { value: value as never, updatedAt: sql`now()` } });
+    },
+    async insertTeam(team: Team) {
+      await db.insert(commissionTeams).values({ id: team.id, name: team.name, leaderRepId: team.leaderRepId, overrideRate: team.overrideRate });
+    },
+    async updateTeam(id: string, patch: Partial<Omit<Team, 'id'>>) {
+      await db.update(commissionTeams).set(patch).where(eq(commissionTeams.id, id));
+    },
+    async deleteTeam(id: string) {
+      await db.delete(commissionTeams).where(eq(commissionTeams.id, id));
+    },
+    async insertRep(rep: Rep) {
+      await db.insert(commissionReps).values({ id: rep.id, name: rep.name, email: rep.email, role: rep.role, teamId: rep.teamId, openerRate: rep.openerRate, closerRate: rep.closerRate, overrideRate: rep.overrideRate, active: rep.active });
+    },
+    async updateRep(id: string, patch: Partial<Omit<Rep, 'id'>>) {
+      await db.update(commissionReps).set({ ...patch, updatedAt: sql`now()` }).where(eq(commissionReps.id, id));
+    },
     async insertRun(run: PayrollRun) {
       await db.insert(commissionPayrollRuns).values({ id: run.id, label: run.label, start: run.start, end: run.end, status: run.status });
     },

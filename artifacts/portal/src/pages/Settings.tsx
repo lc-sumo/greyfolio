@@ -272,7 +272,7 @@ function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Tea
   const toDraft = (r: RosterRep): Draft => ({ name: r.name, email: r.email, teamId: r.teamId ?? '', openerRate: pctIn(r.openerRate), closerRate: pctIn(r.closerRate), overrideRate: pctIn(r.overrideRate), role: r.role });
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [adding, setAdding] = useState<Draft | null>(null);
-  const cols = 'minmax(150px,1.1fr) minmax(190px,1.2fr) 150px 70px 70px 70px 100px 100px 120px 90px 210px 150px';
+  const cols = 'minmax(150px,1.1fr) minmax(190px,1.2fr) 150px 70px 70px 70px 100px 100px 120px 90px 230px 160px';
   const [pw, setPw] = useState<{ id: string; value: string } | null>(null);
   const label = (role: string) => (role === 'admin' ? 'Master' : role === 'manager' ? 'Team lead' : 'Rep');
   const Editor = ({ v, onChange }: { v: Draft; onChange: (v: Draft) => void }) => (
@@ -289,7 +289,7 @@ function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Tea
   return (
     <Card title="Reps" extra={`${reps.length} · ${reps.filter((r) => r.active).length} active`}>
       <div className="scroller">
-        <div style={{ minWidth: 1560 }}>
+        <div style={{ minWidth: 1700 }}>
           <Head cols={cols}><span>Name</span><span>Email</span><span>Team</span><span>Opener %</span><span>Closer %</span><span>Override %</span><span>Earned</span><span>Owed</span><span>Access</span><span>Active</span><span>Sign-in</span><span /></Head>
           {reps.map((r) => {
             const v = drafts[r.id] ?? toDraft(r);

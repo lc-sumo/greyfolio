@@ -332,3 +332,7 @@ input.mini-input:focus { border-color: var(--teal); }
 .pwform input { height: 32px; border: 1px solid var(--navy-border-2); border-radius: 7px; padding: 0 8px; background: var(--navy-raised); color: #fff; font: inherit; font-size: 13px; outline: none; }
 .cleared { display: inline-flex; align-items: center; gap: 6px; color: var(--teal); font-weight: 600; font-size: 13.5px; }
 .cleared i { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--teal); color: #fff; font-style: normal; font-size: 12px; }
+/* Payroll line picker: a big box and the whole cell as its hit area. */
+input.big { width: 24px; height: 24px; accent-color: var(--teal); cursor: pointer; margin: 0; }
+.table .td.pick { display: grid; place-items: center; cursor: pointer; align-self: stretch; padding: 0; }
+.table .td.pick:hover { background: var(--zebra-hover); }

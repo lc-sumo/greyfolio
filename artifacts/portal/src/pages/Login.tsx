@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { api, ApiError } from '../lib/api';
+import { api, ApiError, DEMO } from '../lib/api';
 import { useSession } from '../lib/session';
 
 export function Login({ oidc, devAuth }: { oidc: boolean; devAuth: boolean }) {
@@ -43,7 +43,15 @@ export function Login({ oidc, devAuth }: { oidc: boolean; devAuth: boolean }) {
           )}
           {devAuth && (
             <>
-              <div className="note">Development sign-in — enter the email of a provisioned rep. OIDC replaces this in production.</div>
+              {DEMO ? (
+                <div className="note">
+                  <b>Preview with demo data.</b> Nothing here is real. Sign in as <button type="button" className="linkish" style={{ color: 'var(--teal)', padding: 0, font: 'inherit', fontWeight: 600 }} onClick={() => setEmail('leor@greystoneus.com')}>Leor (admin)</button>,{' '}
+                  <button type="button" className="linkish" style={{ color: 'var(--teal)', padding: 0, font: 'inherit', fontWeight: 600 }} onClick={() => setEmail('julian.ribak@greystoneus.com')}>Julian Ribak (rep)</button> or{' '}
+                  <button type="button" className="linkish" style={{ color: 'var(--teal)', padding: 0, font: 'inherit', fontWeight: 600 }} onClick={() => setEmail('raymond.amato@greystoneus.com')}>Raymond Amato (team lead)</button>.
+                </div>
+              ) : (
+                <div className="note">Development sign-in — enter the email of a provisioned rep. OIDC replaces this in production.</div>
+              )}
               <input type="email" placeholder="you@greystoneus.com" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
               <button className="btn primary big" disabled={busy || !email}>{busy ? 'Signing in…' : 'Sign in'}</button>
             </>

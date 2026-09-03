@@ -36,7 +36,14 @@ let viewAs: string | null = null;
 export function setViewAs(id: string | null) { viewAs = id; }
 export function getViewAs() { return viewAs; }
 
+/** Demo build: the API runs in the browser over the demo board (see demo-api.ts). */
+export const DEMO = import.meta.env.VITE_DEMO === '1';
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  if (DEMO) {
+    const { demoFetch } = await import('./demo-api');
+    return demoFetch<T>(path, init, viewAs);
+  }
   const headers: Record<string, string> = { Accept: 'application/json', ...(init.headers as Record<string, string>) };
   if (viewAs) headers['X-View-As'] = viewAs;
   const res = await fetch(path, { credentials: 'same-origin', ...init, headers });

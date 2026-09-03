@@ -12,5 +12,8 @@ export default defineConfig({
       '/auth': { target: api, changeOrigin: false },
     },
   },
-  build: { outDir: 'dist', sourcemap: true },
+  build:
+    process.env.VITE_DEMO === '1'
+      ? { outDir: 'dist-demo', sourcemap: false, rollupOptions: { output: { inlineDynamicImports: true } } }
+      : { outDir: 'dist', sourcemap: true },
 });

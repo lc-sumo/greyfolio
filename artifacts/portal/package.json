@@ -8,13 +8,16 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:demo": "VITE_DEMO=1 vite build && node scripts/inline-demo.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.102.8",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-router-dom": "^7.18.3"
+    "react-router-dom": "^7.18.3",
+    "@greystone/commission": "workspace:*",
+    "@greystone/db": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.2.18",

@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { api, DEMO } from './lib/api';
 import { SessionProvider, useSession } from './lib/session';
 import { Clawbacks } from './pages/Clawbacks';
 import { Dashboard } from './pages/Dashboard';
@@ -11,6 +12,9 @@ import { Roster } from './pages/Roster';
 import { Soon } from './pages/Soon';
 import { Statements } from './pages/Statements';
 import './styles.css';
+
+// The hosted demo runs at an arbitrary path, so it routes by hash.
+const Router = DEMO ? HashRouter : BrowserRouter;
 
 const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 15_000, refetchOnWindowFocus: false } } });
 
@@ -47,17 +51,17 @@ declare global {
 }
 
 // Ask the API which sign-in methods exist before rendering the login screen.
-fetch('/auth/methods').then((r) => r.json()).catch(() => ({ oidc: false, devAuth: false })).then((m: { oidc: boolean; devAuth: boolean }) => {
+api<{ oidc: boolean; devAuth: boolean }>('/auth/methods').catch(() => ({ oidc: false, devAuth: false })).then((m) => {
   window.__GS_OIDC__ = m.oidc;
   window.__GS_DEV__ = m.devAuth;
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <QueryClientProvider client={qc}>
-        <BrowserRouter>
+        <Router>
           <SessionProvider>
             <App />
           </SessionProvider>
-        </BrowserRouter>
+        </Router>
       </QueryClientProvider>
     </StrictMode>,
   );

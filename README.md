@@ -33,6 +33,10 @@ docs/             Phase notes and review checklists.
 
 ## Getting started
 
+### Zero-setup preview
+
+`pnpm --filter @greystone/portal build:demo` produces `artifacts/portal/dist-demo/portal-demo.html`: the whole rep portal plus admin roster as one file, running the same domain layer and rep projections in the browser over the demo board. Open it in any browser, or host it anywhere static. Nothing in it is real data.
+
 ### Preview in GitHub Codespaces (nothing to install)
 
 On the repo page, switch the branch to `claude/new-session-kdfrhy`, then **Code → Codespaces → Create codespace on claude/new-session-kdfrhy**. The dev container installs dependencies, migrates and seeds the demo board, builds the portal, starts the API, and opens port 8080 in your browser. Sign in with `leor@greystoneus.com`. If the tab opens before the API is up, wait a few seconds and reload; `tail -f /tmp/api.log` in the Codespace terminal shows progress.

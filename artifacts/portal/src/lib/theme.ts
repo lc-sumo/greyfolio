@@ -25,7 +25,7 @@ export function applyTheme(t: Theme): void {
 
 applyTheme(readTheme());
 
-/** Colour palette, remembered per browser. 'greystone' is the default sand + navy look. */
+/** Colour palette, remembered per browser. Graphite (white, light grey, near-black sidebar) is the default. */
 export type Palette = 'greystone' | 'sand' | 'slate' | 'forest' | 'graphite' | 'midnight';
 export const PALETTES: Array<{ id: Palette; label: string; swatch: [string, string, string] }> = [
   { id: 'greystone', label: 'Greystone', swatch: ['#f3efe8', '#17362b', '#8fc3a8'] },
@@ -36,20 +36,22 @@ export const PALETTES: Array<{ id: Palette; label: string; swatch: [string, stri
   { id: 'midnight', label: 'Midnight', swatch: ['#f5f7fb', '#0b1f3a', '#0f6fb8'] },
 ];
 const PKEY = 'gs-palette';
+export const DEFAULT_PALETTE: Palette = 'graphite';
 export function readPalette(): Palette {
   try {
     const v = localStorage.getItem(PKEY);
-    return PALETTES.some((p) => p.id === v) ? (v as Palette) : 'greystone';
+    return PALETTES.some((p) => p.id === v) ? (v as Palette) : DEFAULT_PALETTE;
   } catch {
-    return 'greystone';
+    return DEFAULT_PALETTE;
   }
 }
 export function applyPalette(p: Palette): void {
   const root = document.documentElement;
+  // The stylesheet's bare tokens are the Greystone look; every other palette is a data attribute.
   if (p === 'greystone') delete root.dataset.palette;
   else root.dataset.palette = p;
   try {
-    if (p === 'greystone') localStorage.removeItem(PKEY);
+    if (p === DEFAULT_PALETTE) localStorage.removeItem(PKEY);
     else localStorage.setItem(PKEY, p);
   } catch {
     /* private mode */

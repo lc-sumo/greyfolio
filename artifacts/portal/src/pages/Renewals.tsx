@@ -17,10 +17,11 @@ const termLabel = (termDays: number | null, frequency: string) => (termDays === 
 
 export function Renewals({ admin }: { admin: boolean }) {
   const { viewAs } = useSession();
-  const q = useQuery({ queryKey: [admin ? 'admin-renewals' : 'my-renewals', viewAs], queryFn: () => api<{ renewals: Row[] }>(admin ? '/api/admin/renewals' : '/api/me/renewals') });
+  const q = useQuery({ queryKey: [admin ? 'admin-renewals' : 'my-renewals', viewAs], queryFn: () => api<{ renewals: Row[]; thresholds?: { renewalMark: number; additionalCapitalAfterDays: number } }>(admin ? '/api/admin/renewals' : '/api/me/renewals') });
   const settings = useQuery({ queryKey: ['settings'], queryFn: () => api<Settings>('/api/admin/settings'), enabled: admin });
-  const mark = settings.data?.thresholds.renewalMark ?? 0.4;
-  const capitalDays = settings.data?.thresholds.additionalCapitalAfterDays ?? 30;
+  // Reps get the configured thresholds with their rows, so the bar and the buckets agree.
+  const mark = settings.data?.thresholds.renewalMark ?? q.data?.thresholds?.renewalMark ?? 0.4;
+  const capitalDays = settings.data?.thresholds.additionalCapitalAfterDays ?? q.data?.thresholds?.additionalCapitalAfterDays ?? 30;
   const [tab, setTab] = useState<Tab>('all');
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState<string | null>(null);

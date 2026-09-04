@@ -118,7 +118,11 @@ export interface SheetRead {
 }
 
 export function readFundedDealsCsv(text: string): SheetRead {
-  const grid = parseCsv(text);
+  return readFundedDealsTable(parseCsv(text));
+}
+
+/** The same reader over an already-parsed grid (CSV or a workbook sheet). */
+export function readFundedDealsTable(grid: string[][]): SheetRead {
   const headerAt = grid.findIndex((r) => r.some((c) => norm(c) === 'business name') && r.some((c) => norm(c) === 'lender'));
   if (headerAt < 0) return { rows: [], skipped: grid.length, problems: ['Could not find the FUNDED DEALS header row (needs "Business Name" and "Lender" columns)'] };
   const idx = headerIndex(grid[headerAt]!);

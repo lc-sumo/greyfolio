@@ -95,6 +95,9 @@ export interface CommissionInput {
   /** Fraction of the basis. */
   psfRate?: number;
   originationFee?: number;
+  /** LOC line fee: `lineRate` × `lineAmount` (the credit line) is added to gross. */
+  lineAmount?: number | null;
+  lineRate?: number | null;
   /** Fraction of gross. */
   referralRate?: number;
   referralCap?: number | null;
@@ -110,6 +113,7 @@ export interface CommissionResult {
   commission: number;
   psf: number;
   originationFee: number;
+  lineFee: number;
   gross: number;
   referralFeeRaw: number;
   referralFee: number;
@@ -143,7 +147,8 @@ export function commissionFor(input: CommissionInput): CommissionResult {
   const commission = cents(basisAmount * clamp(input.commissionRate || 0, 0, 1));
   const psf = cents(basisAmount * clamp(input.psfRate || 0, 0, 1));
   const originationFee = cents(Math.max(0, input.originationFee || 0));
-  const gross = cents(commission + psf + originationFee);
+  const lineFee = cents((input.lineAmount ?? 0) * clamp(input.lineRate ?? 0, 0, 1));
+  const gross = cents(commission + psf + originationFee + lineFee);
 
   const ref = referralFeeFor({
     gross,
@@ -163,6 +168,7 @@ export function commissionFor(input: CommissionInput): CommissionResult {
     basisAmount,
     commission,
     psf,
+    lineFee,
     originationFee,
     gross,
     referralFeeRaw: ref.raw,

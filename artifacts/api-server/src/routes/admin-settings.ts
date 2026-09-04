@@ -4,6 +4,7 @@ import type { Repo } from '../repo.js';
 import { createRep, createTeam, deleteTeam, saveCrm, saveLenders, savePartners, savePayroll, saveProducts, saveThresholds, updateRep, updateTeam, usage } from '../services/settings.js';
 import { setRepPassword } from '../services/passwords.js';
 import { commitImport, previewImport } from '../services/import.js';
+import { sheetSource } from '../services/sheet-source.js';
 import { commitRemittance, previewRemittance } from '../services/remittance.js';
 
 /** Settings writes: lenders, partners, product rules, thresholds, CRM, teams, reps. Admin only. */
@@ -28,9 +29,10 @@ export function adminSettingsRouter(repo: Repo): Router {
   });
 
   /** Import the tracker's FUNDED DEALS tab (CSV text in the body). */
-  const importOpts = (req: Parameters<Router>[0]) => ({ skipExisting: !!req.body?.skipExisting });
-  r.post('/import/preview', async (req, res) => res.json(await previewImport(repo, String(req.body?.csv ?? ''), importOpts(req))));
-  r.post('/import', async (req, res) => res.status(201).json(await commitImport(repo, String(req.body?.csv ?? ''), actor(req), importOpts(req))));
+  /** Body: `{ csv }` (text) or `{ xlsx }` (base64 of the Google Sheets → Download → Microsoft Excel file). */
+  const importOpts = async (req: Parameters<Router>[0]) => ({ skipExisting: !!req.body?.skipExisting, grid: await sheetSource(req.body) });
+  r.post('/import/preview', async (req, res) => res.json(await previewImport(repo, String(req.body?.csv ?? ''), await importOpts(req))));
+  r.post('/import', async (req, res) => res.status(201).json(await commitImport(repo, String(req.body?.csv ?? ''), actor(req), await importOpts(req))));
   /** Lender remittance report (CSV): match payments to deals and mark increments / dollars received. */
   r.post('/remittance/preview', async (req, res) => res.json(await previewRemittance(repo, String(req.body?.csv ?? ''))));
   r.post('/remittance', async (req, res) => res.status(201).json(await commitRemittance(repo, String(req.body?.csv ?? ''), actor(req))));

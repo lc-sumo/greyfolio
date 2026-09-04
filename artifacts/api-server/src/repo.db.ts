@@ -98,6 +98,27 @@ export function dbRepo(db: Database): Repo {
     async updateDraw(dealId: string, ref: string, patch: { collected: number | null; schedule: WeeklySchedule | null }) {
       await db.update(commissionDealDraws).set(patch).where(sql`${commissionDealDraws.dealId} = ${dealId} and ${commissionDealDraws.ref} = ${ref}`);
     },
+    async replaceDraw(dealId: string, ref: string, draw: DealDraw) {
+      const { ref: _r, ...rest } = draw;
+      await db.update(commissionDealDraws).set(rest).where(sql`${commissionDealDraws.dealId} = ${dealId} and ${commissionDealDraws.ref} = ${ref}`);
+    },
+    async updateClawback(id: string, patch: Partial<Pick<Clawback, 'amount' | 'date' | 'reason'>>) {
+      await db.update(commissionClawbacks).set(patch).where(eq(commissionClawbacks.id, id));
+    },
+    async deleteClawback(id: string) {
+      await db.delete(commissionClawbacks).where(eq(commissionClawbacks.id, id));
+    },
+    async renameRef(kind: 'lender' | 'partner' | 'product', from: string, to: string) {
+      const col = kind === 'lender' ? commissionDeals.lender : kind === 'product' ? commissionDeals.product : commissionDeals.referralPartner;
+      const rows = await db.update(commissionDeals).set({ [kind === 'lender' ? 'lender' : kind === 'product' ? 'product' : 'referralPartner']: to, updatedAt: sql`now()` } as never).where(eq(col, from)).returning({ id: commissionDeals.id });
+      return rows.length;
+    },
+    async deleteDraw(dealId: string, ref: string) {
+      await db.delete(commissionDealDraws).where(sql`${commissionDealDraws.dealId} = ${dealId} and ${commissionDealDraws.ref} = ${ref}`);
+    },
+    async deleteRun(id: string) {
+      await db.delete(commissionPayrollRuns).where(eq(commissionPayrollRuns.id, id));
+    },
     async putSetting(key: string, value: unknown) {
       await db
         .insert(commissionSettings)
@@ -214,8 +235,8 @@ export function dbRepo(db: Database): Repo {
         detail: entry.detail ?? null,
       });
     },
-    async listAudit(limit = 100) {
-      const rows = await db.select().from(commissionAuditLog).orderBy(desc(commissionAuditLog.at)).limit(limit);
+    async listAudit(limit = 100, offset = 0) {
+      const rows = await db.select().from(commissionAuditLog).orderBy(desc(commissionAuditLog.at)).limit(limit).offset(offset);
       return rows.map((r) => ({
         actorRepId: r.actorRepId,
         action: r.action as AuditEntry['action'],

@@ -39,6 +39,19 @@
 | Two-factor sign-in (TOTP) | `auth/totp.ts`, `/api/me/totp/*`, `/auth/totp`, admin reset | Done |
 | Record a clawback from the deal drawer | `POST /api/admin/deals/:id/clawbacks` | Done |
 | Deal notes history and file attachments | `commission_deal_notes`, `commission_deal_files`, drawer sections | Done |
+| Close out an empty draft run; reopen an approved run; open a run for custom dates | `DELETE/POST reopen /api/admin/payroll/runs/:id`, Payroll page | Done |
+| Upload the Google Sheet itself (.xlsx) with notices + one-click adds for missing lenders/partners/reps | `lib/db/src/seed/xlsx.ts`, `sheet-source.ts`, Import tab | Done |
+| Add / edit / remove LOC draws; un-record upfront and final receipts | `PATCH/DELETE /deals/:id/draws/:ref`, drawer | Done |
+| Revenued LOC structure: % of the credit line at open + draw % | `Lender.locLineRate`, `Deal.lineRate/lineFee`, migration 0006 | Done |
+| Edit / forgive clawbacks; total clawbacks capped at gross | `PATCH/DELETE /deals/:id/clawbacks/:cid` | Done |
+| Fix merchant contact on paid deals, merchant-wide | `PATCH /deals/:id/contact` | Done |
+| Rename lenders/partners/products in use (cascades); retire with Active switch | `settings.renamedFrom`, `active` | Done |
+| Audit: splits could be wiped from four drawers (empty rep list) | `AdminDealDrawer` loads options itself | Done |
+| Audit: leaderboard leaked other reps' dollars | `scope.leaderboard` ranks only | Done |
+| Audit: renewal estimate ~21× on consolidations; voided payouts counted in date windows; two clawbacks on a deal; next payout past date; sessions never re-checked active/role | `scope.ts`, `ledger.paidFigures`, `refreshSession` | Done |
+| Audit: "Partially Paid" guessed half the gross | UI asks for the dollars | Done |
+| Rep can ask about a deal (note + email to admins); reps see configured renewal thresholds; cents on pay history | `POST /api/me/deals/:id/question` | Done |
+| Audit log paging + CSV export | `/api/admin/audit?offset=`, `/audit.csv` | Done |
 | CRM integration that fires triggers (e.g. renewal-ready → CRM task) | After Phase 9 — needs the real CRM (open question #6: URL pattern, API) before anything beyond the deep link | Later |
 
 Payment math for a draw: `payback = amount × factor`; payments in the term at the deal's frequency are Daily = term, Weekly = term/5, Bi-Weekly = term/10, Monthly = term/21 (business days); `payment = payback / payments`.

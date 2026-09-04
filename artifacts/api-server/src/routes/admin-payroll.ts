@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { HttpError, currentUser, requireRole } from '../auth/middleware.js';
 import { annualCsv, annualReport, payableFor, payrollRepDetail, payrollReps, preview, runCsv, runSummary } from '../payroll-views.js';
 import type { Repo } from '../repo.js';
-import { advanceRun, createRun, paySelected, voidPayout } from '../services/payroll.js';
+import { advanceRun, createRun, deleteRun, paySelected, reopenRun, voidPayout } from '../services/payroll.js';
 import { notifyRunApproved, type NotifyDeps } from '../services/notify.js';
 
 /** Payroll: runs, per-rep payable lines, netting preview, pay + record, CSV. Admin only. */
@@ -26,6 +26,13 @@ export function adminPayrollRouter(repo: Repo, notify?: Omit<NotifyDeps, 'repo'>
     // Approval releases statements: each rep with lines in the run gets theirs by email when mail is on.
     const mailed = run.status === 'approved' && notify ? await notifyRunApproved({ repo, ...notify }, run.id, actor) : null;
     res.json({ ...run, notified: mailed ? mailed.sent : 0, statements: mailed ? mailed.reps : 0 });
+  });
+
+  r.post('/payroll/runs/:id/reopen', async (req, res) => {
+    res.json(await reopenRun(repo, String(req.params.id), currentUser(req)!.repId));
+  });
+  r.delete('/payroll/runs/:id', async (req, res) => {
+    res.json(await deleteRun(repo, String(req.params.id), currentUser(req)!.repId));
   });
 
   r.get('/payroll/runs/:id/reps/:repId', async (req, res) => {

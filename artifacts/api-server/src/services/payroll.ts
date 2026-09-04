@@ -15,7 +15,7 @@ const iso = (y: number, m: number, d: number) => `${y}-${String(m).padStart(2, '
 
 /** The twice-monthly period that follows `after` (or contains `on` when there are no runs). */
 export function nextPeriod(runs: PayrollRun[], on = today()): { start: string; end: string } {
-  const latest = [...runs].sort((a, b) => b.end.localeCompare(a.end))[0];
+  const latest = [...runs].filter((r) => !r.id.startsWith('import-')).sort((a, b) => b.end.localeCompare(a.end))[0];
   if (!latest) {
     const [y, m, d] = on.split('-').map(Number) as [number, number, number];
     return d <= 15 ? { start: iso(y, m, 1), end: iso(y, m, 15) } : { start: iso(y, m, 16), end: iso(y, m, lastDay(y, m)) };
@@ -31,7 +31,8 @@ export async function createRun(repo: Repo, actorRepId: string, period?: { start
   const runs = await repo.listRuns();
   const p = period ?? nextPeriod(runs);
   if (p.start > p.end) throw new HttpError(400, 'Run start must not be after its end');
-  if (runs.some((r) => r.start <= p.end && r.end >= p.start)) throw new HttpError(400, `A run already covers ${label(p.start, p.end)}`);
+  // Sheet-import runs span the whole imported history; they never block a real pay period.
+  if (runs.some((r) => !r.id.startsWith('import-') && r.start <= p.end && r.end >= p.start)) throw new HttpError(400, `A run already covers ${label(p.start, p.end)}`);
   const run: PayrollRun = { id: `run-${p.start}`, label: label(p.start, p.end), start: p.start, end: p.end, status: 'draft' };
   await repo.insertRun(run);
   await repo.writeAudit({ actorRepId, action: 'payroll.run', targetRepId: null, path: `/api/admin/payroll/runs/${run.id}`, detail: { created: run.label } });
@@ -47,6 +48,28 @@ export async function advanceRun(repo: Repo, id: string, actorRepId: string): Pr
   await repo.updateRun(id, { status: next, ...(next === 'approved' ? { approvedAt: new Date().toISOString() } : { paidAt: new Date().toISOString() }) });
   await repo.writeAudit({ actorRepId, action: 'payroll.run', targetRepId: null, path: `/api/admin/payroll/runs/${id}`, detail: { status: next } });
   return { ...run, status: next };
+}
+
+/** Approved too soon? Back to draft. Statements already emailed stay sent; the audit trail shows both moves. */
+export async function reopenRun(repo: Repo, id: string, actorRepId: string): Promise<PayrollRun> {
+  const run = (await repo.listRuns()).find((r) => r.id === id);
+  if (!run) throw new HttpError(404, `Run ${id} not found`);
+  if (run.status !== 'approved') throw new HttpError(400, run.status === 'paid' ? `${run.label} is paid and locked` : `${run.label} is already a draft`);
+  await repo.updateRun(id, { status: 'draft', approvedAt: null });
+  await repo.writeAudit({ actorRepId, action: 'payroll.run.reopen', targetRepId: null, path: `/api/admin/payroll/runs/${id}/reopen`, detail: { label: run.label } });
+  return { ...run, status: 'draft' };
+}
+
+/** Close out a run that was opened by mistake. Only a draft with nothing paid in it can go; paid history is never deleted. */
+export async function deleteRun(repo: Repo, id: string, actorRepId: string): Promise<{ deleted: string }> {
+  const run = (await repo.listRuns()).find((r) => r.id === id);
+  if (!run) throw new HttpError(404, `Run ${id} not found`);
+  if (run.status !== 'draft') throw new HttpError(400, `${run.label} is ${run.status} — only draft runs can be removed`);
+  const ctx = await repo.loadContext();
+  if (ctx.lines.some((l) => l.runId === id)) throw new HttpError(400, `${run.label} has payouts recorded in it — void them first or mark the run paid`);
+  await repo.deleteRun(id);
+  await repo.writeAudit({ actorRepId, action: 'payroll.run.delete', targetRepId: null, path: `/api/admin/payroll/runs/${id}`, detail: { label: run.label } });
+  return { deleted: id };
 }
 
 export interface PayRequest {

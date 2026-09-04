@@ -4,13 +4,14 @@ import { HttpError, requireAuth, resolveScope, scopeOf } from '../auth/middlewar
 import type { Repo } from '../repo.js';
 import { changeOwnPassword } from '../services/passwords.js';
 import { beginTotp, disableTotp, enableTotp, totpStatus } from '../services/twofactor.js';
+import { repQuestion, type NotifyDeps } from '../services/notify.js';
 import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repPayHistory, repRenewals, repStatements, repWallet } from '../scope.js';
 
 /**
  * The rep portal. Every handler reads `scopeOf(req).effectiveRepId` — the
  * signed-in rep, or the View-as target — and returns rep-safe projections only.
  */
-export function meRouter(repo: Repo, appName = 'Greystone Commission Portal'): Router {
+export function meRouter(repo: Repo, appName = 'Greystone Commission Portal', notify?: Omit<NotifyDeps, 'repo'>): Router {
   const r = Router();
   r.use(requireAuth, resolveScope(repo));
 
@@ -89,6 +90,19 @@ export function meRouter(repo: Repo, appName = 'Greystone Commission Portal'): R
     res.json({ ...view, payments });
   });
 
+  /** Ask the admins about one of my deals — a note on the deal plus an email. Only for deals the rep earned on. */
+  r.post('/deals/:id/question', async (req, res) => {
+    const s = scopeOf(req);
+    if (s.viewAs) throw new HttpError(403, 'Questions come from the rep, not from View as');
+    const text = String(req.body?.text ?? '').trim();
+    if (!text) throw new HttpError(400, 'Write your question first');
+    if (text.length > 2000) throw new HttpError(400, 'Keep it under 2,000 characters');
+    const ctx = await repo.loadContext();
+    if (!repDeals(ctx.deals, s.actor.repId).some((d) => d.id === req.params.id)) throw new HttpError(404, 'Deal not found');
+    const r2 = await repQuestion({ repo, mailer: notify?.mailer ?? { kind: 'off', live: false, send: async () => ({ ok: false }) }, origin: notify?.origin ?? '', appName: notify?.appName ?? appName }, s.actor.repId, String(req.params.id), text);
+    res.status(201).json({ ok: true, emailed: r2.sent });
+  });
+
   r.get('/clawbacks', async (req, res) => {
     const ctx = await repo.loadContext();
     res.json({ clawbacks: repClawbackViews(ctx, scopeOf(req).effectiveRepId) });
@@ -108,7 +122,8 @@ export function meRouter(repo: Repo, appName = 'Greystone Commission Portal'): R
   /** The rep's own renewals, so they know when to follow up. Merchant contact included; other reps' names are not. */
   r.get('/renewals', async (req, res) => {
     const [ctx, thresholds] = await Promise.all([repo.loadContext(), repo.getSetting<{ renewalMark: number; additionalCapitalAfterDays: number }>('thresholds')]);
-    res.json({ renewals: repRenewals(ctx, scopeOf(req).effectiveRepId, { renewalMark: thresholds?.renewalMark ?? 0.4, additionalCapitalAfterDays: thresholds?.additionalCapitalAfterDays ?? 30 }, new Date().toISOString().slice(0, 10)) });
+    const t = { renewalMark: thresholds?.renewalMark ?? 0.4, additionalCapitalAfterDays: thresholds?.additionalCapitalAfterDays ?? 30 };
+    res.json({ renewals: repRenewals(ctx, scopeOf(req).effectiveRepId, t, new Date().toISOString().slice(0, 10)), thresholds: t });
   });
 
   r.get('/leaderboard', async (req, res) => {

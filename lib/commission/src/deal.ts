@@ -27,6 +27,8 @@ export interface NewDealDraft {
   creditLine?: number | null;
   drawInitialPct?: number | null;
   drawSubsequentPct?: number | null;
+  /** LOC line fee % (fraction or percent). Defaults to the lender's `locLineRate`; 0 for lenders without one. */
+  lineRate?: number | null;
   openerId?: string | null;
   openerRate?: number | null;
   closerId?: string | null;
@@ -84,6 +86,9 @@ export function priceDeal(draft: NewDealDraft, ctx: PricingContext): Deal {
   const commRate = asRate(draft.commRate ?? (rule.multiDraw ? rule.drawInitial : rule.comm));
   const psfPct = asRate(draft.psfPct);
   const originationFee = cents(draft.originationFee ?? 0);
+  // LOC line fee (Revenued): a % of the credit line on top of the draw commission, at open only.
+  const creditLine = rule.multiDraw ? draft.creditLine ?? null : null;
+  const lineRate = rule.multiDraw ? asRate(draft.lineRate ?? ctx.lender?.locLineRate ?? 0) : 0;
   // Referral % is locked to Settings › Referral partners; a rate typed on the deal is ignored.
   const referralRate = ctx.partner ? ctx.partner.pct : 0;
   const openerRate = draft.openerId ? asRate(draft.openerRate) : 0;
@@ -99,6 +104,8 @@ export function priceDeal(draft: NewDealDraft, ctx: PricingContext): Deal {
     commissionRate: commRate,
     psfRate: psfPct,
     originationFee,
+    lineAmount: creditLine,
+    lineRate,
     referralRate,
     referralCap: ctx.partner?.monthlyCap ?? null,
     referralPaidThisMonth: ctx.referralPaidThisMonth,
@@ -142,9 +149,11 @@ export function priceDeal(draft: NewDealDraft, ctx: PricingContext): Deal {
     overrideRate,
     commCollected: schedule ? null : 0,
     commSchedule: schedule,
-    creditLine: rule.multiDraw ? draft.creditLine ?? null : null,
+    creditLine,
     drawInitialPct: rule.multiDraw ? asRate(draft.drawInitialPct ?? rule.drawInitial) : null,
     drawSubsequentPct: rule.multiDraw ? asRate(draft.drawSubsequentPct ?? rule.drawSubsequent) : null,
+    lineRate: rule.multiDraw ? lineRate : null,
+    lineFee: calc.lineFee,
     dealStatus: 'Performing',
     repPaid: null,
     lenderPaid: null,

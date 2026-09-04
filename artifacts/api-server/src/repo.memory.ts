@@ -103,14 +103,33 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
     async writeAudit(e) {
       audit.push({ ...e, at: new Date().toISOString() });
     },
-    async listAudit(limit = 100) {
-      return audit.slice(-limit).reverse();
+    async listAudit(limit = 100, offset = 0) {
+      const all = [...audit].reverse();
+      return all.slice(offset, offset + limit);
     },
     async insertDeal(deal) {
       data.deals.unshift({ ...deal, draws: [...deal.draws] });
     },
     async insertClawback(c) {
       data.clawbacks.push({ ...c });
+    },
+    async updateClawback(id, patch) {
+      const i = data.clawbacks.findIndex((x) => x.id === id);
+      if (i < 0) throw new Error(`No clawback ${id}`);
+      data.clawbacks[i] = { ...data.clawbacks[i]!, ...patch };
+    },
+    async deleteClawback(id) {
+      const i = data.clawbacks.findIndex((x) => x.id === id);
+      if (i >= 0) data.clawbacks.splice(i, 1);
+    },
+    async renameRef(kind, from, to) {
+      let n = 0;
+      for (const d of data.deals) {
+        if (kind === 'lender' && d.lender === from) { d.lender = to; n++; }
+        if (kind === 'product' && d.product === from) { d.product = to; n++; }
+        if (kind === 'partner' && d.referralPartner === from) { d.referralPartner = to; n++; }
+      }
+      return n;
     },
     async deleteDeal(id) {
       const i = data.deals.findIndex((d) => d.id === id);
@@ -130,6 +149,19 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
       const d = data.deals.find((x) => x.id === dealId);
       if (!d) throw new Error(`No deal ${dealId}`);
       d.draws = d.draws.map((x) => (x.ref === ref ? { ...x, ...patch } : x));
+    },
+    async replaceDraw(dealId, ref, draw) {
+      const d = data.deals.find((x) => x.id === dealId);
+      if (!d) throw new Error(`No deal ${dealId}`);
+      d.draws = d.draws.map((x) => (x.ref === ref ? { ...draw, ref } : x));
+    },
+    async deleteDraw(dealId, ref) {
+      const d = data.deals.find((x) => x.id === dealId);
+      if (d) d.draws = d.draws.filter((x) => x.ref !== ref);
+    },
+    async deleteRun(id) {
+      const i = data.runs.findIndex((r) => r.id === id);
+      if (i >= 0) data.runs.splice(i, 1);
     },
     async insertRun(run: PayrollRun) {
       data.runs.unshift({ ...run });

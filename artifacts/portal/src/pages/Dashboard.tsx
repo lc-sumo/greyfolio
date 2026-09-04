@@ -71,7 +71,7 @@ export function Dashboard() {
                   <div className={`row ${r.isMe ? 'me' : ''}`} key={r.rank}>
                     <span className="rank">#{r.rank}</span>
                     <span className="ellipsis">{r.label}</span>
-                    <span className="amt">{compact(r.commission)}</span>
+                    <span className="amt">{r.commission === null ? <span className="subtle">·</span> : compact(r.commission)}</span>
                   </div>
                 ))}
               </div>

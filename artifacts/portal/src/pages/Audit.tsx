@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { Shell } from '../components/Shell';
 import { Card, Empty, Loading, Pill } from '../components/ui';
-import { api } from '../lib/api';
+import { DEMO, api } from '../lib/api';
 
 interface AuditEntry { actorRepId: string; action: string; targetRepId: string | null; path: string | null; detail?: Record<string, unknown>; at?: string }
 
@@ -10,7 +10,8 @@ const TONE: Record<string, 'teal' | 'amber' | 'red' | 'grey'> = { 'payroll.pay':
 
 /** Every login, edit, payout and password change the API recorded. Read-only. */
 export function Audit() {
-  const q = useQuery({ queryKey: ['audit'], queryFn: () => api<{ entries: AuditEntry[] }>('/api/admin/audit?limit=500') });
+  const [pages, setPages] = useState(1);
+  const q = useQuery({ queryKey: ['audit', pages], queryFn: () => api<{ entries: AuditEntry[]; hasMore: boolean }>(`/api/admin/audit?limit=${500 * pages}`) });
   const reps = useQuery({ queryKey: ['roster-reps'], queryFn: () => api<{ reps: Array<{ id: string; name: string }> }>('/api/admin/reps') });
   const [search, setSearch] = useState('');
   const [action, setAction] = useState('all');
@@ -23,7 +24,7 @@ export function Audit() {
   const when = (iso?: string) => (iso ? new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—');
   return (
     <Shell eyebrow="Admin" title="Audit log">
-      <Card title="Everything the portal recorded" extra="newest first · logins, edits, payouts, password changes · 500 most recent">
+      <Card title="Everything the portal recorded" extra={<>newest first · logins, edits, payouts, emails, password changes · showing {q.data?.entries.length ?? 0}{q.data?.hasMore ? <> · <button className="linkish" style={{ color: 'var(--teal)', padding: 0 }} onClick={() => setPages((p) => p + 1)}>load 500 more</button></> : ''}{!DEMO && <> · <a href="/api/admin/audit.csv">download CSV</a></>}</>}>
         <div className="toolbar" style={{ marginBottom: 12 }}>
           <input className="search" placeholder="Search actor, target, path or detail" value={search} onChange={(e) => setSearch(e.target.value)} style={{ minWidth: 320 }} />
           <select className="filter" value={action} onChange={(e) => setAction(e.target.value)}><option value="all">All actions</option>{actions.map((a) => <option key={a}>{a}</option>)}</select>

@@ -7,7 +7,7 @@ import { day, fullDay, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 import { ClawbackBar, Contact, Drawer, Loading, Pill, toneFor } from './ui';
 import { NewDealDrawer } from './NewDealDrawer';
-import { DealFiles, DealNotes, RecordClawback } from './DealExtras';
+import { ClawbackNote, ContactEditor, DealFiles, DealNotes, DrawEditor, RecordClawback } from './DealExtras';
 
 export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: string; settings: Settings; editOptions: RepOption[]; onClose: () => void }) {
   const { notify } = useSession();
@@ -36,7 +36,22 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
   }
   const collect = (body: Record<string, unknown>, label: string) => run(label, () => post(`/api/admin/deals/${id}/collection`, body));
   const [editing, setEditing] = useState(false);
-  const board = useQuery({ queryKey: ['deals-board-for-edit'], queryFn: () => api<MasterBoard>('/api/admin/deals'), enabled: editing });
+  const [contact, setContact] = useState(false);
+  const [editDraw, setEditDraw] = useState<string | null>(null);
+  // Rep options for the splits editor: passed in from the master board, otherwise fetched — never an empty list that could wipe a deal's roles.
+  const board = useQuery({ queryKey: ['deals-board-for-edit'], queryFn: () => api<MasterBoard>('/api/admin/deals'), enabled: editing || editOptions.length === 0 });
+  const opts = editOptions.length ? editOptions : board.data?.repOptions.edit ?? [];
+  /** "Partially Paid" needs the dollars; the API otherwise guesses half the gross. */
+  const statusChange = (segmentKey: string, status: string, label: string) => {
+    if (status === 'Partially Paid') {
+      const v = window.prompt('How much commission has the lender paid so far on this deal ($)?');
+      if (v === null) return;
+      const dollars = Number(String(v).replace(/[^0-9.]/g, ''));
+      if (!(dollars > 0)) { setErr('Enter the dollars received'); return; }
+      return collect({ segmentKey, status, partialDollars: dollars }, `${label} — ${money(dollars)} collected`);
+    }
+    return collect({ segmentKey, status }, label);
+  };
   async function remove() {
     if (!d) return;
     if (!window.confirm(`Delete ${d.id} · ${d.business}? This removes the deal and its draws. It is refused if anything was ever paid on it.`)) return;
@@ -76,7 +91,9 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
             <button className="btn" onClick={() => setEditing(true)} title="Correct amount, lender, product, dates, rates — the deal re-prices">Edit terms</button>
             <button className="btn" style={{ color: 'var(--red)' }} onClick={() => void remove()} title="Only a deal nothing was paid on can be deleted">Delete deal</button>
             <RecordClawback dealId={d.id} gross={d.gross} onDone={(label) => run(label, async () => {})} />
+            <button className="btn" onClick={() => setContact((v) => !v)} title="Fix the business name, contact, email or phone — allowed on paid deals">Edit contact</button>
           </div>
+          {contact && <ContactEditor deal={d} onDone={(label) => { setContact(false); void run(label, async () => {}); }} onCancel={() => setContact(false)} />}
           <section className="card">
             <h3>Deal terms</h3>
             <dl className="kv">
@@ -95,10 +112,10 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
               {d.payback !== null && <><dt>Payback</dt><dd>{money(d.payback)}</dd></>}
               <dt>Clawback</dt><dd style={{ fontFamily: 'var(--sans)' }}>{d.clawbackWindow.cleared ? <span className="cleared"><i>✓</i> {d.clawbackWindow.label}</span> : <Pill tone={d.atRisk && (d.dealStatus === 'Default' || d.dealStatus === 'Slow Pay') ? 'red' : 'amber'}>{d.clawbackWindow.label}</Pill>}{d.clawbackWindow.clearsOn && <div style={{ display: 'grid', justifyItems: 'end', gap: 4, marginTop: 6 }}><ClawbackBar fundedDate={d.date} win={d.clawbackWindow} />{!d.clawbackWindow.cleared && <div className="subtle" style={{ fontSize: 13 }}>clears {fullDay(d.clawbackWindow.clearsOn)} · {d.clawbackWindow.source === 'lender' ? `${d.lender} policy` : 'default window'}</div>}</div>}</dd>
               {d.segments[0]?.payment != null && <><dt>Payment</dt><dd>{money(d.segments[0].payment)} <span className="subtle">/ {d.frequency.toLowerCase()}</span></dd></>}
-              <dt>Commission</dt><dd>{pct(d.commRate)}{d.psfPct ? ` + PSF ${pct(d.psfPct)}` : ''}{d.originationFee ? ` + ${money(d.originationFee)} orig.` : ''}</dd>
+              <dt>Commission</dt><dd>{pct(d.commRate)}{d.psfPct ? ` + PSF ${pct(d.psfPct)}` : ''}{d.originationFee ? ` + ${money(d.originationFee)} orig.` : ''}{d.lineRate ? ` + ${pct(d.lineRate)} of the line (${money(d.lineFee)})` : ''}</dd>
               <dt>Referral</dt><dd>{d.referralPartner ? `${d.referralPartner} ${pct(d.referralRate)} · ${money(d.referralFee)}` : '—'}</dd>
               <dt>Commission status</dt><dd style={{ fontFamily: 'var(--sans)' }}>
-                <select className="mini" value={d.commissionStatus} onChange={(e) => void collect({ segmentKey: 'base', status: e.target.value }, `${d.id} — commission ${e.target.value.toLowerCase()}`)}>
+                <select className="mini" value={d.commissionStatus} onChange={(e) => void statusChange('base', e.target.value, `${d.id} — commission ${e.target.value.toLowerCase()}`)}>
                   {['Waiting for payment', 'Partially Paid', 'YES - Paid In Full'].map((s) => <option key={s}>{s}</option>)}
                 </select>
               </dd>
@@ -126,13 +143,13 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
               </div>
               <div className="pips">{s.schedule.events.filter((e) => e.kind === 'increment').map((e) => <i key={e.n} className={e.received ? 'on' : e.overdue ? 'late' : ''} title={`${e.label} · ${e.expected ? fullDay(e.expected) : '—'}${e.amount ? ` · ${money(e.amount)}` : ''}${e.received ? ' · received' : e.overdue ? ' · overdue' : ''}`} />)}</div>
               <dl className="kv" style={{ marginTop: 12 }}>
-                {s.schedule.upfrontPct > 0 && <><dt>Upfront {money(s.schedule.upfrontAmount)}</dt><dd style={{ fontFamily: 'var(--sans)' }}>{s.schedule.upfrontReceived ? <span className="pos">received</span> : <button className="btn" style={{ height: 26, padding: '0 8px', fontSize: 13.5 }} onClick={() => void collect({ segmentKey: s.sk, markUpfront: true }, `${d.id} — upfront ${money(s.schedule!.upfrontAmount)} received`)}>Record upfront received</button>}</dd></>}
+                {s.schedule.upfrontPct > 0 && <><dt>Upfront {money(s.schedule.upfrontAmount)}</dt><dd style={{ fontFamily: 'var(--sans)' }}>{s.schedule.upfrontReceived ? <span className="pos">received <button className="linkish" style={{ color: 'var(--ink-subtle)', padding: '0 4px' }} title="Recorded by mistake? Mark the upfront as not yet received" onClick={() => void collect({ segmentKey: s.sk, markUpfront: false }, `${d.id} — upfront marked not received`)}>undo</button></span> : <button className="btn" style={{ height: 26, padding: '0 8px', fontSize: 13.5 }} onClick={() => void collect({ segmentKey: s.sk, markUpfront: true }, `${d.id} — upfront ${money(s.schedule!.upfrontAmount)} received`)}>Record upfront received</button>}</dd></>}
                 <dt>Lender paid</dt><dd>{s.schedule.received}/{s.schedule.weeks} increments{s.schedule.remainder === 'spread' ? ` · ${money(s.schedule.perWeek * s.schedule.received)}` : ''}</dd>
                 <dt>Collected so far</dt><dd>{money(s.collected)} <span className="subtle">of {money(s.gross)}</span></dd>
                 {s.schedule.paidToReps.length > 0 && <><dt>Rep paid</dt><dd style={{ fontFamily: 'var(--sans)' }}>{s.schedule.paidToReps.map((r) => <div key={r.role}><span className="num">{r.paid}/{r.total}</span> <span className="subtle">{r.name} · {r.role}</span></div>)}</dd></>}
                 <dt>Still to come</dt><dd>{money(s.outstanding)}</dd>
                 <dt>Next expected</dt><dd>{s.schedule.nextExpected ? <>{s.schedule.nextExpected.expected ? day(s.schedule.nextExpected.expected) : '—'} <span className="subtle" style={{ fontFamily: 'var(--sans)' }}>· {s.schedule.nextExpected.label}{s.schedule.nextExpected.amount ? ` · ${money(s.schedule.nextExpected.amount)}` : ''}{s.schedule.nextExpected.overdue ? <b className="neg"> · overdue</b> : ''}</span></> : <span className="pos">Complete</span>}</dd>
-                {s.schedule.remainder === 'at-end' && <><dt>Final {money(s.schedule.remainderAmount)}</dt><dd style={{ fontFamily: 'var(--sans)' }}>{s.schedule.remainderReceived ? <span className="pos">received</span> : s.schedule.received >= s.schedule.weeks ? <button className="btn primary" style={{ height: 26, padding: '0 8px', fontSize: 13.5 }} onClick={() => void collect({ segmentKey: s.sk, markRemainder: true }, `${d.id} — final ${money(s.schedule!.remainderAmount)} received`)}>Record final received</button> : <span className="subtle">due when increments are done</span>}</dd></>}
+                {s.schedule.remainder === 'at-end' && <><dt>Final {money(s.schedule.remainderAmount)}</dt><dd style={{ fontFamily: 'var(--sans)' }}>{s.schedule.remainderReceived ? <span className="pos">received <button className="linkish" style={{ color: 'var(--ink-subtle)', padding: '0 4px' }} title="Recorded by mistake? Mark the final as not yet received" onClick={() => void collect({ segmentKey: s.sk, markRemainder: false }, `${d.id} — final marked not received`)}>undo</button></span> : s.schedule.received >= s.schedule.weeks ? <button className="btn primary" style={{ height: 26, padding: '0 8px', fontSize: 13.5 }} onClick={() => void collect({ segmentKey: s.sk, markRemainder: true }, `${d.id} — final ${money(s.schedule!.remainderAmount)} received`)}>Record final received</button> : <span className="subtle">due when increments are done</span>}</dd></>}
               </dl>
               <details style={{ marginTop: 10 }}>
                 <summary className="muted" style={{ cursor: 'pointer', fontSize: 14 }}>Increment grid {s.schedule.amounts ? '· uneven' : '· equal'}</summary>
@@ -172,9 +189,11 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
                     <span className="num">{money(s.amount)}</span>
                     <span className="num subtle">{pct(s.commRate)}</span>
                     <span className="num">{money(s.net)}</span>
+                    {s.sk !== 'base' && <span style={{ display: 'inline-flex', gap: 4, marginRight: 6 }}><button className="linkish" style={{ color: 'var(--ink-subtle)', padding: '0 4px' }} title="Correct this draw's amount, date, term, factor or rate" onClick={() => setEditDraw(editDraw === s.sk ? null : s.sk)}>edit</button><button className="linkish" style={{ color: 'var(--ink-subtle)', padding: '0 4px' }} title="Remove a draw entered by mistake (refused once paid on)" onClick={() => { if (window.confirm(`Remove ${s.label} (${money(s.amount)}) from ${d.id}?`)) void run(`${d.id} ${s.sk} removed`, () => post(`/api/admin/deals/${id}/draws/${s.sk}`, {}, 'DELETE')); }}>remove</button></span>}
                     <button className={`pill ${toneFor(s.lenderPaidLabel === 'Collected' ? 'Paid' : s.status)}`} style={{ cursor: 'pointer' }} onClick={() => void collect({ segmentKey: s.sk, toggle: true }, `${d.id} ${s.sk} — collection updated`)}>{s.lenderPaidLabel}</button>
                   </div>
                 ))}
+                {editDraw && (() => { const s = d.segments.find((x) => x.sk === editDraw); return s ? <DrawEditor dealId={d.id} draw={{ sk: s.sk, label: s.label, date: s.date, amount: s.amount, commRate: s.commRate, termDays: s.termDays, factor: s.factor }} onDone={(label) => { setEditDraw(null); void run(label, async () => {}); }} onCancel={() => setEditDraw(null)} /> : null; })()}
                 <div className="row draw total"><span>Total</span><span className="num">{money(d.funded)}</span><span /><span className="num">{money(d.net)}</span><span className="subtle">{money(d.outstanding)} outstanding</span></div>
               </div>
               {d.drawSubsequentPct && (() => {
@@ -210,7 +229,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
                   <label className="field"><span className="label">{role === 'override' ? 'Override rep' : role[0]!.toUpperCase() + role.slice(1)}</span>
                     <select value={splits[`${role}Id`] ?? ''} onChange={(e) => setSplits((s) => ({ ...s, [`${role}Id`]: e.target.value }))}>
                       <option value="">— none —</option>
-                      {editOptions.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+                      {opts.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
                     </select>
                   </label>
                   <label className="field"><span className="label">Rate %</span><input inputMode="decimal" value={splits[`${role}Rate`] ?? ''} onChange={(e) => setSplits((s) => ({ ...s, [`${role}Rate`]: e.target.value }))} /></label>
@@ -218,7 +237,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
                 </div>
               ))}
             </div>
-            <button className="btn primary" style={{ marginTop: 10 }} onClick={() => run(`${d.id} — splits saved`, () => post(`/api/admin/deals/${id}/splits`, { openerId: splits.openerId || null, openerRate: Number(splits.openerRate), closerId: splits.closerId || null, closerRate: Number(splits.closerRate), overrideId: splits.overrideId || null, overrideRate: Number(splits.overrideRate) }, 'PATCH'))}>Save splits</button>
+            <button className="btn primary" style={{ marginTop: 10 }} disabled={opts.length === 0} title={opts.length === 0 ? 'Loading reps…' : undefined} onClick={() => run(`${d.id} — splits saved`, () => post(`/api/admin/deals/${id}/splits`, { openerId: splits.openerId || null, openerRate: Number(splits.openerRate), closerId: splits.closerId || null, closerRate: Number(splits.closerRate), overrideId: splits.overrideId || null, overrideRate: Number(splits.overrideRate) }, 'PATCH'))}>Save splits</button>
           </section>
 
           <section className="card">
@@ -239,11 +258,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
           <DealNotes dealId={d.id} />
           <DealFiles dealId={d.id} />
 
-          {d.clawbacks.map((c) => (
-            <div className="note" key={c.id} style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>
-              Clawback {day(c.date)}: <b>{money(c.amount)}</b> — {c.reason}. {c.status === 'open' ? 'Open' : 'Recovered'}: {c.slices.map((s) => `${s.name} ${money(s.remaining)} remaining`).join(', ')}.
-            </div>
-          ))}
+          {d.clawbacks.map((c) => <ClawbackNote key={c.id} dealId={d.id} c={c} onDone={(label) => run(label, async () => {})} />)}
           {err && <div className="note" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>{err}</div>}
         </>
       )}
@@ -253,11 +268,6 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
   );
 }
 
-function addWeeks(iso: string, n: number): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + 7 * n);
-  return d.toISOString().slice(0, 10);
-}
 
 /** Paste or type the increment grid on an existing deal. It must total the plan's funded amount. */
 function GridEditor({ current, planned, count, onApply }: { current: number[] | null; planned: number; count: number; onApply: (amounts: number[] | null) => Promise<void> | void }) {

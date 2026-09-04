@@ -160,7 +160,7 @@ export function adminOverview(ctx: LedgerContext, reps: Rep[], settings: Setting
       drawLines: inPeriod.reduce((s, d) => s + d.draws.length, 0),
       avgDealSize: inPeriod.length ? sum([funded / inPeriod.length]) : 0,
       avgFactor: factors.length ? Math.round((factors.reduce((s, f) => s + f, 0) / factors.length) * 100) / 100 : null,
-      paid: paidFigures(paidRows).gross,
+      paid: paidFigures(paidRows, ctx.lines).gross,
       owed,
       clawbackExposure: sum(exposure.map((e) => e.remaining)),
       renewalReady: ren.length,

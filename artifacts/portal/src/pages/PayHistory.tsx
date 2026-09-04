@@ -4,7 +4,7 @@ import { DealDrawer } from '../components/DealDrawer';
 import { Shell } from '../components/Shell';
 import { Card, Loading, Metric } from '../components/ui';
 import { api, type PayHistory as PayHistoryData } from '../lib/api';
-import { fullDay, money } from '../lib/format';
+import { fullDay, moneyCents as money } from '../lib/format';
 import { useSession } from '../lib/session';
 
 /** Every payout the rep received: when, how much, and for which deal. Recoveries are shown as their own red lines. */

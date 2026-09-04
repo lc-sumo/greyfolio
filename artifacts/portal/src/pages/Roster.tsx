@@ -5,17 +5,15 @@ import { api, type RosterRep } from '../lib/api';
 import { money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 
-/** Admin landing for Phase 3: the roster, read from repLedger. Full admin screens arrive in Phases 4–7. */
+/** Rep roster, read from repLedger: every rep's earned, paid, held and owed. Team leads see their own team. */
 export function Roster() {
   const { setViewAs, auth } = useSession();
-  const q = useQuery({ queryKey: ['roster'], queryFn: () => api<{ reps: RosterRep[] }>('/api/admin/reps'), enabled: auth?.user.role === 'admin' });
+  const q = useQuery({ queryKey: ['roster'], queryFn: () => api<{ reps: RosterRep[] }>('/api/admin/reps') });
   const reps = [...(q.data?.reps ?? [])].sort((a, b) => b.owed - a.owed);
   const totals = reps.reduce((t, r) => ({ earned: t.earned + r.earned, paid: t.paid + r.paid, owed: t.owed + r.owed }), { earned: 0, paid: 0, owed: 0 });
   return (
     <Shell eyebrow="Admin" title="Rep roster">
-      {auth?.user.role !== 'admin' ? (
-        <div className="note">Team leads use <b>View as</b> in the sidebar to open a rep on their team.</div>
-      ) : !q.data ? (
+      {!q.data ? (
         <Loading error={q.error} />
       ) : (
         <>

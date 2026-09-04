@@ -40,6 +40,14 @@ export interface Lender {
   products?: string[];
   /** Lender clawback policy. Absent = the global clawback-window default. */
   clawback?: LenderClawbackPolicy;
+  /**
+   * LOC lenders that also pay a fee on the credit line itself (Revenued):
+   * commission at open = draw % × initial draw + this % × the line.
+   * Subsequent draws pay the draw % only. Fraction; absent = no line fee.
+   */
+  locLineRate?: number;
+  /** false = retired: kept for history, hidden from new-deal pickers. */
+  active?: boolean;
 }
 
 export type ClawbackBasis = 'none' | 'days' | 'payments';
@@ -56,6 +64,8 @@ export interface ReferralPartner {
   pct: number;
   /** Monthly cap in dollars; `null` = uncapped (workbook: blank cap). */
   monthlyCap: number | null;
+  /** false = retired: kept for history, hidden from new-deal pickers. */
+  active?: boolean;
 }
 
 export interface ProductRule {
@@ -80,6 +90,8 @@ export interface ProductRule {
    * upfront and never ask for one.
    */
   incremental?: boolean;
+  /** false = retired: kept for history, hidden from new-deal pickers. */
+  active?: boolean;
 }
 
 /**
@@ -204,6 +216,9 @@ export interface Deal {
   creditLine: number | null;
   drawInitialPct: number | null;
   drawSubsequentPct: number | null;
+  /** LOC line fee (Revenued): fraction of `creditLine` paid as commission at open, and the dollars it added to gross. */
+  lineRate?: number | null;
+  lineFee?: number;
   dealStatus: string;
   /** Stamped when every role line on every segment is in the ledger. */
   repPaid: string | null;

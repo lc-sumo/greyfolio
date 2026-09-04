@@ -93,3 +93,17 @@ describe('the increment grid: uneven disbursements', () => {
     expect(withAmounts(seg, null)!.schedule!.amounts).toBeNull();
   });
 });
+
+describe('withCollection on an uneven grid', () => {
+  it('writes dollars back to the increment count the grid implies, so reading it back agrees', async () => {
+    const { withCollection, collectedOf } = await import('../src/collection.js');
+    // 4 increments disbursing 40/30/20/10 of a 100k plan; commission 10k spread the same way.
+    const seg = { gross: 10_000, collected: null, schedule: { mode: 'weekly' as const, weeks: 4, received: 0, startDate: '2026-08-01', amounts: [40_000, 30_000, 20_000, 10_000] } };
+    const p = withCollection(seg, 7_000);
+    expect(p.schedule!.received).toBe(2); // 4,000 + 3,000
+    expect(collectedOf({ ...seg, ...p })).toBe(7_000);
+    expect(withCollection(seg, 8_999).schedule!.received).toBe(2);
+    expect(withCollection(seg, 9_000).schedule!.received).toBe(3);
+    expect(withCollection(seg, 10_000).schedule!.received).toBe(4);
+  });
+});

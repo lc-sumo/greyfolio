@@ -129,6 +129,9 @@ export const commissionDeals = pgTable(
     merchantPhone: text('merchant_phone').notNull().default(''),
     creditLine: money('credit_line'),
     drawInitialPct: rate('draw_initial_pct'),
+    /** LOC line fee (Revenued): % of the credit line paid at open, and the dollars it added to gross. */
+    lineRate: rate('line_rate'),
+    lineFee: money('line_fee').notNull().default(0),
     drawSubsequentPct: rate('draw_subsequent_pct'),
     psfPct: rate('psf_pct').notNull().default(0),
     originationFee: money('origination_fee').notNull().default(0),

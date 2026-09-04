@@ -38,7 +38,7 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
         <nav className="nav">
           {repMode ? (
             <>
-              <div className="nav-group label" style={{ color: 'var(--navy-text-3)' }}>{viewAs ? 'Rep portal (view as)' : 'My portal'}</div>
+              <div className="nav-group label" style={{ color: 'var(--navy-text-3)' }}>{viewAs && viewAs !== user.repId ? 'Rep portal (view as)' : 'My portal'}</div>
               <NavLink to="/"><i className="dot" />My dashboard</NavLink>
               <NavLink to="/deals"><i className="dot" />My deals</NavLink>
               <NavLink to="/renewals"><i className="dot" />Renewals</NavLink>
@@ -65,8 +65,8 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
               <span className="label">View as</span>
               <select value={viewAs ?? '__admin'} onChange={(e) => setViewAs(e.target.value === '__admin' ? null : e.target.value)}>
                 <option value="__admin">{user.role === 'admin' ? 'Admin — master view' : 'My own portal'}</option>
-                {(options.data?.options ?? []).filter((o) => o.id !== user.repId || user.role !== 'admin').map((o) => (
-                  <option key={o.id} value={o.id}>{o.label}</option>
+                {(options.data?.options ?? []).map((o) => (
+                  <option key={o.id} value={o.id}>{o.id === user.repId ? `${o.label} (me)` : o.label}</option>
                 ))}
               </select>
             </label>
@@ -87,8 +87,8 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
               <span>{user.role === 'admin' ? 'Master' : user.role === 'manager' ? 'Team lead' : 'Rep'}</span>
             </div>
           </div>
-          {!viewAs && <ChangePassword />}
-          {!viewAs && <TwoFactor />}
+          {(!viewAs || viewAs === user.repId) && <ChangePassword />}
+          {(!viewAs || viewAs === user.repId) && <TwoFactor />}
           <button className="linkish" onClick={() => void logout()}>Sign out</button>
         </div>
       </aside>
@@ -109,7 +109,7 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
           </div>
         </header>
         <div className="body">
-          {viewAs && me.data && (
+          {viewAs && viewAs !== user.repId && me.data && (
             <div className="banner">
               <span>Viewing as <b>{me.data.rep.name}</b>{!me.data.rep.active && ' (inactive)'} — this is exactly what they see. Every request is audit-logged.</span>
               <button onClick={() => setViewAs(null)}>Exit view-as</button>

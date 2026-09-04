@@ -4,7 +4,7 @@ import { HttpError, currentUser, requireRole } from '../auth/middleware.js';
 import { adminDealDetail, adminDealRow, adminRenewals } from '../admin-views.js';
 import { adminMerchants, adminOverview } from '../analytics-views.js';
 import type { Repo } from '../repo.js';
-import { addDraw, createDeal, deleteDeal, recordClawback, setCollection, setCrmId, setDealStatus, updateSplits, updateTerms } from '../services/deals.js';
+import { addDraw, createDeal, deleteClawback, deleteDeal, deleteDraw, recordClawback, updateClawback, updateContact, updateDrawTerms, setCollection, setCrmId, setDealStatus, updateSplits, updateTerms } from '../services/deals.js';
 import { addFile, addNote, fetchFile, removeFile, removeNote } from '../services/notes.js';
 import { notifyClawback, type NotifyDeps } from '../services/notify.js';
 
@@ -102,6 +102,27 @@ export function adminDealsRouter(repo: Repo, notify?: Omit<NotifyDeps, 'repo'>):
   r.post('/deals/:id/draws', async (req, res) => {
     await addDraw(repo, String(req.params.id), req.body, currentUser(req)!.repId);
     res.status(201).json(await detailOf(String(req.params.id)));
+  });
+  /** Merchant identity can be corrected on any deal, paid or not; optionally across every deal on that email. */
+  r.patch('/deals/:id/contact', async (req, res) => {
+    const r2 = await updateContact(repo, String(req.params.id), req.body ?? {}, currentUser(req)!.repId);
+    res.json({ ...(await detailOf(String(req.params.id))), updatedDeals: r2.updated });
+  });
+  r.patch('/deals/:id/draws/:ref', async (req, res) => {
+    await updateDrawTerms(repo, String(req.params.id), String(req.params.ref), req.body ?? {}, currentUser(req)!.repId);
+    res.json(await detailOf(String(req.params.id)));
+  });
+  r.patch('/deals/:id/clawbacks/:cid', async (req, res) => {
+    await updateClawback(repo, String(req.params.id), String(req.params.cid), req.body ?? {}, currentUser(req)!.repId);
+    res.json(await detailOf(String(req.params.id)));
+  });
+  r.delete('/deals/:id/clawbacks/:cid', async (req, res) => {
+    await deleteClawback(repo, String(req.params.id), String(req.params.cid), currentUser(req)!.repId);
+    res.json(await detailOf(String(req.params.id)));
+  });
+  r.delete('/deals/:id/draws/:ref', async (req, res) => {
+    await deleteDraw(repo, String(req.params.id), String(req.params.ref), currentUser(req)!.repId);
+    res.json(await detailOf(String(req.params.id)));
   });
   r.post('/deals/:id/collection', async (req, res) => {
     await setCollection(repo, String(req.params.id), req.body, currentUser(req)!.repId);

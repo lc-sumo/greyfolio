@@ -108,7 +108,11 @@ export function withCollection(seg: Pick<Segment, 'gross' | 'collected' | 'sched
     const upfrontReceived = parts.upfront > 0 ? amt >= parts.upfront - 0.005 : s.upfrontReceived ?? false;
     const afterUpfront = Math.max(0, amt - (upfrontReceived ? parts.upfront : 0));
     if ((s.remainder ?? 'spread') === 'spread') {
-      const received = parts.rest > 0 ? Math.round((afterUpfront / parts.rest) * s.weeks) : 0;
+      let received = 0;
+      if (gridOf(s)) {
+        // Uneven grid: the most increments whose cumulative share fits the dollars — the inverse of `shareThrough`.
+        while (received < s.weeks && shareThrough(s, received + 1) * parts.rest <= afterUpfront + 0.005) received++;
+      } else received = parts.rest > 0 ? Math.round((afterUpfront / parts.rest) * s.weeks) : 0;
       return { collected: null, schedule: { ...s, upfrontReceived, received: clamp(received, 0, s.weeks) } };
     }
     const remainderReceived = afterUpfront >= parts.rest - 0.005 && parts.rest > 0;

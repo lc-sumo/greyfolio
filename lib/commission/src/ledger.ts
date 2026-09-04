@@ -69,8 +69,9 @@ export interface PaidFigures {
  * How to render "paid" for any set of ledger rows (a period, a run, a rep).
  * Sum only positive rows for the headline; surface withholding separately.
  */
-export function paidFigures(lines: PayoutLine[]): PaidFigures {
-  const gone = voidedKeys(lines);
+export function paidFigures(lines: PayoutLine[], allLines: PayoutLine[] = lines): PaidFigures {
+  // Voids are detected over the whole ledger: a payout inside a date window may have been voided outside it.
+  const gone = voidedKeys(allLines);
   const stands = lines.filter((l) => l.role !== 'Void' && !gone.has(l.key));
   const pos = stands.filter((l) => l.amount > 0);
   const gross = sum(pos.map((l) => l.amount));

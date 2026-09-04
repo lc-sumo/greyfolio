@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { api, type RepDealDetail } from '../lib/api';
+import { useState } from 'react';
+import { api, post, type RepDealDetail } from '../lib/api';
 import { day, fullDay, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 import { ClawbackBar, Drawer, Loading, Pill, toneFor } from './ui';
@@ -68,6 +69,7 @@ export function DealDrawer({ id, onClose }: { id: string; onClose: () => void })
             )}
           </section>
 
+          <AskAboutDeal dealId={d.id} />
           {d.clawback && (
             <div className="note" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>
               Clawback on this deal: <b>{money(d.clawback.amount)}</b> charged to you
@@ -77,5 +79,23 @@ export function DealDrawer({ id, onClose }: { id: string; onClose: () => void })
         </>
       )}
     </Drawer>
+  );
+}
+
+/** A rep's question or dispute goes to the admins as a note on the deal plus an email. */
+function AskAboutDeal({ dealId }: { dealId: string }) {
+  const { notify } = useSession();
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  if (!open) return <button className="btn" onClick={() => setOpen(true)} title="Think a line is wrong or have a question? It goes to the admins with this deal attached">Ask about this deal</button>;
+  return (
+    <section className="card">
+      <h3>Ask about this deal <small>goes to the admins as a note on the deal, with an email</small></h3>
+      <div className="noteadd">
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} placeholder="My closer split on this deal should be 40%, not 35%…" autoFocus />
+        <button className="btn primary" disabled={busy || !text.trim()} onClick={async () => { setBusy(true); try { await post(`/api/me/deals/${dealId}/question`, { text }); notify('Sent to the admins'); setOpen(false); setText(''); } catch (e) { notify(e instanceof Error ? e.message : 'Could not send'); } finally { setBusy(false); } }}>Send</button>
+      </div>
+    </section>
   );
 }

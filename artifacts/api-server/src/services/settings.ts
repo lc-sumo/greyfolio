@@ -2,7 +2,7 @@ import { asRate, type Lender, type ProductRule, type ReferralPartner, type Rep, 
 import { HttpError } from '../http-error.js';
 import type { Repo, Settings, Thresholds } from '../repo.js';
 
-const audit = (repo: Repo, actorRepId: string, action: 'settings.update' | 'team.update' | 'rep.update' | 'rep.password', path: string, detail: Record<string, unknown>) =>
+const audit = (repo: Repo, actorRepId: string, action: 'settings.update' | 'team.update' | 'rep.update' | 'rep.password' | 'settings.rename', path: string, detail: Record<string, unknown>) =>
   repo.writeAudit({ actorRepId, action, targetRepId: null, path, detail });
 
 /** How many deals reference each lender / partner / product, and how many reps sit on each team. */
@@ -39,11 +39,25 @@ function uniqueNames(items: Array<{ name: string }>, what: string) {
   }
 }
 
-/** Removing something deals still reference is refused, with the count. */
-function guardRemovals(before: string[], after: string[], used: Record<string, number>, what: string) {
-  const kept = new Set(after);
+/** Removing something deals still reference is refused, with the count. Renames (`renamedFrom`) cascade instead. */
+function guardRemovals(before: string[], after: string[], used: Record<string, number>, what: string, renamed: string[] = []) {
+  const kept = new Set([...after, ...renamed]);
   const blocked = before.filter((n) => !kept.has(n) && used[n]).map((n) => `${n} (${used[n]} deal${used[n] === 1 ? '' : 's'})`);
   if (blocked.length) throw new HttpError(400, `${what} in use cannot be removed: ${blocked.join(', ')}`);
+}
+
+/** `{ name, renamedFrom }` pairs where the old name is on file and differs: apply to every deal that references it. */
+async function applyRenames(repo: Repo, kind: 'lender' | 'partner' | 'product', before: string[], input: Array<Record<string, unknown>>, actorRepId: string): Promise<string[]> {
+  const done: string[] = [];
+  for (const item of input) {
+    const from = typeof item.renamedFrom === 'string' ? item.renamedFrom : '';
+    const to = typeof item.name === 'string' ? item.name.trim() : '';
+    if (!from || !to || from === to || !before.includes(from)) continue;
+    const n = await repo.renameRef(kind, from, to);
+    await audit(repo, actorRepId, 'settings.rename', `/api/admin/settings/${kind}s`, { from, to, deals: n });
+    done.push(from);
+  }
+  return done;
 }
 
 export async function saveLenders(repo: Repo, input: unknown, actorRepId: string): Promise<Lender[]> {
@@ -60,6 +74,8 @@ export async function saveLenders(repo: Repo, input: unknown, actorRepId: string
     if (incremental && l.terms === 'weekly' && weeks < 1) throw new HttpError(400, `Weekly lender "${name}" needs a week count`);
     const terms = weeks > 0 ? 'weekly' : 'upfront';
     const lender: Lender = { name, terms, weeks };
+    if (l.active === false) lender.active = false;
+    if (l.locLineRate !== undefined && l.locLineRate !== null && l.locLineRate !== '' && Number(l.locLineRate) > 0) lender.locLineRate = asRate(Number(l.locLineRate));
     if (terms === 'weekly') {
       const up = Number(l.upfrontPct);
       if (Number.isFinite(up) && up > 0) lender.upfrontPct = asRate(up);
@@ -78,7 +94,8 @@ export async function saveLenders(repo: Repo, input: unknown, actorRepId: string
     return lender;
   });
   uniqueNames(lenders, 'lender');
-  guardRemovals(settings.lenders.map((x) => x.name), lenders.map((x) => x.name), u.lenders, 'Lenders');
+  const renamedL = await applyRenames(repo, 'lender', settings.lenders.map((x) => x.name), input as Array<Record<string, unknown>>, actorRepId);
+  guardRemovals(settings.lenders.map((x) => x.name), lenders.map((x) => x.name), u.lenders, 'Lenders', renamedL);
   await repo.putSetting('lenders', lenders);
   await audit(repo, actorRepId, 'settings.update', '/api/admin/settings/lenders', { count: lenders.length });
   return lenders;
@@ -89,11 +106,14 @@ export async function savePartners(repo: Repo, input: unknown, actorRepId: strin
   const partners: ReferralPartner[] = input.map((p: Record<string, unknown>) => {
     const cap = p.monthlyCap === null || p.monthlyCap === '' || p.monthlyCap === undefined ? null : Number(p.monthlyCap);
     if (cap !== null && !(cap >= 0)) throw new HttpError(400, `Partner "${p.name}" has an invalid cap`);
-    return { name: cleanName(p.name, 'Referral partner'), pct: asRate(Number(p.pct) || 0), monthlyCap: cap };
+    const partner: ReferralPartner = { name: cleanName(p.name, 'Referral partner'), pct: asRate(Number(p.pct) || 0), monthlyCap: cap };
+    if (p.active === false) partner.active = false;
+    return partner;
   });
   uniqueNames(partners, 'partner');
   const [settings, u] = await Promise.all([repo.getSettings(), usage(repo)]);
-  guardRemovals(settings.partners.map((x) => x.name), partners.map((x) => x.name), u.partners, 'Referral partners');
+  const renamedP = await applyRenames(repo, 'partner', settings.partners.map((x) => x.name), input as Array<Record<string, unknown>>, actorRepId);
+  guardRemovals(settings.partners.map((x) => x.name), partners.map((x) => x.name), u.partners, 'Referral partners', renamedP);
   await repo.putSetting('partners', partners);
   await audit(repo, actorRepId, 'settings.update', '/api/admin/settings/partners', { count: partners.length });
   return partners;
@@ -117,11 +137,13 @@ export async function saveProducts(repo: Repo, input: unknown, actorRepId: strin
       drawInitial: multiDraw ? asRate(Number(p.drawInitial) || 0) : null,
       drawSubsequent: multiDraw ? asRate(Number(p.drawSubsequent) || 0) : null,
       incremental: !!p.incremental,
+      ...(p.active === false ? { active: false } : {}),
     };
   });
   uniqueNames(products, 'product');
   const [settings, u] = await Promise.all([repo.getSettings(), usage(repo)]);
-  guardRemovals(settings.products.map((x) => x.name), products.map((x) => x.name), u.products, 'Products');
+  const renamedPr = await applyRenames(repo, 'product', settings.products.map((x) => x.name), input as Array<Record<string, unknown>>, actorRepId);
+  guardRemovals(settings.products.map((x) => x.name), products.map((x) => x.name), u.products, 'Products', renamedPr);
   await repo.putSetting('products', products);
   await audit(repo, actorRepId, 'settings.update', '/api/admin/settings/products', { count: products.length });
   return products;

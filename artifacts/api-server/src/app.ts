@@ -2,7 +2,7 @@ import path from 'node:path';
 import cookieSession from 'cookie-session';
 import express, { type ErrorRequestHandler } from 'express';
 import { authRouter } from './auth/oidc.js';
-import { HttpError } from './auth/middleware.js';
+import { HttpError, refreshSession } from './auth/middleware.js';
 import type { AppConfig } from './config.js';
 import type { Repo } from './repo.js';
 import { adminRouter } from './routes/admin.js';
@@ -42,8 +42,8 @@ export function createApp(config: AppConfig, repo: Repo, deps: AppDeps = {}): ex
 
   app.use('/', healthRouter());
   app.use('/auth', rateLimit({ windowMs: 60_000, max: 30, keyPrefix: 'auth:' }), authRouter(config, repo, mailer));
-  app.use('/api', rateLimit({ windowMs: 60_000, max: 600 }));
-  app.use('/api/me', meRouter(repo, config.appName));
+  app.use('/api', rateLimit({ windowMs: 60_000, max: 600 }), refreshSession(repo));
+  app.use('/api/me', meRouter(repo, config.appName, notify));
   app.use('/api/admin', adminRouter(repo));
   app.use('/api/admin', adminDealsRouter(repo, notify));
   app.use('/api/admin', adminPayrollRouter(repo, notify));

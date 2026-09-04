@@ -79,9 +79,10 @@ function LendersTab({ lenders, products, thresholds, usage, run }: { lenders: Le
   const [rows, setRows] = useState(lenders);
   const [name, setName] = useState('');
   useEffect(() => setRows(lenders), [lenders]);
-  const cols = 'minmax(150px,1fr) minmax(300px,1.6fr) 150px 80px 80px 170px 100px 210px 90px 80px';
+  const cols = 'minmax(150px,1fr) minmax(300px,1.6fr) 150px 80px 80px 170px 100px 210px 90px 70px 90px 80px';
   const save = (next: Lender[]) => run('Lenders saved', () => post('/api/admin/settings/lenders', { lenders: next }, 'PUT'));
-  const set = (i: number, patch: Partial<Lender>) => setRows(rows.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  // Renaming keeps the original name alongside, so the server can move every deal that references it.
+  const set = (i: number, patch: Partial<Lender>) => setRows(rows.map((x, j) => (j === i ? { ...x, ...patch, ...(patch.name !== undefined && x.renamedFrom === undefined ? { renamedFrom: x.name } : {}) } : x)));
   const fundsAll = (l: Lender) => !l.products?.length;
   const funds = (l: Lender, p: string) => fundsAll(l) || !!l.products?.includes(p);
   const doesIncrements = (l: Lender) => products.some((p) => p.incremental && funds(l, p.name));
@@ -99,8 +100,8 @@ function LendersTab({ lenders, products, thresholds, usage, run }: { lenders: Le
   };
   return (
     <Card title="Lenders" extra={`${rows.length} · toggle the products each lender funds; increments only apply to lenders that fund a consolidation · clawback policy drives "cleared clawback" on every deal`}>
-      <div className="scroller"><div style={{ minWidth: 1500 }}>
-      <Head cols={cols}><span>Lender</span><span>Products funded</span><span>Payout structure</span><span>Increments</span><span>Upfront %</span><span>Remainder</span><span>Cadence</span><span>Clawback policy</span><span>Usage</span><span /></Head>
+      <div className="scroller"><div style={{ minWidth: 1700 }}>
+      <Head cols={cols}><span>Lender</span><span>Products funded</span><span>Payout structure</span><span>Increments</span><span>Upfront %</span><span>Remainder</span><span>Cadence</span><span>Clawback policy</span><span>LOC line %</span><span>Active</span><span>Usage</span><span /></Head>
       {rows.map((l, i) => {
         const inc = doesIncrements(l);
         return (
@@ -123,8 +124,10 @@ function LendersTab({ lenders, products, thresholds, usage, run }: { lenders: Le
             </select>
             <input inputMode="numeric" disabled={!l.clawback || l.clawback.basis === 'none'} value={l.clawback && l.clawback.basis !== 'none' ? l.clawback.count : ''} placeholder="—" onChange={(e) => set(i, { clawback: { basis: l.clawback?.basis ?? 'days', count: Number(e.target.value) || 0 } })} />
           </div>
+          <input inputMode="decimal" placeholder="—" title="LOC lenders that also pay a % of the credit line at open (Revenued): draw % × initial draw + this % × the line" value={l.locLineRate ? String(Math.round(l.locLineRate * 10000) / 100) : ''} onChange={(e) => set(i, { locLineRate: (Number(e.target.value) || 0) / 100 })} />
+          <button type="button" className={`tog ${l.active !== false ? 'on' : ''}`} title={l.active === false ? 'Retired — hidden from new deals, kept for history' : 'Active — offered on new deals'} onClick={() => set(i, { active: l.active === false ? true : false })} />
           <span className="num subtle">{usage[l.name] ? `${usage[l.name]} deal${usage[l.name] === 1 ? '' : 's'}` : 'unused'}</span>
-          <button className="btn" disabled={!!usage[l.name]} title={usage[l.name] ? 'In use — cannot remove' : 'Remove'} onClick={() => setRows(rows.filter((_, j) => j !== i))}>Remove</button>
+          <button className="btn" disabled={!!usage[l.name]} title={usage[l.name] ? 'In use — retire it with the Active switch instead' : 'Remove'} onClick={() => setRows(rows.filter((_, j) => j !== i))}>Remove</button>
         </Row>
         );
       })}
@@ -141,27 +144,28 @@ function LendersTab({ lenders, products, thresholds, usage, run }: { lenders: Le
 
 /* ---------- Partners ---------- */
 function PartnersTab({ partners, usage, run }: { partners: ReferralPartner[]; usage: Record<string, number>; run: Run }) {
-  type Draft = { name: string; pct: string; monthlyCap: string };
-  const toDraft = (p: ReferralPartner): Draft => ({ name: p.name, pct: pctIn(p.pct), monthlyCap: p.monthlyCap === null ? '' : String(p.monthlyCap) });
+  type Draft = { name: string; pct: string; monthlyCap: string; active?: boolean; renamedFrom?: string };
+  const toDraft = (p: ReferralPartner): Draft => ({ active: p.active, name: p.name, pct: pctIn(p.pct), monthlyCap: p.monthlyCap === null ? '' : String(p.monthlyCap) });
   const [rows, setRows] = useState<Draft[]>(partners.map(toDraft));
   useEffect(() => setRows(partners.map(toDraft)), [partners]);
-  const cols = 'minmax(180px,1.2fr) 110px 140px 110px 90px';
+  const cols = 'minmax(180px,1.2fr) 110px 140px 70px 110px 90px';
   return (
     <Card title="Referral partners" extra={`${rows.length} · fee is a % of gross commission`}>
-      <Head cols={cols}><span>Partner</span><span>Fee %</span><span>Monthly cap $</span><span>Usage</span><span /></Head>
+      <Head cols={cols}><span>Partner</span><span>Fee %</span><span>Monthly cap $</span><span>Active</span><span>Usage</span><span /></Head>
       {rows.map((p, i) => (
         <Row key={i} cols={cols}>
-          <input value={p.name} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
+          <input value={p.name} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, name: e.target.value, renamedFrom: x.renamedFrom ?? x.name } : x)))} />
           <input inputMode="decimal" value={p.pct} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, pct: e.target.value } : x)))} />
           <input inputMode="decimal" placeholder="uncapped" value={p.monthlyCap} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, monthlyCap: e.target.value } : x)))} />
+          <button type="button" className={`tog ${p.active !== false ? 'on' : ''}`} title={p.active === false ? 'Retired — hidden from new deals' : 'Active'} onClick={() => setRows(rows.map((x, j) => (j === i ? { ...x, active: x.active === false ? true : false } : x)))} />
           <span className="num subtle">{usage[p.name] ? `${usage[p.name]} deal${usage[p.name] === 1 ? '' : 's'}` : 'unused'}</span>
-          <button className="btn" disabled={!!usage[p.name]} onClick={() => setRows(rows.filter((_, j) => j !== i))}>Remove</button>
+          <button className="btn" disabled={!!usage[p.name]} title={usage[p.name] ? 'In use — retire it with the Active switch instead' : 'Remove'} onClick={() => setRows(rows.filter((_, j) => j !== i))}>Remove</button>
         </Row>
       ))}
       <div className="toolbar" style={{ marginTop: 12 }}>
         <button className="btn" onClick={() => setRows([...rows, { name: '', pct: '10', monthlyCap: '' }])}>+ Add partner</button>
         <span className="count" />
-        <button className="btn primary" onClick={() => void run('Referral partners saved', () => post('/api/admin/settings/partners', { partners: rows.map((r) => ({ name: r.name, pct: Number(r.pct) || 0, monthlyCap: r.monthlyCap.trim() === '' ? null : Number(r.monthlyCap) })) }, 'PUT'))}>Save partners</button>
+        <button className="btn primary" onClick={() => void run('Referral partners saved', () => post('/api/admin/settings/partners', { partners: rows.map((r) => ({ renamedFrom: r.renamedFrom, active: r.active, name: r.name, pct: Number(r.pct) || 0, monthlyCap: r.monthlyCap.trim() === '' ? null : Number(r.monthlyCap) })) }, 'PUT'))}>Save partners</button>
       </div>
     </Card>
   );
@@ -174,16 +178,16 @@ function ProductsTab({ products, usage, run }: { products: ProductRule[]; usage:
   const [rows, setRows] = useState<Draft[]>(products.map(toDraft));
   useEffect(() => setRows(products.map(toDraft)), [products]);
   const set = (i: number, patch: Partial<Draft>) => setRows(rows.map((x, j) => (j === i ? { ...x, ...patch } : x)));
-  const cols = 'minmax(200px,1.3fr) 120px 80px 80px 80px repeat(6, 74px) 90px 80px';
+  const cols = 'minmax(200px,1.3fr) 120px 80px 80px 80px repeat(7, 74px) 90px 80px';
   const Toggle = ({ on, onChange, disabled }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean }) => <button type="button" className={`tog ${on ? 'on' : ''}`} disabled={disabled} onClick={() => onChange(!on)} aria-pressed={on}><i /></button>;
   return (
     <Card title="Product rules" extra="draw %s apply only to multi-draw products · increments (lender pays commission in pieces) apply to consolidations only">
       <div className="scroller">
         <div style={{ minWidth: 1280 }}>
-          <Head cols={cols}><span>Product</span><span>Commission basis</span><span>Default %</span><span>Initial draw %</span><span>Subsequent %</span><span>Factor</span><span>Term</span><span>Parent</span><span>Clawback</span><span>Renewable</span><span>Increments</span><span>Usage</span><span /></Head>
+          <Head cols={cols}><span>Product</span><span>Commission basis</span><span>Default %</span><span>Initial draw %</span><span>Subsequent %</span><span>Factor</span><span>Term</span><span>Parent</span><span>Clawback</span><span>Renewable</span><span>Increments</span><span>Active</span><span>Usage</span><span /></Head>
           {rows.map((p, i) => (
             <Row key={i} cols={cols}>
-              <input value={p.name} onChange={(e) => set(i, { name: e.target.value })} />
+              <input value={p.name} onChange={(e) => set(i, { name: e.target.value, renamedFrom: p.renamedFrom ?? p.name })} />
               <select value={p.basis} onChange={(e) => set(i, { basis: e.target.value as ProductRule['basis'], parent: e.target.value === 'draw' ? true : p.parent })}><option value="funded">Funded amount</option><option value="draw">Draw amount</option><option value="payback">Payback</option></select>
               <input inputMode="decimal" value={p.comm} onChange={(e) => set(i, { comm: e.target.value })} />
               <input inputMode="decimal" disabled={!p.multiDraw} value={p.multiDraw ? p.drawInitial : ''} onChange={(e) => set(i, { drawInitial: e.target.value })} />
@@ -194,8 +198,9 @@ function ProductsTab({ products, usage, run }: { products: ProductRule[]; usage:
               <Toggle on={p.clawback} onChange={(v) => set(i, { clawback: v })} />
               <Toggle on={p.renewal} onChange={(v) => set(i, { renewal: v })} />
               <Toggle on={!!p.incremental} onChange={(v) => set(i, { incremental: v })} />
+              <Toggle on={p.active !== false} onChange={(v) => set(i, { active: v })} />
               <span className="num subtle">{usage[p.name] ? `${usage[p.name]} deal${usage[p.name] === 1 ? '' : 's'}` : 'unused'}</span>
-              <button className="btn" disabled={!!usage[p.name]} onClick={() => setRows(rows.filter((_, j) => j !== i))}>Remove</button>
+              <button className="btn" disabled={!!usage[p.name]} title={usage[p.name] ? 'In use — retire it with the Active switch instead' : 'Remove'} onClick={() => setRows(rows.filter((_, j) => j !== i))}>Remove</button>
             </Row>
           ))}
           <div className="subtle" style={{ fontSize: 13, margin: '6px 0' }}>Multi-draw: <span className="num">{rows.filter((p) => p.multiDraw).map((p) => p.name).join(', ') || 'none'}</span> · toggle per product below. Incremental payout: <span className="num">{rows.filter((p) => p.incremental).map((p) => p.name).join(', ') || 'none'}</span> — LOCs and LOC draws are paid upfront.</div>
@@ -392,43 +397,54 @@ function tempPassword(): string {
 
 /* ---------- Import from sheet ---------- */
 interface ImportRow { line: number; id: string; action: 'deal' | 'draw' | 'skip'; parentId: string | null; business: string; lender: string; product: string; amount: number; date: string; opener: string | null; closer: string | null; override: string | null; commissionStatus: string; repPaid: string | null; clawback: number | null; problems: string[]; warnings: string[] }
-interface ImportPreview { rows: ImportRow[]; skipped: number; skippedExisting: number; problems: string[]; summary: { deals: number; draws: number; funded: number; withPayouts: number; warnings: number; clawbacks: number; problems: number } }
+interface MissingRefs { lenders: string[]; products: string[]; partners: string[]; reps: string[] }
+interface ImportPreview { rows: ImportRow[]; skipped: number; skippedExisting: number; problems: string[]; missing: MissingRefs; summary: { deals: number; draws: number; funded: number; withPayouts: number; warnings: number; clawbacks: number; problems: number } }
 function ImportTab() {
   const { notify } = useSession();
   const qc = useQueryClient();
   const [csv, setCsv] = useState('');
+  const [xlsx, setXlsx] = useState<{ name: string; data: string } | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [onlyProblems, setOnlyProblems] = useState(false);
   const [skipExisting, setSkipExisting] = useState(false);
   const [done, setDone] = useState<{ deals: number; draws: number; clawbacks: number; payoutLines: number; runId: string | null } | null>(null);
-  async function file(f: File | undefined) { if (!f) return; setCsv(await f.text()); setPreview(null); setDone(null); }
+  const body = () => (xlsx ? { xlsx: xlsx.data, skipExisting } : { csv, skipExisting });
+  async function file(f: File | undefined) {
+    if (!f) return;
+    setPreview(null); setDone(null);
+    if (/\.xlsx?$/i.test(f.name)) {
+      // The workbook itself (Google Sheets → File → Download → Microsoft Excel). The server picks the FUNDED DEALS tab.
+      const data = await new Promise<string>((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(String(r.result)); r.onerror = () => reject(new Error('Could not read the file')); r.readAsDataURL(f); });
+      setXlsx({ name: f.name, data }); setCsv('');
+    } else { setXlsx(null); setCsv(await f.text()); }
+  }
   async function run() {
     setBusy(true);
-    try { setPreview(await post<ImportPreview>('/api/admin/import/preview', { csv, skipExisting })); } catch (e) { notify(e instanceof Error ? e.message : 'Preview failed'); } finally { setBusy(false); }
+    try { setPreview(await post<ImportPreview>('/api/admin/import/preview', body())); } catch (e) { notify(e instanceof Error ? e.message : 'Preview failed'); } finally { setBusy(false); }
   }
   async function commit() {
     if (!preview || preview.summary.problems) return;
     if (!window.confirm(`Import ${preview.summary.deals} deals and ${preview.summary.draws} draws (${compact(preview.summary.funded)} funded)? Rows with a Rep Paid Date become paid ledger lines in a run called "Imported from sheet".`)) return;
     setBusy(true);
     try {
-      const r = await post<{ deals: number; draws: number; clawbacks: number; payoutLines: number; runId: string | null }>('/api/admin/import', { csv, skipExisting });
-      setDone(r); setPreview(null); setCsv('');
+      const r = await post<{ deals: number; draws: number; clawbacks: number; payoutLines: number; runId: string | null }>('/api/admin/import', body());
+      setDone(r); setPreview(null); setCsv(''); setXlsx(null);
       await qc.invalidateQueries();
       notify(`Imported ${r.deals} deals, ${r.draws} draws, ${r.payoutLines} paid lines`);
     } catch (e) { notify(e instanceof Error ? e.message : 'Import failed'); } finally { setBusy(false); }
   }
   const rows = preview ? preview.rows.filter((r) => !onlyProblems || r.problems.length || r.warnings.length) : [];
   return (
-    <Card title="Import the FUNDED DEALS tab" extra="Google Sheets → File → Download → CSV of the FUNDED DEALS tab · reps, lenders, products and partners must already exist in Settings">
+    <Card title="Import the FUNDED DEALS tab" extra="upload the Google Sheet itself (File → Download → Microsoft Excel) or a CSV of the FUNDED DEALS tab · anything the sheet mentions that Settings does not know is listed for you to add">
       <div style={{ display: 'grid', gap: 10 }}>
         <div className="toolbar">
-          <input type="file" accept=".csv,text/csv" onChange={(e) => void file(e.target.files?.[0])} />
-          <span className="count">{csv ? `${csv.length.toLocaleString()} characters loaded` : 'or paste the CSV below'}</span>
+          <input type="file" accept=".xlsx,.xls,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(e) => void file(e.target.files?.[0])} />
+          <span className="count">{xlsx ? `${xlsx.name} loaded` : csv ? `${csv.length.toLocaleString()} characters loaded` : 'or paste the CSV below'}</span>
           <label className="subtle" style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }} title="Re-exporting the whole sheet? Deals and draws the portal already holds are left alone; only new rows come in."><input type="checkbox" className="big" checked={skipExisting} onChange={(e) => { setSkipExisting(e.target.checked); setPreview(null); }} /> skip rows already in the portal</label>
-          <button className="btn primary" disabled={!csv.trim() || busy} onClick={() => void run()}>{busy ? 'Working…' : 'Preview'}</button>
+          <button className="btn primary" disabled={(!csv.trim() && !xlsx) || busy} onClick={() => void run()}>{busy ? 'Working…' : 'Preview'}</button>
         </div>
-        <textarea rows={4} value={csv} onChange={(e) => { setCsv(e.target.value); setPreview(null); }} placeholder="Deal ID,Parent Deal,Date,Business Name,Lender,Product,…" style={{ border: '1px solid var(--border-strong)', borderRadius: 8, padding: '8px 10px', background: 'var(--input-bg)', color: 'inherit', font: 'inherit', fontFamily: 'var(--mono)', fontSize: 12.5, resize: 'vertical', outline: 'none' }} />
+        <textarea rows={4} value={csv} onChange={(e) => { setCsv(e.target.value); setXlsx(null); setPreview(null); }} placeholder="Deal ID,Parent Deal,Date,Business Name,Lender,Product,…" style={{ border: '1px solid var(--border-strong)', borderRadius: 8, padding: '8px 10px', background: 'var(--input-bg)', color: 'inherit', font: 'inherit', fontFamily: 'var(--mono)', fontSize: 12.5, resize: 'vertical', outline: 'none' }} />
         {done && <div className="note" style={{ background: 'var(--teal-light)', borderColor: 'var(--teal-light-2)' }}>Imported <b>{done.deals}</b> deals, <b>{done.draws}</b> draws, <b>{done.clawbacks}</b> clawbacks and <b>{done.payoutLines}</b> paid ledger lines{done.runId ? ` (run ${done.runId})` : ''}. The master board, rep portals and payroll now reflect them.</div>}
         {preview && (
           <>
@@ -439,6 +455,7 @@ function ImportTab() {
               <section className="card"><div className="label">Problems</div><div className={`metric ${preview.summary.problems ? 'neg' : 'pos'}`}>{preview.summary.problems}</div><div className="sub">{preview.summary.warnings} warning{preview.summary.warnings === 1 ? '' : 's'} · {preview.summary.clawbacks} clawbacks</div></section>
             </div>
             {preview.problems.map((p, i) => <div key={i} className="note" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>{p}</div>)}
+            <MissingRefsNotice missing={preview.missing} onAdded={() => void run()} />
             <div className="toolbar">
               <label className="subtle" style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}><input type="checkbox" checked={onlyProblems} onChange={(e) => setOnlyProblems(e.target.checked)} /> only rows with problems or warnings</label>
               <span className="count">{rows.length} of {preview.rows.length} rows</span>
@@ -539,5 +556,50 @@ function RemittanceTab() {
         )}
       </div>
     </Card>
+  );
+}
+
+/** What the sheet names that Settings and the roster do not know yet — add them here, then preview again. */
+function MissingRefsNotice({ missing, onAdded }: { missing: MissingRefs; onAdded: () => void }) {
+  const { notify } = useSession();
+  const qc = useQueryClient();
+  const [repForm, setRepForm] = useState<{ name: string; email: string } | null>(null);
+  const [busy, setBusy] = useState('');
+  const total = missing.lenders.length + missing.products.length + missing.partners.length + missing.reps.length;
+  if (!total) return null;
+  async function go(key: string, fn: () => Promise<unknown>, ok: string) {
+    setBusy(key);
+    try { await fn(); await qc.invalidateQueries(); notify(ok); onAdded(); } catch (e) { notify(e instanceof Error ? e.message : 'Could not add'); } finally { setBusy(''); }
+  }
+  const addLender = (name: string) => go(`l:${name}`, async () => { const s = await api<SettingsData>('/api/admin/settings'); await post('/api/admin/settings/lenders', { lenders: [...s.lenders, { name, terms: 'upfront', weeks: 0, products: [] }] }, 'PUT'); }, `${name} added as a lender — set its products and clawback policy in Settings › Lenders`);
+  const addPartner = (name: string) => {
+    const v = window.prompt(`Referral fee % for ${name} (of gross commission)?`, '10');
+    if (v === null) return;
+    const pct = Number(v);
+    if (!(pct >= 0)) return notify('Enter a fee percentage');
+    void go(`p:${name}`, async () => { const s = await api<SettingsData>('/api/admin/settings'); await post('/api/admin/settings/partners', { partners: [...s.partners, { name, pct: pct > 1 ? pct / 100 : pct, monthlyCap: null }] }, 'PUT'); }, `${name} added as a referral partner`);
+  };
+  const guessEmail = (name: string) => `${name.trim().toLowerCase().replace(/[^a-z ]/g, '').split(/\s+/).join('.')}@greystoneus.com`;
+  return (
+    <div className="note" style={{ background: 'var(--amber-light)', borderColor: 'var(--amber-light-3)', color: 'var(--amber-deep)' }}>
+      <b>Before this can import, the portal needs {total} thing{total === 1 ? '' : 's'} the sheet mentions:</b>
+      <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
+        {missing.lenders.map((n) => <div key={n} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}><span>Lender <b>{n}</b></span><button className="btn" style={{ height: 28, padding: '0 10px' }} disabled={busy === `l:${n}`} onClick={() => void addLender(n)}>Add lender</button></div>)}
+        {missing.partners.map((n) => <div key={n} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}><span>Referral partner <b>{n}</b></span><button className="btn" style={{ height: 28, padding: '0 10px' }} disabled={busy === `p:${n}`} onClick={() => addPartner(n)}>Add partner</button></div>)}
+        {missing.reps.map((n) => (
+          <div key={n} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span>Rep <b>{n}</b> is not on the roster</span>
+            {repForm?.name === n ? (
+              <>
+                <input className="search" style={{ minWidth: 260, height: 30 }} value={repForm.email} onChange={(e) => setRepForm({ name: n, email: e.target.value })} placeholder="email@greystoneus.com" />
+                <button className="btn primary" style={{ height: 28, padding: '0 10px' }} disabled={!repForm.email.includes('@') || busy === `r:${n}`} onClick={() => void go(`r:${n}`, () => post('/api/admin/reps', { name: n, email: repForm.email.trim().toLowerCase(), role: 'rep', teamId: null, openerRate: 0.2, closerRate: 0.2, overrideRate: null }), `${n} added to the roster — set their rates in Settings › Reps`)}>Add rep</button>
+                <button className="btn" style={{ height: 28, padding: '0 10px' }} onClick={() => setRepForm(null)}>Cancel</button>
+              </>
+            ) : <button className="btn" style={{ height: 28, padding: '0 10px' }} onClick={() => setRepForm({ name: n, email: guessEmail(n) })}>Add rep</button>}
+          </div>
+        ))}
+        {missing.products.map((n) => <div key={n}>Product <b>{n}</b> — products need a commission basis, so add it under <b>Settings › Product rules</b> and preview again.</div>)}
+      </div>
+    </div>
   );
 }

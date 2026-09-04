@@ -15,7 +15,7 @@ export interface RepDealView {
 }
 export interface RepDealDetail extends RepDealView { payments: Array<{ role: string; segmentKey: string | null; unit: string | null; amount: number; paidAt: string; runId: string | null }> }
 export interface RepWallet { earned: number; paid: number; cash: number; held: number; recovered: number; owed: number; dealCount: number; awaitingLender: number }
-export interface LeaderboardRow { rank: number; label: string; isMe: boolean; commission: number }
+export interface LeaderboardRow { rank: number; label: string; isMe: boolean; commission: number | null }
 export interface RepDashboard {
   wallet: RepWallet;
   nextPayout: { date: string | null; runLabel: string | null; cycle: string };
@@ -63,10 +63,10 @@ export const qs = (o: Record<string, string | undefined>) => {
 /* ---- Admin (Phase 4). Never served to reps. ---- */
 export type ClawbackBasis = 'none' | 'days' | 'payments';
 export interface LenderClawbackPolicy { basis: ClawbackBasis; count: number; note?: string }
-export interface Lender { name: string; terms: 'upfront' | 'weekly'; weeks: number; upfrontPct?: number; remainder?: 'spread' | 'at-end'; cadenceDays?: number; products?: string[]; clawback?: LenderClawbackPolicy }
+export interface Lender { name: string; terms: 'upfront' | 'weekly'; weeks: number; upfrontPct?: number; remainder?: 'spread' | 'at-end'; cadenceDays?: number; products?: string[]; clawback?: LenderClawbackPolicy; locLineRate?: number; active?: boolean; renamedFrom?: string }
 export interface ClawbackWindow { basis: ClawbackBasis; count: number; source: 'lender' | 'product' | 'default'; clearsOn: string | null; cleared: boolean; daysLeft: number | null; label: string }
-export interface ReferralPartner { name: string; pct: number; monthlyCap: number | null }
-export interface ProductRule { name: string; basis: 'funded' | 'draw' | 'payback'; factor: boolean; term: boolean; parent: boolean; comm: number; clawback: boolean; renewal: boolean; multiDraw: boolean; drawInitial: number | null; drawSubsequent: number | null; incremental?: boolean }
+export interface ReferralPartner { name: string; pct: number; monthlyCap: number | null; active?: boolean; renamedFrom?: string }
+export interface ProductRule { name: string; basis: 'funded' | 'draw' | 'payback'; factor: boolean; term: boolean; parent: boolean; comm: number; clawback: boolean; renewal: boolean; multiDraw: boolean; drawInitial: number | null; drawSubsequent: number | null; incremental?: boolean; active?: boolean; renamedFrom?: string }
 export interface Settings {
   lenders: Lender[]; partners: ReferralPartner[]; products: ProductRule[];
   thresholds: { clawbackWindowDays: number; paymentOverdueDays: number; renewalMark: number; additionalCapitalAfterDays: number };
@@ -78,7 +78,7 @@ export interface AdminDealRow {
   id: string; opportunityId: string; parentId: string | null; date: string; business: string; drawCount: number;
   merchantContact: string; merchantEmail: string; merchantPhone: string; lender: string; product: string;
   funded: number; factor: number | null; apr: number | null; termDays: number | null; frequency: string; payback: number | null;
-  commRate: number; psfPct: number; originationFee: number; gross: number; referralPartner: string | null; referralRate: number; referralFee: number; net: number;
+  commRate: number; psfPct: number; originationFee: number; lineRate: number | null; lineFee: number; gross: number; referralPartner: string | null; referralRate: number; referralFee: number; net: number;
   roles: RoleView[]; totalRepPayout: number; houseNet: number; collected: number; outstanding: number; lenderPaidLabel: string;
   commissionStatus: string; dealStatus: string; storedDealStatus: string; atRisk: boolean; repPaid: string | null; lenderPaid: string | null; crmId: string | null; crmUrl: string;
   creditLine: number | null; drawSubsequentPct: number | null; hasClawback: boolean; clawbackWindow: ClawbackWindow; overdueReceipts: number; overdueAmount: number; increments: { total: number; lenderPaid: number; repPaid: number; disbursed: number; planned: number; perIncrement: number; stopped: boolean } | null;
@@ -97,7 +97,7 @@ export interface MasterBoard { count: number; deals: AdminDealRow[]; repOptions:
 export interface NewDealDraft {
   business: string; merchantContact?: string; merchantEmail?: string; merchantPhone?: string; fundedDate: string; lender: string; product: string; parentId?: string | null;
   amount: number; termDays?: number | null; factor?: number | null; apr?: number | null; frequency?: string; commRate?: number | null; psfPct?: number | null; originationFee?: number | null;
-  referralPartner?: string | null; referralRate?: number | null; creditLine?: number | null; drawInitialPct?: number | null; drawSubsequentPct?: number | null;
+  referralPartner?: string | null; referralRate?: number | null; creditLine?: number | null; drawInitialPct?: number | null; drawSubsequentPct?: number | null; lineRate?: number | null;
   openerId?: string | null; openerRate?: number | null; closerId?: string | null; closerRate?: number | null; overrideId?: string | null; overrideRate?: number | null; leadSource?: string | null; notes?: string | null;
   commIncrements?: number | null; commUpfrontPct?: number | null; commRemainder?: 'spread' | 'at-end' | null; commCadenceDays?: number | null; commStartDate?: string | null; commAmounts?: number[] | null;
 }

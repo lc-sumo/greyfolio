@@ -68,9 +68,25 @@ export function adminRouter(repo: Repo): Router {
     res.json(check.ok ? { ok: true, target: { id: check.target.id, name: check.target.name, active: check.target.active } } : { ok: false, reason: check.reason });
   });
 
-  r.get('/audit', requireRole('admin'), async (req, res) => {
+  /** Paged audit trail: `?limit=&offset=&action=&rep=`. */
+  const auditQuery = async (req: Parameters<Router>[0]) => {
     const limit = Math.min(500, Math.max(1, Number(req.query.limit ?? 100) || 100));
-    res.json({ entries: await repo.listAudit(limit) });
+    const offset = Math.max(0, Number(req.query.offset ?? 0) || 0);
+    const action = typeof req.query.action === 'string' && req.query.action ? req.query.action : null;
+    const rep = typeof req.query.rep === 'string' && req.query.rep ? req.query.rep : null;
+    // Filters apply after the page is fetched from storage, so fetch a wider page when filtering.
+    const raw = await repo.listAudit(action || rep ? Math.min(5000, limit * 20) : limit, action || rep ? 0 : offset);
+    const filtered = raw.filter((e) => (!action || e.action === action) && (!rep || e.actorRepId === rep || e.targetRepId === rep));
+    return { entries: action || rep ? filtered.slice(offset, offset + limit) : filtered, limit, offset, hasMore: (action || rep ? filtered.length : raw.length) > offset + limit || (!action && !rep && raw.length === limit) };
+  };
+  r.get('/audit', requireRole('admin'), async (req, res) => res.json(await auditQuery(req)));
+  r.get('/audit.csv', requireRole('admin'), async (req, res) => {
+    const [reps, all] = await Promise.all([repo.listReps(), repo.listAudit(5000, 0)]);
+    const name = new Map(reps.map((x) => [x.id, x.name]));
+    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const head = ['At', 'Actor', 'Action', 'Target', 'Path', 'Detail'].map(esc).join(',');
+    const body = all.map((e) => [e.at ?? '', name.get(e.actorRepId) ?? e.actorRepId, e.action, e.targetRepId ? name.get(e.targetRepId) ?? e.targetRepId : '', e.path ?? '', e.detail ? JSON.stringify(e.detail) : ''].map(esc).join(','));
+    res.type('text/csv').attachment('audit-log.csv').send([head, ...body].join('\r\n') + '\r\n');
   });
 
   return r;

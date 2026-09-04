@@ -32,6 +32,8 @@ export interface AdminDealRow {
   commRate: number;
   psfPct: number;
   originationFee: number;
+  lineRate: number | null;
+  lineFee: number;
   gross: number;
   referralPartner: string | null;
   referralRate: number;
@@ -97,6 +99,8 @@ export function adminDealRow(deal: Deal, ctx: LedgerContext, reps: Rep[], settin
     commRate: deal.commRate,
     psfPct: deal.psfPct,
     originationFee: deal.originationFee,
+    lineRate: deal.lineRate ?? null,
+    lineFee: deal.lineFee ?? 0,
     gross: totalGross(deal),
     referralPartner: deal.referralPartner,
     referralRate: deal.referralRate,

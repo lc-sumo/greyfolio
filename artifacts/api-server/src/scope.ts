@@ -111,8 +111,10 @@ export function repDealView(deal: Deal, repId: string, lines: PayoutLine[], claw
   for (const l of mine) grouped.set(`${l.role}|${l.segmentKey}`, [...(grouped.get(`${l.role}|${l.segmentKey}`) ?? []), l]);
   const paid = sum(standingLines(lines).filter((l) => l.repId === repId && l.dealId === deal.id && l.amount > 0).map((l) => l.amount));
   const segs = segments(deal);
-  const cb = clawbacks.find((c) => c.dealId === deal.id);
-  const slice = cb ? repClawback(cb, deal, repId, lines) : null;
+  // Every clawback on the deal, summed — one banner, one remaining figure.
+  const cbs = clawbacks.filter((c) => c.dealId === deal.id);
+  const slices = cbs.map((c) => repClawback(c, deal, repId, lines));
+  const cb = cbs.length ? { amount: sum(slices.map((x) => x.share)), remaining: sum(slices.map((x) => x.remaining)), status: cbs.some((c) => c.status === 'open') ? ('open' as const) : ('recovered' as const) } : null;
   return {
     id: deal.id,
     crmId: deal.crmId,
@@ -147,7 +149,7 @@ export function repDealView(deal: Deal, repId: string, lines: PayoutLine[], claw
     lenderPaidLabel: segs.length === 1 ? collectionLabel(segs[0]!) : `${segs.filter((s) => collectionLabel(s) === 'Collected' || /^(\d+)\/\1 wks$/.test(collectionLabel(s))).length}/${segs.length} segments`,
     dealStatus: deal.dealStatus,
     repPaid: deal.repPaid,
-    clawback: cb && slice ? { amount: slice.share, remaining: slice.remaining, status: cb.status } : null,
+    clawback: cb,
     clawbackWindow: clawbackWindow(deal, { lender: settings.lenders.find((l) => l.name === deal.lender), rule: settings.products.find((p) => p.name === deal.product), defaultDays: settings.thresholds.clawbackWindowDays }, settings.today ?? new Date().toISOString().slice(0, 10)),
   };
 }
@@ -213,15 +215,17 @@ export interface LeaderboardRow {
   label: string;
   isMe: boolean;
   /** Net commission earned (the rep's share), the ranking key. */
-  commission: number;
+  commission: number | null;
 }
 
 /** Top N by net commission, anonymized except the viewer, who is appended if outside the top N. */
 export function leaderboard(ctx: LedgerContext, reps: Rep[], repId: string, limit = 6): LeaderboardRow[] {
+  // Rank only: another rep's dollars never leave the server. The viewer sees their own figure and everyone's position.
   const ranked = reps
+    .filter((r) => r.active || r.id === repId)
     .map((r) => ({ id: r.id, net: repLedger(ctx, r.id).earned }))
     .sort((a, b) => b.net - a.net || a.id.localeCompare(b.id))
-    .map((r, i) => ({ rank: i + 1, label: r.id === repId ? 'You' : `Rep #${i + 1}`, isMe: r.id === repId, commission: r.net }));
+    .map((r, i) => ({ rank: i + 1, label: r.id === repId ? 'You' : `Rep #${i + 1}`, isMe: r.id === repId, commission: r.id === repId ? r.net : null }));
   const top = ranked.slice(0, limit);
   const me = ranked.find((r) => r.isMe);
   if (me && !top.some((r) => r.isMe)) top.push(me);
@@ -245,7 +249,7 @@ export function repStatements(ctx: LedgerContext, runs: PayrollRun[], repId: str
   for (const run of runs) {
     const rows = ctx.lines.filter((l) => l.repId === repId && (l.runId === run.id || (!l.runId && linesInPeriod([l], run.start, run.end).length > 0)));
     if (rows.length === 0) continue;
-    const f = paidFigures(rows);
+    const f = paidFigures(rows, ctx.lines);
     out.push({ runId: run.id, period: run.label, status: run.status, dealCount: new Set(rows.filter((l) => l.amount > 0).map((l) => l.dealId)).size, grossPaid: f.gross, clawbacks: f.recovered, netPaid: f.cash });
   }
   return out;
@@ -281,16 +285,16 @@ export function repDashboard(ctx: LedgerContext, reps: Rep[], runs: PayrollRun[]
   const inPeriod = (d: Deal) => d.date >= from && d.date <= to;
   const periodDeals = mine.filter(inPeriod);
   const periodLines = ctx.lines.filter((l) => l.repId === repId && l.paidAt >= from && l.paidAt <= to);
-  const f = paidFigures(periodLines);
+  const f = paidFigures(periodLines, ctx.lines);
   const periodEarned = (id: string) => sum(repDeals(ctx.deals, id).filter(inPeriod).map((d) => repShare(d, id)));
   const ranked = reps
     .filter((r) => r.active || r.id === repId)
     .map((r) => ({ id: r.id, earned: periodEarned(r.id) }))
     .sort((a, b) => b.earned - a.earned || a.id.localeCompare(b.id));
   const rankIdx = ranked.findIndex((r) => r.id === repId);
-  // Next payout: the first unpaid run still open as of `to`; otherwise the most recent unpaid run (approved, paying soon).
-  const unpaid = [...runs].filter((r) => r.status !== 'paid').sort((a, b) => a.end.localeCompare(b.end));
-  const next = unpaid.find((r) => r.end >= to) ?? unpaid.at(-1) ?? null;
+  // Next payout: the first unpaid run whose period has not ended. None open yet → null (the UI says so) rather than a past date.
+  const unpaid = [...runs].filter((r) => r.status !== 'paid' && !r.id.startsWith('import-')).sort((a, b) => a.end.localeCompare(b.end));
+  const next = unpaid.find((r) => r.end >= to) ?? null;
   const owedToMe = mine
     .map((d) => repDealView(d, repId, ctx.lines, ctx.clawbacks, settings))
     .filter((v) => v.owed > 0)
@@ -363,7 +367,8 @@ export function repRenewals(ctx: LedgerContext, repId: string, settings: Renewal
       const r = renewalOf(d, settings, today);
       const mine = repLines(d, repId);
       const roles = [...new Set(mine.map((l) => l.role))];
-      const rate = sum(mine.filter((l) => l.segmentKey === 'base').map((l) => l.rate));
+      // One rate per role: incremental deals carry one line per receipt, all at the same rate.
+      const rate = sum([...new Map(mine.filter((l) => l.segmentKey === 'base').map((l) => [l.role, l.rate])).values()]);
       const whoCalls: RepRenewalView['whoCalls'] = d.closerId === repId ? 'You' : d.closerId ? 'Closer' : d.openerId === repId ? 'You' : 'Opener';
       return {
         id: d.id,
@@ -458,7 +463,7 @@ export function repPayHistory(ctx: LedgerContext, runs: PayrollRun[], repId: str
     day.rows.push(r);
   }
   for (const d of days) {
-    const f = paidFigures(ctx.lines.filter((l) => l.repId === repId && l.paidAt === d.date));
+    const f = paidFigures(ctx.lines.filter((l) => l.repId === repId && l.paidAt === d.date), ctx.lines);
     d.grossPaid = f.gross;
     d.recovered = f.recovered;
     d.cash = f.cash;

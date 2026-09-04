@@ -12,6 +12,29 @@ export function currentUser(req: Request): SessionUser | null {
   return req.session?.user ?? null;
 }
 
+/**
+ * Re-check the signed-in rep on every request: a rep deactivated or demoted
+ * mid-session loses access at the next call, not when the cookie expires.
+ * Role and name in the cookie are refreshed from the roster as they go.
+ */
+export function refreshSession(repo: Repo): RequestHandler {
+  return async (req, _res, next) => {
+    const u = currentUser(req);
+    if (!u) return next();
+    try {
+      const rep = await repo.findRep(u.repId);
+      if (!rep || !rep.active) {
+        req.session = null;
+        return next(new HttpError(401, rep ? `${rep.name} is inactive — ask an admin to reactivate the account` : 'Sign in required'));
+      }
+      if (rep.role !== u.role || rep.name !== u.name || rep.email !== u.email) req.session = { ...req.session, user: { repId: rep.id, email: rep.email, name: rep.name, role: rep.role } };
+      next();
+    } catch (e) {
+      next(e);
+    }
+  };
+}
+
 export const requireAuth: RequestHandler = (req, _res, next) => {
   if (!currentUser(req)) return next(new HttpError(401, 'Sign in required'));
   next();

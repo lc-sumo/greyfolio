@@ -127,9 +127,33 @@ export function Payroll() {
       notify(e instanceof Error ? e.message : 'Could not update run');
     }
   }
-  async function newRun() {
+  const [customPeriod, setCustomPeriod] = useState<{ start: string; end: string } | null>(null);
+  async function reopen() {
+    if (!activeRun || activeRun.status !== 'approved') return;
+    if (!window.confirm(`Move ${activeRun.label} back to draft? Statements already emailed stay sent.`)) return;
     try {
-      const r = await post<{ id: string; label: string }>('/api/admin/payroll/runs', {});
+      await post(`/api/admin/payroll/runs/${activeRun.id}/reopen`, {});
+      await qc.invalidateQueries();
+      notify(`${activeRun.label} reopened as a draft`);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Could not reopen');
+    }
+  }
+  async function removeRun(r: { id: string; label: string }) {
+    if (!window.confirm(`Close out ${r.label}? Only an empty draft can be removed.`)) return;
+    try {
+      await post(`/api/admin/payroll/runs/${r.id}`, {}, 'DELETE');
+      await qc.invalidateQueries();
+      if (runId === r.id) setRunId(null);
+      notify(`${r.label} removed`);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Could not remove the run');
+    }
+  }
+  async function newRun(period?: { start: string; end: string }) {
+    try {
+      const r = await post<{ id: string; label: string }>('/api/admin/payroll/runs', period ?? {});
+      setCustomPeriod(null);
       await qc.invalidateQueries();
       setRunId(r.id);
       notify(`${r.label} opened as a draft run`);
@@ -155,10 +179,21 @@ export function Payroll() {
                   <button key={r.id} className={`run ${activeRun?.id === r.id ? 'on' : ''}`} onClick={() => { setRunId(r.id); setSelected({}); }}>
                     <span className="ellipsis"><b>{r.label}</b><span className="subtle">{r.lineCount ? `${compact(r.paidGross)} · ${r.repCount} rep${r.repCount === 1 ? '' : 's'}` : 'nothing paid yet'}</span></span>
                     <Pill tone={toneFor(r.status)}>{r.status === 'paid' ? 'Paid' : r.status === 'approved' ? 'Approved' : 'Draft'}</Pill>
+                    {r.status === 'draft' && r.lineCount === 0 && <span className="linkish" role="button" style={{ color: 'var(--ink-subtle)', padding: '0 4px' }} title="Remove this empty draft run" onClick={(e) => { e.stopPropagation(); void removeRun(r); }}>✕</span>}
                   </button>
                 ))}
               </div>
-              <button className="btn" style={{ marginTop: 10, width: '100%' }} onClick={() => void newRun()}>+ Open next run</button>
+              <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                <button className="btn" style={{ flex: 1 }} onClick={() => void newRun()}>+ Open next run</button>
+                <button className="btn" title="Open a run for dates of your choosing" onClick={() => setCustomPeriod(customPeriod ? null : { start: '', end: '' })}>…</button>
+              </div>
+              {customPeriod && (
+                <div className="pwform" style={{ margin: '8px 0 0' }}>
+                  <input type="date" value={customPeriod.start} onChange={(e) => setCustomPeriod({ ...customPeriod, start: e.target.value })} style={{ height: 34, border: '1px solid var(--border-strong)', borderRadius: 8, padding: '0 8px', background: 'var(--input-bg)', color: 'inherit' }} />
+                  <input type="date" value={customPeriod.end} onChange={(e) => setCustomPeriod({ ...customPeriod, end: e.target.value })} style={{ height: 34, border: '1px solid var(--border-strong)', borderRadius: 8, padding: '0 8px', background: 'var(--input-bg)', color: 'inherit' }} />
+                  <button className="btn primary" style={{ height: 30 }} disabled={!customPeriod.start || !customPeriod.end} onClick={() => void newRun(customPeriod)}>Open this period</button>
+                </div>
+              )}
             </Card>
             <YearEnd />
             <Card title="Reps" extra="sorted by amount owed">
@@ -187,6 +222,8 @@ export function Payroll() {
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button className="btn" onClick={() => void exportCsv()}>Export CSV</button>
                       <button className="btn primary" disabled={activeRun.status === 'paid'} onClick={() => void advance()}>{activeRun.status === 'draft' ? 'Approve run' : activeRun.status === 'approved' ? 'Mark as paid' : 'Locked'}</button>
+                      {activeRun.status === 'approved' && <button className="btn" onClick={() => void reopen()} title="Approved too soon? Back to draft">Reopen</button>}
+                      {activeRun.status === 'draft' && activeRun.lineCount === 0 && <button className="btn" style={{ color: 'var(--red)' }} onClick={() => void removeRun(activeRun)} title="Nothing paid in this run — remove it">Close out</button>}
                     </div>
                   </div>
                   <div className="grid-auto" style={{ marginTop: 16 }}>

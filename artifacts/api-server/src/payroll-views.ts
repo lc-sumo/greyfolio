@@ -12,7 +12,7 @@ export interface RunSummary extends PayrollRun {
 
 export function runSummary(run: PayrollRun, ctx: LedgerContext): RunSummary {
   const rows = ctx.lines.filter((l) => l.runId === run.id);
-  const f = paidFigures(rows);
+  const f = paidFigures(rows, ctx.lines);
   return { ...run, paidGross: f.gross, recovered: f.recovered, cash: f.cash, repCount: new Set(rows.map((l) => l.repId)).size, lineCount: f.lineCount };
 }
 
@@ -127,7 +127,7 @@ export function payrollRepDetail(ctx: LedgerContext, rep: Rep, runId: string): P
     paidInRun: paid
       .map((l) => ({ key: l.key, dealId: l.dealId, business: byId.get(l.dealId)?.business ?? '—', merchantContact: byId.get(l.dealId)?.merchantContact ?? '—', merchantEmail: byId.get(l.dealId)?.merchantEmail ?? '', merchantPhone: byId.get(l.dealId)?.merchantPhone ?? '', role: l.role, segmentKey: l.segmentKey, unitLabel: unitLabelOf(l.role === 'Void' ? (l.voids ?? l.key) : l.key), amount: l.amount, paidAt: l.paidAt, voided: gone.has(l.key), voids: l.voids ?? null }))
       .sort((a, b) => a.paidAt.localeCompare(b.paidAt) || Math.sign(b.amount) - Math.sign(a.amount) || a.key.localeCompare(b.key)),
-    paidSummary: paidFigures(paid),
+    paidSummary: paidFigures(paid, ctx.lines),
   };
 }
 
@@ -175,7 +175,7 @@ export function annualReport(ctx: LedgerContext, reps: Rep[], year: number): { y
   const rows = reps
     .map((rep) => {
       const mine = ctx.lines.filter((l) => l.repId === rep.id && l.paidAt.startsWith(prefix));
-      const f = paidFigures(mine);
+      const f = paidFigures(mine, ctx.lines);
       const standing = standingLines(mine);
       return { repId: rep.id, name: rep.name, email: rep.email, active: rep.active, grossPaid: f.gross, recovered: f.recovered, cash: f.cash, payouts: new Set(standing.map((l) => l.paidAt)).size, deals: new Set(standing.filter((l) => l.amount > 0).map((l) => l.dealId)).size };
     })

@@ -98,3 +98,17 @@ describe('paymentFor', () => {
     expect(paymentFor({ payback: 1000, termDays: 0, frequency: 'Daily' })).toBeNull();
   });
 });
+
+describe('LOC line fee (Revenued)', () => {
+  it('adds lineRate × line to gross at open; reps are paid on the whole', () => {
+    const r = commissionFor({ amount: 50_000, basis: 'funded', commissionRate: 0.05, lineAmount: 90_000, lineRate: 0.05, openerRate: 0.4 });
+    expect(r.commission).toBe(2_500);
+    expect(r.lineFee).toBe(4_500);
+    expect(r.gross).toBe(7_000);
+    expect(r.openerPayout).toBe(2_800);
+  });
+  it('is zero without a line or a rate', () => {
+    expect(commissionFor({ amount: 50_000, basis: 'funded', commissionRate: 0.05, lineAmount: 90_000 }).lineFee).toBe(0);
+    expect(commissionFor({ amount: 50_000, basis: 'funded', commissionRate: 0.05, lineRate: 0.05 }).lineFee).toBe(0);
+  });
+});

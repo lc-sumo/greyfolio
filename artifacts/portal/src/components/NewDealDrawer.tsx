@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api, post, type AdminDealDetail, type MasterBoard, type RepOption, type Settings } from '../lib/api';
 import { compact, day, fullDay, money, pct, todayIso } from '../lib/format';
-import { addBusinessDays, liveMath, num } from '../lib/math';
+import { addBusinessDays, liveMath, num, rate } from '../lib/math';
 import { parseIncrementGrid } from '@greystone/commission';
 import { useSession } from '../lib/session';
 import { Drawer, Pill, toneFor } from './ui';
@@ -37,7 +37,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
     return {
       business: existing.business, crmId: existing.crmId ?? '', merchantContact: existing.merchantContact, merchantEmail: existing.merchantEmail, merchantPhone: existing.merchantPhone, fundedDate: existing.date, lender: existing.lender, product: existing.product, parentId: existing.parentId ?? '',
       amount: String(amount), termDays: existing.termDays === null ? '' : String(existing.termDays), factor: existing.factor === null ? '' : String(existing.factor), apr: existing.apr === null ? '' : String(existing.apr), frequency: existing.frequency, commRate: pctStr(existing.commRate), psfPct: pctStr(existing.psfPct), psfMode: '%', psfDollars: '', originationFee: String(existing.originationFee),
-      referralPartner: existing.referralPartner ?? 'None', referralRate: pctStr(existing.referralRate), creditLine: existing.creditLine === null ? '' : String(existing.creditLine), drawInitialPct: pctStr(existing.commRate), drawSubsequentPct: pctStr(existing.drawSubsequentPct),
+      referralPartner: existing.referralPartner ?? 'None', referralRate: pctStr(existing.referralRate), creditLine: existing.creditLine === null ? '' : String(existing.creditLine), lineRate: existing.lineRate ? pctStr(existing.lineRate) : '', drawInitialPct: pctStr(existing.commRate), drawSubsequentPct: pctStr(existing.drawSubsequentPct),
       openerId: existing.roles.find((r) => r.role === 'Opener')?.repId ?? '', openerRate: pctStr(existing.roles.find((r) => r.role === 'Opener')?.rate), closerId: existing.roles.find((r) => r.role === 'Closer')?.repId ?? '', closerRate: pctStr(existing.roles.find((r) => r.role === 'Closer')?.rate), overrideId: existing.roles.find((r) => r.role === 'Override')?.repId ?? '', overrideRate: pctStr(existing.roles.find((r) => r.role === 'Override')?.rate),
       payout: sch ? 'increments' : 'upfront', commIncrements: sch ? String(sch.planned?.increments ?? sch.weeks) : '', commUpfrontPct: sch?.upfrontPct ? String(Math.round(sch.upfrontPct * 100)) : '', commRemainder: sch?.remainder ?? 'spread', commCadenceDays: String(sch?.cadenceDays ?? 7), commStartDate: sch?.startDate ?? '', commGrid: sch?.amounts ? sch.amounts.join('\n') : '',
     };
@@ -45,7 +45,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
   const [f, setF] = useState<F>(seed() ?? {
     business: '', crmId: '', merchantContact: '', merchantEmail: '', merchantPhone: '', fundedDate: todayIso(), lender: '', product: first?.name ?? 'MCA', parentId: '',
     amount: '', termDays: '120', factor: '1.35', apr: '', frequency: 'Daily', commRate: String((first?.comm ?? 0.12) * 100), psfPct: '0', psfMode: '%', psfDollars: '', originationFee: '0',
-    referralPartner: 'None', referralRate: '0', creditLine: '', drawInitialPct: '', drawSubsequentPct: '',
+    referralPartner: 'None', referralRate: '0', creditLine: '', lineRate: '', drawInitialPct: '', drawSubsequentPct: '',
     openerId: '', openerRate: '', closerId: '', closerRate: '', overrideId: '', overrideRate: '',
     payout: 'lender', commIncrements: '', commUpfrontPct: '', commRemainder: 'spread', commCadenceDays: '7', commStartDate: '', commGrid: '',
   });
@@ -73,7 +73,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
   useEffect(() => {
     if (!lender) return;
     if (skipDefaults.current) return;
-    setF((s) => ({ ...s, commIncrements: lender.terms === 'weekly' ? String(lender.weeks) : s.commIncrements ?? '', commUpfrontPct: lender.upfrontPct ? String(lender.upfrontPct * 100) : s.payout === 'lender' ? '' : s.commUpfrontPct ?? '', commRemainder: lender.remainder ?? 'spread', commCadenceDays: String(lender.cadenceDays ?? 7) }));
+    setF((s) => ({ ...s, lineRate: lender.locLineRate ? String(Math.round(lender.locLineRate * 10000) / 100) : '', commIncrements: lender.terms === 'weekly' ? String(lender.weeks) : s.commIncrements ?? '', commUpfrontPct: lender.upfrontPct ? String(lender.upfrontPct * 100) : s.payout === 'lender' ? '' : s.commUpfrontPct ?? '', commRemainder: lender.remainder ?? 'spread', commCadenceDays: String(lender.cadenceDays ?? 7) }));
   }, [lender?.name]); // eslint-disable-line react-hooks/exhaustive-deps
   // Partner change → prefill its rate.
   useEffect(() => { setF((s) => ({ ...s, referralRate: partner ? String(partner.pct * 100) : '0' })); }, [partner?.name]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -144,7 +144,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
         business: f.business, crmId: f.crmId || null, merchantContact: f.merchantContact, merchantEmail: f.merchantEmail, merchantPhone: f.merchantPhone, fundedDate: f.fundedDate, lender: f.lender, product: f.product,
         parentId: f.parentId || null, amount: num(f.amount), termDays: rule?.term ? num(f.termDays) || null : null, factor: rule?.factor ? num(f.factor) || null : null, apr: rule && !rule.factor ? num(f.apr) || null : null,
         frequency: f.frequency, commRate: num(f.commRate), psfPct: m.psfRate * 100, originationFee: num(f.originationFee), referralPartner: f.referralPartner === 'None' ? null : f.referralPartner,
-        creditLine: rule?.multiDraw ? num(f.creditLine) || null : null, drawInitialPct: rule?.multiDraw ? num(f.drawInitialPct) : null, drawSubsequentPct: rule?.multiDraw ? num(f.drawSubsequentPct) : null,
+        creditLine: rule?.multiDraw ? num(f.creditLine) || null : null, lineRate: rule?.multiDraw ? num(f.lineRate) : null, drawInitialPct: rule?.multiDraw ? num(f.drawInitialPct) : null, drawSubsequentPct: rule?.multiDraw ? num(f.drawSubsequentPct) : null,
         openerId: f.openerId || null, openerRate: num(f.openerRate), closerId: f.closerId || null, closerRate: num(f.closerRate), overrideId: f.overrideId || null, overrideRate: num(f.overrideRate),
         leadSource: priorDeals.length ? 'Existing client' : 'Direct',
         commIncrements: f.payout === 'upfront' ? 0 : incremental ? num(f.commIncrements) || null : null,
@@ -170,7 +170,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
       <div className="drawer-cols">
       <div className="form">
         <Field label="Product" span>
-          <select value={f.product} onChange={set('product')}>{settings.products.map((p) => <option key={p.name}>{p.name}</option>)}</select>
+          <select value={f.product} onChange={set('product')}>{settings.products.filter((p) => p.active !== false || p.name === f.product).map((p) => <option key={p.name}>{p.name}</option>)}</select>
           <span className="muted" style={{ fontSize: 14 }}>{explainer}</span>
         </Field>
         {rule?.parent && (
@@ -213,7 +213,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
         <Field label="Lender">
           <select value={f.lender} onChange={set('lender')}>
             <option value="">— select —</option>
-            {settings.lenders.filter((l) => !l.products?.length || l.products.includes(f.product ?? '')).map((l) => <option key={l.name} value={l.name}>{l.name}{canIncrement && l.terms === 'weekly' ? ` · ${l.weeks} increments` : ''}</option>)}
+            {settings.lenders.filter((l) => (l.active !== false || l.name === f.lender) && (!l.products?.length || l.products.includes(f.product ?? ''))).map((l) => <option key={l.name} value={l.name}>{l.name}{canIncrement && l.terms === 'weekly' ? ` · ${l.weeks} increments` : ''}</option>)}
           </select>
           <span className="subtle" style={{ fontSize: 13 }}>Only lenders set up for {f.product} (Settings › Lenders).</span>
         </Field>
@@ -226,6 +226,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
             <Field label="Credit line"><input inputMode="decimal" value={f.creditLine} onChange={set('creditLine')} /></Field>
             <Field label="Initial draw %"><input inputMode="decimal" value={f.drawInitialPct} onChange={(e) => setF((s) => ({ ...s, drawInitialPct: e.target.value, commRate: e.target.value }))} /></Field>
             <Field label="Subsequent draw %"><input inputMode="decimal" value={f.drawSubsequentPct} onChange={set('drawSubsequentPct')} /></Field>
+            <Field label="% of credit line" hint={num(f.lineRate) > 0 && num(f.creditLine) > 0 ? `${money(num(f.creditLine) * rate(f.lineRate))} on the line + ${money(num(f.amount) * rate(f.commRate))} on the draw` : lender?.locLineRate ? `${lender.name} pays ${Math.round(lender.locLineRate * 10000) / 100}% of the line at open` : 'Only some LOC lenders (Revenued) pay on the line itself'}><input inputMode="decimal" value={f.lineRate} onChange={set('lineRate')} placeholder="0" /></Field>
           </>
         )}
         <Field label="Commission %"><input inputMode="decimal" value={f.commRate} onChange={set('commRate')} /></Field>
@@ -234,7 +235,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
         </Field>
         <Field label="Total (comm + PSF)" hint="computed"><input readOnly value={money(m.commission + m.psf)} className="ro" /></Field>
         <Field label="Origination fee ($)"><input inputMode="decimal" value={f.originationFee} onChange={set('originationFee')} /></Field>
-        <Field label="Referral partner"><select value={f.referralPartner} onChange={set('referralPartner')}>{settings.partners.map((p) => <option key={p.name}>{p.name}</option>)}</select></Field>
+        <Field label="Referral partner"><select value={f.referralPartner} onChange={set('referralPartner')}>{settings.partners.filter((p) => p.active !== false || p.name === f.referralPartner).map((p) => <option key={p.name}>{p.name}</option>)}</select></Field>
         <Field label="Referral fee %" hint={partner && partner.name !== 'None' ? (partner.monthlyCap ? `Cap ${money(partner.monthlyCap)}/month · ${money(referralPaidThisMonth)} already owed this month${m.referralExcess ? ` · ${money(m.referralExcess)} over the cap is excess we do not pay` : ''}` : 'No cap') : 'Locked — set in Settings › Referral partners'}>
           <input readOnly className="ro" value={partner && partner.name !== 'None' ? `${(partner.pct * 100).toFixed(partner.pct * 100 % 1 ? 2 : 0)}%` : '—'} title="Locked — change it in Settings › Referral partners" />
         </Field>

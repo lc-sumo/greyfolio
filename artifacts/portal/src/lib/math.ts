@@ -1,5 +1,5 @@
 /** Live math for the new-deal form — the same chain the server runs, so the preview never disagrees with the saved deal. */
-import { commissionFor, paybackOf, paymentFor } from '@greystone/commission';
+import { addBusinessDays as domainAddBusinessDays, commissionFor, paybackOf, paymentFor } from '@greystone/commission';
 import type { ProductRule, ReferralPartner } from './api';
 
 export const num = (v: string | number | null | undefined) => {
@@ -31,6 +31,8 @@ export function liveMath(f: Record<string, string>, rule: ProductRule | undefine
     commissionRate: rate(f.commRate),
     psfRate: psfRateOf(f, amount),
     originationFee: num(f.originationFee),
+    lineAmount: rule?.multiDraw ? num(f.creditLine) : 0,
+    lineRate: rule?.multiDraw ? rate(f.lineRate) : 0,
     referralRate: partner?.pct ?? 0,
     referralCap: partner?.monthlyCap ?? null,
     referralPaidThisMonth,
@@ -44,9 +46,5 @@ export function liveMath(f: Record<string, string>, rule: ProductRule | undefine
   return { ...calc, payback, payment, termDays, psfRate: psfRateOf(f, amount), referralRaw, referralExcess: Math.max(0, Math.round((referralRaw - calc.referralFee) * 100) / 100), referralPaidThisMonth };
 }
 
-/** Estimated renewal / maturity in calendar days: business days × 1.4 (Mon–Fri only). */
-export function addBusinessDays(iso: string, businessDays: number): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + Math.round(businessDays * 1.4));
-  return d.toISOString().slice(0, 10);
-}
+/** Same Mon–Fri walk the server uses for mark and maturity dates. */
+export const addBusinessDays = (iso: string, businessDays: number): string => domainAddBusinessDays(iso, Math.round(businessDays));

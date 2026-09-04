@@ -137,3 +137,22 @@ export function startDigestScheduler(deps: NotifyDeps, hourUtc: number, now = ()
   timer.unref?.();
   return { stop: () => clearInterval(timer), tick };
 }
+
+/** A rep's question about one of their deals: a note on the deal (for the history) plus an email to every admin. */
+export async function repQuestion(deps: NotifyDeps, repId: string, dealId: string, text: string): Promise<{ noteId: string; sent: number }> {
+  const [ctx, reps] = await Promise.all([deps.repo.loadContext(), deps.repo.listReps()]);
+  const rep = reps.find((r) => r.id === repId);
+  const deal = ctx.deals.find((d) => d.id === dealId);
+  if (!rep || !deal) throw new Error('Rep or deal not found');
+  const body = String(text ?? '').trim();
+  const note = { id: `note-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, dealId, authorRepId: repId, body: `[Question from ${rep.name}] ${body}`, createdAt: new Date().toISOString() };
+  await deps.repo.insertNote(note);
+  await deps.repo.writeAudit({ actorRepId: repId, action: 'deal.note', targetRepId: null, path: `/api/me/deals/${dealId}/question`, detail: { noteId: note.id, question: true } });
+  const admins = reps.filter((r) => r.active && r.role === 'admin');
+  let sent = 0;
+  if (admins.length) {
+    const mail: Mail = { to: admins.map((a) => a.email), subject: `${rep.name} asked about ${deal.business} (${deal.id})`, text: [`${rep.name} sent a question from the portal about ${deal.business} (${deal.id}, ${deal.lender}, funded ${deal.date}):`, '', body, '', `Open the deal: ${deps.origin}/deals`, '', `— ${deps.appName}`].join('\n') };
+    if (await deliver(deps, repId, null, mail, `question ${dealId}`)) sent = admins.length;
+  }
+  return { noteId: note.id, sent };
+}

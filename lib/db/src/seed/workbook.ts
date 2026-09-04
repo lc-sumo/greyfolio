@@ -121,7 +121,7 @@ export const LENDERS: readonly Lender[] = [
   { name: 'Byzfunder', terms: 'upfront', weeks: 0, products: ['MCA'], clawback: { basis: 'days', count: 30 } },
   { name: 'RTMI', terms: 'upfront', weeks: 0, products: ['MCA'], clawback: { basis: 'days', count: 30 } },
   { name: 'Highland Hill', terms: 'weekly', weeks: 20, products: [...CONSOL], clawback: { basis: 'payments', count: 10 } }, // assumption
-  { name: 'Revenued', terms: 'upfront', weeks: 0, products: [...LOC], clawback: { basis: 'days', count: 30 } },
+  { name: 'Revenued', terms: 'upfront', weeks: 0, products: [...LOC], clawback: { basis: 'days', count: 30 }, locLineRate: 0.05 }, // assumption: 5% of the line at open + the draw % (confirm in Settings › Lenders)
 ];
 
 /**

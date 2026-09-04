@@ -43,6 +43,13 @@
       "when": 1788478317515,
       "tag": "0005_launch_notes_files_2fa",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788553208347,
+      "tag": "0006_loc_line_fee",
+      "breakpoints": true
     }
   ]
 }

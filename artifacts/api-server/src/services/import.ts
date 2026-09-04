@@ -21,7 +21,7 @@ import {
   type Rep,
 } from '@greystone/commission';
 import { collectedFromSheetStatus } from '@greystone/db/seed/columns';
-import { readFundedDealsCsv, type SheetRow } from '@greystone/db/seed/csv';
+import { readFundedDealsCsv, readFundedDealsTable, type SheetRow } from '@greystone/db/seed/csv';
 import { HttpError } from '../http-error.js';
 import type { Repo, Settings } from '../repo.js';
 import { referralPaidInMonth } from './deals.js';
@@ -52,6 +52,16 @@ export interface ImportRowPreview {
 export interface ImportOptions {
   /** Re-exporting the whole sheet: rows already in the portal are skipped instead of flagged. */
   skipExisting?: boolean;
+  /** An already-parsed grid (from an .xlsx upload) instead of CSV text. */
+  grid?: string[][];
+}
+
+/** Names the sheet uses that Settings / the roster do not know yet — each is one thing to add before the import can run. */
+export interface MissingRefs {
+  lenders: string[];
+  products: string[];
+  partners: string[];
+  reps: string[];
 }
 
 export interface ImportPreview {
@@ -60,6 +70,7 @@ export interface ImportPreview {
   /** Rows left alone because the portal already has them (only with `skipExisting`). */
   skippedExisting: number;
   problems: string[];
+  missing: MissingRefs;
   summary: { deals: number; draws: number; funded: number; withPayouts: number; warnings: number; clawbacks: number; problems: number };
 }
 
@@ -72,25 +83,42 @@ function repByName(reps: Rep[], name: string): Rep | undefined {
 /** Resolve every row against settings and the roster. Pure apart from reads. */
 export async function previewImport(repo: Repo, csv: string, opts: ImportOptions = {}): Promise<ImportPreview> {
   const [settings, reps, ctx] = await Promise.all([repo.getSettings(), repo.listReps(), repo.loadContext()]);
-  const read = readFundedDealsCsv(csv);
+  const read = opts.grid ? readFundedDealsTable(opts.grid) : readFundedDealsCsv(csv);
   const existing = new Set(ctx.deals.map((d) => d.id));
   const seen = new Set<string>();
+  const missing: MissingRefs = { lenders: [], products: [], partners: [], reps: [] };
+  const note = (list: string[], name: string) => {
+    const n = name.trim();
+    if (n && !list.some((x) => x.toLowerCase() === n.toLowerCase())) list.push(n);
+  };
   const ids = new Set(read.rows.map((r) => r.id).filter(Boolean));
   const rows: ImportRowPreview[] = read.rows.map((r) => {
     const problems: string[] = [];
     const warnings: string[] = [];
     const rule = settings.products.find((p) => p.name.toLowerCase() === r.product.toLowerCase());
     const lender = settings.lenders.find((l) => l.name.toLowerCase() === r.lender.toLowerCase());
-    if (!rule) problems.push(`Unknown product "${r.product}" — add it in Settings › Product rules`);
-    if (!lender) problems.push(`Unknown lender "${r.lender}" — add it in Settings › Lenders`);
-    if (r.referralPartner && r.referralPartner.toLowerCase() !== 'none' && !settings.partners.some((p) => p.name.toLowerCase() === r.referralPartner.toLowerCase())) problems.push(`Unknown referral partner "${r.referralPartner}"`);
+    if (!rule) {
+      problems.push(`Unknown product "${r.product}" — add it in Settings › Product rules`);
+      note(missing.products, r.product);
+    }
+    if (!lender) {
+      problems.push(`Unknown lender "${r.lender}" — add it in Settings › Lenders`);
+      note(missing.lenders, r.lender);
+    }
+    if (r.referralPartner && r.referralPartner.toLowerCase() !== 'none' && !settings.partners.some((p) => p.name.toLowerCase() === r.referralPartner.toLowerCase())) {
+      problems.push(`Unknown referral partner "${r.referralPartner}"`);
+      note(missing.partners, r.referralPartner);
+    }
     if (!r.date) problems.push('Date is missing or unreadable');
     else if (r.date > today()) problems.push(`Funded date ${r.date} is in the future`);
     if (!(r.amount > 0)) problems.push('Amount must be positive');
     const who = (label: string, name: string) => {
       if (!name) return null;
       const rep = repByName(reps, name);
-      if (!rep) problems.push(`${label} "${name}" is not on the roster — add the rep in Settings › Reps`);
+      if (!rep) {
+        problems.push(`${label} "${name}" is not on the roster — add the rep in Settings › Reps`);
+        note(missing.reps, name);
+      }
       return rep?.id ?? null;
     };
     const opener = who('Opener', r.opener);
@@ -147,6 +175,7 @@ export async function previewImport(repo: Repo, csv: string, opts: ImportOptions
     skipped: read.skipped,
     skippedExisting: rows.length - live.length,
     problems,
+    missing,
     summary: {
       deals: deals.length,
       draws: live.length - deals.length,
@@ -172,7 +201,7 @@ export async function commitImport(repo: Repo, csv: string, actorRepId: string, 
   const preview = await previewImport(repo, csv, opts);
   if (preview.summary.problems > 0) throw new HttpError(400, `Fix the ${preview.summary.problems} problem(s) in the preview before importing`);
   const [settings, reps, ctx] = await Promise.all([repo.getSettings(), repo.listReps(), repo.loadContext()]);
-  const read = readFundedDealsCsv(csv);
+  const read = opts.grid ? readFundedDealsTable(opts.grid) : readFundedDealsCsv(csv);
   const byLine = new Map(read.rows.map((r) => [r.line, r]));
   const known: Deal[] = [...ctx.deals];
   const created: Deal[] = [];
@@ -285,7 +314,13 @@ export async function commitImport(repo: Repo, csv: string, actorRepId: string, 
     if (!deal) continue;
     paidDeals.set(deal.id, r.repPaid);
   }
-  const runId = paidDeals.size ? `import-${today()}` : null;
+  // One import run per commit: a second import the same day gets its own id.
+  const runIds = new Set((await repo.listRuns()).map((r) => r.id));
+  let runId: string | null = null;
+  if (paidDeals.size) {
+    runId = `import-${today()}`;
+    for (let n = 2; runIds.has(runId); n++) runId = `import-${today()}-${n}`;
+  }
   if (runId) {
     const existingKeys = new Set(ctx.lines.map((l) => l.key));
     for (const [dealId, paidAt] of paidDeals) {

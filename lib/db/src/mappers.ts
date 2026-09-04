@@ -79,6 +79,8 @@ export function toDeal(d: DealRow, draws: DealDrawRow[] = []): Deal {
     commSchedule: d.commSchedule ?? null,
     creditLine: d.creditLine,
     drawInitialPct: d.drawInitialPct,
+    lineRate: d.lineRate,
+    lineFee: d.lineFee,
     drawSubsequentPct: d.drawSubsequentPct,
     dealStatus: d.dealStatus,
     repPaid: d.repPaid,

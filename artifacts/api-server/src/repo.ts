@@ -2,7 +2,7 @@ import type { Clawback, Deal, DealDraw, Lender, LedgerContext, PayoutLine, Payro
 
 export interface AuditEntry {
   actorRepId: string;
-  action: 'login' | 'logout' | 'view-as' | 'deal.create' | 'deal.update' | 'deal.draw' | 'deal.collection' | 'payroll.run' | 'payroll.pay' | 'settings.update' | 'team.update' | 'rep.update' | 'rep.password' | 'login.failed' | 'deal.delete' | 'payroll.void' | 'deal.import' | 'password.reset' | 'rep.totp' | 'deal.note' | 'deal.file' | 'deal.clawback' | 'deal.remittance' | 'mail.sent';
+  action: 'login' | 'logout' | 'view-as' | 'deal.create' | 'deal.update' | 'deal.draw' | 'deal.collection' | 'payroll.run' | 'payroll.pay' | 'settings.update' | 'team.update' | 'rep.update' | 'rep.password' | 'login.failed' | 'deal.delete' | 'payroll.void' | 'deal.import' | 'password.reset' | 'rep.totp' | 'deal.note' | 'deal.file' | 'deal.clawback' | 'deal.remittance' | 'mail.sent' | 'deal.draw.delete' | 'payroll.run.delete' | 'deal.contact' | 'deal.draw.update' | 'deal.clawback.update' | 'deal.clawback.delete' | 'payroll.run.reopen' | 'settings.rename';
   targetRepId: string | null;
   path: string | null;
   detail?: Record<string, unknown>;
@@ -52,18 +52,26 @@ export interface Repo {
   getSetting<T>(key: string): Promise<T | null>;
   getSettings(): Promise<Settings>;
   writeAudit(entry: AuditEntry): Promise<void>;
-  listAudit(limit?: number): Promise<AuditEntry[]>;
+  listAudit(limit?: number, offset?: number): Promise<AuditEntry[]>;
   // Deal writes (admin only — enforced by the routes)
   insertDeal(deal: Deal): Promise<void>;
   updateDeal(id: string, patch: DealPatch): Promise<void>;
   /** Removes the deal and its draws. Callers must first prove nothing in the ledger references it. */
   deleteDeal(id: string): Promise<void>;
   insertClawback(c: Clawback): Promise<void>;
+  updateClawback(id: string, patch: Partial<Pick<Clawback, 'amount' | 'date' | 'reason'>>): Promise<void>;
+  deleteClawback(id: string): Promise<void>;
+  /** Cascade a settings rename onto the deals that reference the old name. Returns how many changed. */
+  renameRef(kind: 'lender' | 'partner' | 'product', from: string, to: string): Promise<number>;
   insertDraw(dealId: string, draw: DealDraw): Promise<void>;
   updateDraw(dealId: string, ref: string, patch: { collected: number | null; schedule: WeeklySchedule | null }): Promise<void>;
+  deleteDraw(dealId: string, ref: string): Promise<void>;
+  /** Re-price a draw in place (same ref). */
+  replaceDraw(dealId: string, ref: string, draw: DealDraw): Promise<void>;
   // Payroll (admin only — enforced by the routes)
   insertRun(run: PayrollRun): Promise<void>;
   updateRun(id: string, patch: Partial<Pick<PayrollRun, 'status' | 'label'>> & { approvedAt?: string | null; paidAt?: string | null }): Promise<void>;
+  deleteRun(id: string): Promise<void>;
   /** One transaction: append ledger rows, roll up clawbacks, stamp repPaid on fully paid deals. */
   commitPayout(commit: PayoutCommit): Promise<void>;
   // Settings, teams, reps (admin only — enforced by the routes)

@@ -12,11 +12,23 @@ import { adminDealDetail, adminDealRow, adminRenewals } from '../../../api-serve
 import { adminMerchants, adminOverview } from '../../../api-server/src/analytics-views';
 import { memoryRepo } from '../../../api-server/src/repo.memory';
 import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repPayHistory, repRenewals, repStatements, repWallet } from '../../../api-server/src/scope';
-import { addDraw, createDeal, deleteDeal, recordClawback, setCollection, setCrmId, setDealStatus, updateSplits, updateTerms } from '../../../api-server/src/services/deals';
+import { addDraw, createDeal, deleteClawback, deleteDeal, deleteDraw, recordClawback, setCollection, setCrmId, setDealStatus, updateClawback, updateContact, updateDrawTerms, updateSplits, updateTerms } from '../../../api-server/src/services/deals';
 import { addFile, addNote, removeFile, removeNote } from '../../../api-server/src/services/notes';
-import { advanceRun, createRun, paySelected, voidPayout } from '../../../api-server/src/services/payroll';
+import { advanceRun, createRun, deleteRun, paySelected, reopenRun, voidPayout } from '../../../api-server/src/services/payroll';
 import { commitImport, previewImport } from '../../../api-server/src/services/import';
 import { commitRemittance, previewRemittance } from '../../../api-server/src/services/remittance';
+import { base64ToBytes, readXlsx } from '@greystone/db/seed/xlsx';
+
+/** Browser-side .xlsx decoding for the demo: DecompressionStream stands in for node:zlib. */
+async function demoSheetGrid(body: Record<string, unknown>): Promise<string[][] | undefined> {
+  if (typeof body.xlsx !== 'string' || !body.xlsx) return undefined;
+  const inflate = async (b: Uint8Array) => new Uint8Array(await new Response(new Blob([b as BlobPart]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
+  const wb = await readXlsx(base64ToBytes(body.xlsx), inflate);
+  const ok = (g: string[][]) => g.some((r) => r.some((c) => c.trim().toLowerCase() === 'business name') && r.some((c) => c.trim().toLowerCase() === 'lender'));
+  const sheet = wb.sheets.find((s) => s.name.toLowerCase() === 'funded deals' && ok(s.grid)) ?? wb.sheets.find((s) => /funded/i.test(s.name) && ok(s.grid)) ?? wb.sheets.find((s) => ok(s.grid));
+  if (!sheet) throw new ApiError(400, `No FUNDED DEALS tab found (sheets: ${wb.sheets.map((s) => s.name).join(', ')})`);
+  return sheet.grid;
+}
 import { createRep, createTeam, deleteTeam, saveCrm, saveLenders, savePartners, savePayroll, saveProducts, saveThresholds, updateRep, updateTeam, usage } from '../../../api-server/src/services/settings';
 import { annualReport, payrollRepDetail, payrollReps, preview, runSummary } from '../../../api-server/src/payroll-views';
 import { ApiError, type SessionUser } from './api';
@@ -168,6 +180,13 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     return json(repDashboard(ctx, d.reps, d.runs, effective, from, to, 'Twice monthly'));
   }
   if (p === '/api/me/wallet') return json(repWallet(ctx, effective));
+  const qm = p.match(/^\/api\/me\/deals\/([^/]+)\/question$/);
+  if (qm && method === 'POST') {
+    const text = String(body.text ?? '').trim();
+    if (!text) throw new ApiError(400, 'Write your question first');
+    await repo.insertNote({ id: `note-${Date.now().toString(36)}`, dealId: decodeURIComponent(qm[1]!), authorRepId: me.repId, body: `[Question from ${me.name}] ${text}`, createdAt: new Date().toISOString() });
+    return json({ ok: true, emailed: 0 });
+  }
   if (p === '/api/me/deals') {
     const rows = repDeals(ctx.deals, effective).map((x) => repDealView(x, effective, ctx.lines, ctx.clawbacks));
     return json({ count: rows.length, deals: rows });
@@ -184,7 +203,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
   if (p === '/api/me/clawbacks') return json({ clawbacks: repClawbackViews(ctx, effective) });
   if (p === '/api/me/statements') return json({ statements: repStatements(ctx, d.runs, effective) });
   if (p === '/api/me/payments') return json(repPayHistory(ctx, d.runs, effective));
-  if (p === '/api/me/renewals') return json({ renewals: repRenewals(ctx, effective, { renewalMark: settings.thresholds.renewalMark }, today) });
+  if (p === '/api/me/renewals') return json({ renewals: repRenewals(ctx, effective, { renewalMark: settings.thresholds.renewalMark, additionalCapitalAfterDays: settings.thresholds.additionalCapitalAfterDays }, today), thresholds: { renewalMark: settings.thresholds.renewalMark, additionalCapitalAfterDays: settings.thresholds.additionalCapitalAfterDays } });
   if (p === '/api/me/leaderboard') return json({ rows: leaderboard(ctx, d.reps, effective) });
   if (p === '/api/me/monthly') return json({ series: repMonthly(ctx, effective, (q.get('months') ?? '').split(',').filter(Boolean)) });
 
@@ -217,7 +236,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
       }),
     });
   }
-  if (p === '/api/admin/audit') return json({ entries: await repo.listAudit(100) });
+  if (p === '/api/admin/audit') { const lim = Number(q.get('limit') ?? 100); const entries = await repo.listAudit(lim); return json({ entries, limit: lim, offset: 0, hasMore: entries.length === lim }); }
   if (p === '/api/admin/settings') return json(settings);
   if (p === '/api/admin/settings/usage') return json(await usage(repo));
   try {
@@ -235,8 +254,8 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     const tm = p.match(/^\/api\/admin\/teams\/([^/]+)$/);
     if (tm && method === 'PATCH') return json(await updateTeam(repo, decodeURIComponent(tm[1]!), body as never, me.repId));
     if (tm && method === 'DELETE') { await deleteTeam(repo, decodeURIComponent(tm[1]!), me.repId); return json(null); }
-    if (p === '/api/admin/import/preview' && method === 'POST') return json(await previewImport(repo, String(body.csv ?? ''), { skipExisting: !!body.skipExisting }));
-    if (p === '/api/admin/import' && method === 'POST') return json(await commitImport(repo, String(body.csv ?? ''), me.repId, { skipExisting: !!body.skipExisting }));
+    if (p === '/api/admin/import/preview' && method === 'POST') return json(await previewImport(repo, String(body.csv ?? ''), { skipExisting: !!body.skipExisting, grid: await demoSheetGrid(body) }));
+    if (p === '/api/admin/import' && method === 'POST') return json(await commitImport(repo, String(body.csv ?? ''), me.repId, { skipExisting: !!body.skipExisting, grid: await demoSheetGrid(body) }));
     if (p === '/api/admin/remittance/preview' && method === 'POST') return json(await previewRemittance(repo, String(body.csv ?? '')));
     if (p === '/api/admin/remittance' && method === 'POST') return json(await commitRemittance(repo, String(body.csv ?? ''), me.repId));
     if (p === '/api/admin/reports/annual') return json(annualReport(ctx, d.reps, Number(q.get('year') ?? today.slice(0, 4))));
@@ -284,10 +303,13 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
       return json({ rows: plan.lines.length, reversed: plan.reversed, recoveriesReturned: plan.recoveriesReturned, dealsUnstamped: plan.dealsUnstamped });
     }
     if (p === '/api/admin/payroll/preview' && method === 'POST') return json(preview(ctx, String(body.repId ?? ''), Array.isArray(body.selectedKeys) ? (body.selectedKeys as string[]) : []));
-    const pr = p.match(/^\/api\/admin\/payroll\/runs\/([^/]+)\/(advance|pay|reps\/([^/]+))$/);
+    const rd = p.match(/^\/api\/admin\/payroll\/runs\/([^/]+)$/);
+    if (rd && method === 'DELETE') return json(await deleteRun(repo, decodeURIComponent(rd[1]!), me.repId));
+    const pr = p.match(/^\/api\/admin\/payroll\/runs\/([^/]+)\/(advance|reopen|pay|reps\/([^/]+))$/);
     if (pr) {
       const runId = decodeURIComponent(pr[1]!);
-      if (pr[2] === 'advance') return json(await advanceRun(repo, runId, me.repId));
+      if (pr[2] === 'advance') return json({ ...(await advanceRun(repo, runId, me.repId)), notified: 0 });
+      if (pr[2] === 'reopen') return json(await reopenRun(repo, runId, me.repId));
       if (pr[2] === 'pay') {
         const plan = await paySelected(repo, { runId, repId: String(body.repId ?? ''), selectedKeys: Array.isArray(body.selectedKeys) ? (body.selectedKeys as string[]) : [] }, me.repId);
         return json({ repId: plan.repId, runId: plan.runId, gross: plan.gross, withheld: plan.withheld, net: plan.net, lines: plan.lines.length, recoveries: plan.recoveries.length, dealsFullyPaid: plan.dealsFullyPaid, uncollectedDealIds: plan.uncollectedDealIds });
@@ -321,6 +343,8 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
         await recordClawback(repo, id, body as never, me.repId);
         return json({ ...(await detail(id)), notified: 0 });
       }
+      if (kind === 'clawbacks' && sub && method === 'PATCH') { await updateClawback(repo, id, sub, body as never, me.repId); return json(await detail(id)); }
+      if (kind === 'clawbacks' && sub && method === 'DELETE') { await deleteClawback(repo, id, sub, me.repId); return json(await detail(id)); }
       if (kind === 'notes') {
         if (method === 'POST') await addNote(repo, id, body.body, me.repId);
         if (method === 'DELETE' && sub) await removeNote(repo, id, sub, me.repId);
@@ -333,6 +357,11 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
         return json({ files: (await repo.listFiles(id)).map((f) => ({ ...f, uploadedByName: names.get(f.uploadedBy) ?? f.uploadedBy })) });
       }
     }
+    const dm2 = p.match(/^\/api\/admin\/deals\/([^/]+)\/draws\/([^/]+)$/);
+    if (dm2 && method === 'PATCH') { await updateDrawTerms(repo, decodeURIComponent(dm2[1]!), dm2[2]!, body as never, me.repId); return json(await detail(decodeURIComponent(dm2[1]!))); }
+    if (dm2 && method === 'DELETE') { await deleteDraw(repo, decodeURIComponent(dm2[1]!), dm2[2]!, me.repId); return json(await detail(decodeURIComponent(dm2[1]!))); }
+    const cm = p.match(/^\/api\/admin\/deals\/([^/]+)\/contact$/);
+    if (cm && method === 'PATCH') { const r2 = await updateContact(repo, decodeURIComponent(cm[1]!), body as never, me.repId); return json({ ...(await detail(decodeURIComponent(cm[1]!))), updatedDeals: r2.updated }); }
     const m = p.match(/^\/api\/admin\/deals\/([^/]+)(?:\/(splits|status|draws|collection|crm|terms))?$/);
     if (m) {
       const id = decodeURIComponent(m[1]!);

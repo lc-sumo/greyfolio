@@ -1,7 +1,6 @@
-# Replit: one service that builds the portal, syncs the schema and serves API + portal on 8080.
-# Schema sync uses drizzle-kit push (diff the schema file against the database) rather than the
-# migration ledger, because Replit's Publish creates production tables by copying development and
-# leaves no ledger behind; push adds whatever columns the code expects.
+# Replit: one service that builds the portal and serves API + portal on 8080.
+# The development run command syncs the development schema. Production schema changes are owned
+# by Replit's Publish flow; the production run command must not execute migrations or other DDL.
 # Set Secrets first (see README "Launch checklist" and docs/DEPLOY.md):
 #   DATABASE_URL (Replit PostgreSQL adds this), SESSION_SECRET (32+ chars),
 #   BASE_URL and APP_ORIGIN (your repl URL), NODE_ENV=production, SEED=workbook on the first boot then none,
@@ -20,7 +19,7 @@ PORTAL_DIST = "artifacts/portal/dist"
 [deployment]
 deploymentTarget = "autoscale"
 build = ["sh", "-c", "pnpm install --frozen-lockfile && pnpm portal:build"]
-run = ["sh", "-c", "./lib/db/node_modules/.bin/tsx lib/db/src/up.ts && ([ \"${SEED:-none}\" = none ] || ./lib/db/node_modules/.bin/tsx lib/db/src/seed/run.ts) && PORTAL_DIST=\"$PWD/artifacts/portal/dist\" ./artifacts/api-server/node_modules/.bin/tsx artifacts/api-server/src/index.ts"]
+run = ["sh", "-c", "PORTAL_DIST=\"$PWD/artifacts/portal/dist\" ./artifacts/api-server/node_modules/.bin/tsx artifacts/api-server/src/index.ts"]
 
 [[ports]]
 localPort = 8080

@@ -1,2 +1,3 @@
 - [pnpm Publish version](pnpm-publish-version.md) — Keep the pnpm pin aligned with Replit’s provided installer to avoid recursive bootstrap failures.
 - [Portal distribution path](portal-dist-publish-path.md) — Anchor the built portal path before pnpm enters the filtered API package.
+- [Production schema ownership](production-schema-ownership.md) — Replit Publish owns production schema changes; never run migrations during app startup.

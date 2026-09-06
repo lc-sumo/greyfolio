@@ -468,6 +468,25 @@ export const commissionTasks = pgTable(
   (t) => [index('commission_tasks_rep_idx').on(t.repId, t.status), index('commission_tasks_deal_idx').on(t.dealId)],
 );
 
+/** "Remember this device" after a two-factor sign-in: the browser holds a secret, this row holds its hash. */
+export const commissionTrustedDevices = pgTable(
+  'commission_trusted_devices',
+  {
+    id: text('id').primaryKey(),
+    repId: text('rep_id')
+      .notNull()
+      .references(() => commissionReps.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    /** Browser / OS summary from the user agent, for the "your devices" list. */
+    label: text('label').notNull().default(''),
+    ip: text('ip'),
+    createdAt: createdAt(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [index('commission_trusted_devices_rep_idx').on(t.repId), uniqueIndex('commission_trusted_devices_hash_idx').on(t.tokenHash)],
+);
+
 /* ------------------------------------------------------------------ */
 /* Relations                                                           */
 /* ------------------------------------------------------------------ */

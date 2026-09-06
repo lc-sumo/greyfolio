@@ -42,6 +42,7 @@ export async function disableTotp(repo: Repo, repId: string, code: unknown): Pro
   if (!t.secret) return;
   if (t.enabled && !verifyTotp(t.secret, code)) throw new HttpError(400, 'Enter a current code from your authenticator to turn two-factor off');
   await repo.setTotp(repId, { secret: null, enabled: false });
+  await repo.deleteTrustedDevices(repId);
   await repo.writeAudit({ actorRepId: repId, action: 'rep.totp', targetRepId: null, path: '/api/me/totp/disable', detail: { enabled: false } });
 }
 
@@ -50,5 +51,6 @@ export async function resetTotp(repo: Repo, repId: string, actorRepId: string): 
   const rep = await repo.findRep(repId);
   if (!rep) throw new HttpError(404, 'Rep not found');
   await repo.setTotp(repId, { secret: null, enabled: false });
-  await repo.writeAudit({ actorRepId, action: 'rep.totp', targetRepId: repId, path: `/api/admin/reps/${repId}/totp`, detail: { reset: true } });
+  await repo.deleteTrustedDevices(repId);
+  await repo.writeAudit({ actorRepId, action: 'rep.totp', targetRepId: repId, path: `/api/admin/reps/${repId}/totp`, detail: { reset: true, devicesForgotten: true } });
 }

@@ -205,7 +205,7 @@ describe('rep-facing fixes', () => {
     expect(only.body.entries.every((e: { action: string }) => e.action === 'login')).toBe(true);
     const csv = await admin.get('/api/admin/audit.csv');
     expect(csv.headers['content-type']).toMatch(/text\/csv/);
-    expect(csv.text.split('\r\n')[0]).toBe('"At","Actor","Action","Target","IP","Path","Detail"');
+    expect(csv.text.split('\r\n')[0]).toBe('"At","Actor","Action","Target","IP","Location","Path","Detail"');
     expect(page.body.entries[0]).toMatchObject({ actorName: 'Leor', ip: expect.any(String) });
   });
 });

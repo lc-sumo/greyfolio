@@ -4,9 +4,10 @@ import { HttpError, canViewAs, currentUser, requireRole } from '../auth/middlewa
 import type { Repo } from '../repo.js';
 import { resetTotp } from '../services/twofactor.js';
 import { buildBackup } from '../services/backup.js';
+import type { Geo } from '../services/geo.js';
 
 /** Admin surface for Phase 2: roster, rep option lists, View-as targets, audit trail. Phase 4+ adds deals. */
-export function adminRouter(repo: Repo): Router {
+export function adminRouter(repo: Repo, geo?: Geo): Router {
   const r = Router();
 
   r.get('/reps', requireRole('admin'), async (_req, res) => {
@@ -80,8 +81,10 @@ export function adminRouter(repo: Repo): Router {
     const name = new Map(reps.map((x) => [x.id, x.name]));
     const filtered = raw.filter((e) => (!action || e.action === action) && (!rep || e.actorRepId === rep || e.targetRepId === rep));
     const page = action || rep ? filtered.slice(offset, offset + limit) : filtered;
+    const where = geo ? await geo.labels(page.map((e) => e.ip)) : new Map<string, string>();
     return {
-      entries: page.map((e) => ({ ...e, actorName: name.get(e.actorRepId) ?? e.actorRepId, targetName: e.targetRepId ? name.get(e.targetRepId) ?? e.targetRepId : null })),
+      entries: page.map((e) => ({ ...e, actorName: name.get(e.actorRepId) ?? e.actorRepId, targetName: e.targetRepId ? name.get(e.targetRepId) ?? e.targetRepId : null, location: e.ip ? where.get(e.ip) ?? null : null })),
+      geo: !!geo?.enabled,
       limit,
       offset,
       hasMore: (action || rep ? filtered.length : raw.length) > offset + limit || (!action && !rep && raw.length === limit),
@@ -97,9 +100,10 @@ export function adminRouter(repo: Repo): Router {
   r.get('/audit.csv', requireRole('admin'), async (req, res) => {
     const [reps, all] = await Promise.all([repo.listReps(), repo.listAudit(5000, 0)]);
     const name = new Map(reps.map((x) => [x.id, x.name]));
+    const where = geo ? await geo.labels(all.map((e) => e.ip)) : new Map<string, string>();
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const head = ['At', 'Actor', 'Action', 'Target', 'IP', 'Path', 'Detail'].map(esc).join(',');
-    const body = all.map((e) => [e.at ?? '', name.get(e.actorRepId) ?? e.actorRepId, e.action, e.targetRepId ? name.get(e.targetRepId) ?? e.targetRepId : '', e.ip ?? '', e.path ?? '', e.detail ? JSON.stringify(e.detail) : ''].map(esc).join(','));
+    const head = ['At', 'Actor', 'Action', 'Target', 'IP', 'Location', 'Path', 'Detail'].map(esc).join(',');
+    const body = all.map((e) => [e.at ?? '', name.get(e.actorRepId) ?? e.actorRepId, e.action, e.targetRepId ? name.get(e.targetRepId) ?? e.targetRepId : '', e.ip ?? '', e.ip ? where.get(e.ip) ?? '' : '', e.path ?? '', e.detail ? JSON.stringify(e.detail) : ''].map(esc).join(','));
     res.type('text/csv').attachment('audit-log.csv').send([head, ...body].join('\r\n') + '\r\n');
   });
 

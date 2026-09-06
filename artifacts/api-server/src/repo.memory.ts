@@ -1,5 +1,5 @@
 import type { Clawback, Deal, DealDraw, LedgerContext, PayoutLine, PayrollRun, Rep, Team, WeeklySchedule } from '@greystone/commission';
-import { NOTIFICATION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AuditEntry, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Repo, type RepFile, type RepTask, type Settings, type TotpState } from './repo.js';
+import { NOTIFICATION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AuditEntry, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Repo, type RepFile, type RepTask, type Settings, type TotpState, type TrustedDevice } from './repo.js';
 import { requestMeta } from './auth/request-context.js';
 
 export interface MemoryData {
@@ -27,7 +27,28 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
   const playbooks: Playbook[] = [];
   const firings: PlaybookFiring[] = [];
   const tasks: RepTask[] = [];
+  const devices: TrustedDevice[] = [];
   return {
+    async listTrustedDevices(repId) {
+      return devices.filter((d) => d.repId === repId).map((d) => ({ ...d })).sort((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt));
+    },
+    async findTrustedDevice(tokenHash) {
+      return devices.find((d) => d.tokenHash === tokenHash) ?? null;
+    },
+    async insertTrustedDevice(d) {
+      devices.push({ ...d });
+    },
+    async touchTrustedDevice(id, patch) {
+      const d = devices.find((x) => x.id === id);
+      if (d) Object.assign(d, patch);
+    },
+    async deleteTrustedDevice(id) {
+      const i = devices.findIndex((x) => x.id === id);
+      if (i >= 0) devices.splice(i, 1);
+    },
+    async deleteTrustedDevices(repId) {
+      for (let i = devices.length - 1; i >= 0; i--) if (devices[i]!.repId === repId) devices.splice(i, 1);
+    },
     async listAllNotes() {
       return [...notes];
     },

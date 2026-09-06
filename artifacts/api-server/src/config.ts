@@ -29,6 +29,8 @@ export interface AppConfig {
   appName: string;
   /** Daily renewal digest to admins (UTC hour it goes out; -1 = off). */
   digestHourUtc: number;
+  /** IP → location on the audit log: 'ipapi' (default) or 'off'. */
+  geo: 'ipapi' | 'off';
 }
 
 export function configFromEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -63,5 +65,6 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
     mail: mailConfigFromEnv(env, production),
     appName: env.APP_NAME || 'Greystone Commission Portal',
     digestHourUtc: env.RENEWAL_DIGEST_HOUR_UTC === 'off' ? -1 : Number(env.RENEWAL_DIGEST_HOUR_UTC ?? 13),
+    geo: env.GEO_PROVIDER === 'off' || env.NODE_ENV === 'test' || env.VITEST || process.env.VITEST ? 'off' : 'ipapi',
   };
 }

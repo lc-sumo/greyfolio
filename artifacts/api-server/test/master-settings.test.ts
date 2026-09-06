@@ -92,7 +92,7 @@ describe('required two-factor for admins', () => {
     const setup = await admin.post('/api/me/totp/setup');
     await admin.post('/api/me/totp/enable').send({ code: totpCode(setup.body.secret) });
     const on = await admin.put('/api/admin/settings/security').send({ requireTotpForAdmins: true });
-    expect(on.body.security).toEqual({ requireTotpForAdmins: true });
+    expect(on.body.security).toEqual({ requireTotpForAdmins: true, idleMinutes: 120, totpRememberDays: 7 });
     expect((await admin.get('/auth/me')).body.mustEnrollTotp).toBe(false);
     // A second admin without two-factor is held at the enrolment screen.
     expect((await admin.patch('/api/admin/reps/rep-raymond-amato').send({ role: 'admin' })).status).toBe(200);
@@ -114,6 +114,6 @@ describe('required two-factor for admins', () => {
     expect((await rep.get('/api/me/deals')).status).toBe(200);
     // Switching it off again lifts the gate.
     await admin.put('/api/admin/settings/security').send({ requireTotpForAdmins: false });
-    expect((await admin.get('/api/admin/settings')).body.security).toEqual({ requireTotpForAdmins: false });
+    expect((await admin.get('/api/admin/settings')).body.security).toEqual({ requireTotpForAdmins: false, idleMinutes: 120, totpRememberDays: 7 });
   });
 });

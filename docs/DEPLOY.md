@@ -52,6 +52,7 @@ Set `SEED=workbook` for the very first boot only, then `none`.
 | `AUTH_PASSWORD` | no | `off` to disable email + password sign-in (then SSO is required) |
 | `MAIL_PROVIDER` | no | `sendgrid`, `resend`, `postmark`, `log` (dev) or `off` |
 | `SENDGRID_API_KEY` | no | Accepted in place of `MAIL_API_KEY` when the provider is SendGrid |
+| `GEO_PROVIDER` | no | `ipapi` (default: IP → city on the audit log and device list, one lookup per address, cached) or `off` |
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | no | SSO (Google Workspace, Okta, Entra) |
 | `MAIL_API_KEY`, `MAIL_FROM` | with mail | Provider key and verified sender |
 | `RENEWAL_DIGEST_HOUR_UTC` | no | Hour the renewal digest goes to admins (default 13); `off` disables |

@@ -89,7 +89,7 @@ describe('two-factor sign-in', () => {
 
     const again = request.agent(app);
     const first = await again.post('/auth/password-login').send({ email: 'julian.ribak@greystoneus.com', password: 'Harbor-Cedar-1234' });
-    expect(first.body).toEqual({ ok: false, totp: true });
+    expect(first.body).toEqual({ ok: false, totp: true, rememberDays: 7 });
     expect((await again.get('/auth/me')).status).toBe(401);
     expect((await again.post('/auth/totp').send({ code: '123456' })).status).toBe(401);
     const second = await again.post('/auth/totp').send({ code: totpCode(setup.body.secret) });

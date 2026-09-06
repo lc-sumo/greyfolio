@@ -664,6 +664,18 @@ function PortalTab({ settings, run }: { settings: SettingsData; run: Run }) {
       </Card>
       <Card title="Security" extra="passwords and two-factor">
         <Toggle on={sec.requireTotpForAdmins} onChange={(v) => setSec({ ...sec, requireTotpForAdmins: v })} label="Require two-factor for admins" hint="Admins who have not set up an authenticator are held at a setup screen until they do. Turn on your own first." />
+        <label className="field" style={{ marginTop: 8 }}><span className="label">Sign out after inactivity</span>
+          <select value={sec.idleMinutes} onChange={(e) => setSec({ ...sec, idleMinutes: Number(e.target.value) })}>
+            {[[30, '30 minutes'], [60, '1 hour'], [120, '2 hours'], [240, '4 hours'], [480, '8 hours'], [0, 'Never']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+          <span className="subtle" style={{ fontSize: 13 }}>Everyone, admins included. A tab left open returns to the sign-in screen; the server refuses the old session too.</span>
+        </label>
+        <label className="field" style={{ marginTop: 8 }}><span className="label">Remember a device after a two-factor code</span>
+          <select value={sec.totpRememberDays} onChange={(e) => setSec({ ...sec, totpRememberDays: Number(e.target.value) })}>
+            {[[0, 'Ask every sign-in'], [1, '1 day'], [7, '7 days'], [14, '14 days'], [30, '30 days']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+          <span className="subtle" style={{ fontSize: 13 }}>The rep still types their password; the code is skipped on a remembered browser. Reps forget devices from the sidebar; resetting two-factor forgets them all.</span>
+        </label>
         <button className="btn primary" style={{ marginTop: 12 }} onClick={() => void run('Security saved', () => post('/api/admin/settings/security', sec, 'PUT'))}>Save security</button>
         <div className="subtle" style={{ fontSize: 13, marginTop: 10 }}>Passwords: 10+ characters with a letter and a number; five wrong tries lock an email for 15 minutes. Changing a password signs that account out everywhere else. Reps set and reset their own from the sign-in screen; you can also set one or send an invite under Reps.</div>
         <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border-light)' }}>

@@ -344,7 +344,12 @@ export async function saveNotifications(repo: Repo, input: Record<string, unknow
 }
 
 export async function saveSecurity(repo: Repo, input: Record<string, unknown>, actorRepId: string): Promise<Settings['security']> {
-  const sec: Settings['security'] = { requireTotpForAdmins: input.requireTotpForAdmins === true };
+  const current = (await repo.getSettings()).security;
+  const idle = input.idleMinutes === undefined ? current.idleMinutes : Math.round(Number(input.idleMinutes));
+  if (!Number.isFinite(idle) || idle < 0 || idle > 24 * 60) throw new HttpError(400, 'Idle sign-out must be 0 (never) to 1440 minutes');
+  const remember = input.totpRememberDays === undefined ? current.totpRememberDays : Math.round(Number(input.totpRememberDays));
+  if (!Number.isFinite(remember) || remember < 0 || remember > 90) throw new HttpError(400, 'Remembered devices must be 0 (ask every time) to 90 days');
+  const sec: Settings['security'] = { requireTotpForAdmins: input.requireTotpForAdmins === true, idleMinutes: idle, totpRememberDays: remember };
   if (sec.requireTotpForAdmins) {
     // Never lock out the person flipping the switch: the actor must already be enrolled.
     const mine = await repo.getTotp(actorRepId);

@@ -15,17 +15,21 @@ import { healthRouter } from './routes/health.js';
 import { adminBooksRouter } from './routes/admin-books.js';
 import { adminPlaybooksRouter } from './routes/admin-playbooks.js';
 import { calendarForToken } from './services/calendar.js';
+import { createGeo, type Geo } from './services/geo.js';
 import { meRouter } from './routes/me.js';
 import { mailerFor, type Mailer } from './services/mail.js';
 
 export interface AppDeps {
   /** Override the mailer (tests record instead of sending). */
   mailer?: Mailer;
+  /** IP geolocation for the audit log and device list; defaults from config.geo. */
+  geo?: Geo;
 }
 
 export function createApp(config: AppConfig, repo: Repo, deps: AppDeps = {}): express.Express {
   const app = express();
   const mailer = deps.mailer ?? mailerFor(config.mail);
+  const geo = deps.geo ?? createGeo(repo, { lookup: config.geo === 'off' ? null : undefined });
   const notify = { mailer, origin: config.appOrigin, appName: config.appName };
   app.locals.mailer = mailer;
   app.set('trust proxy', 1);
@@ -59,8 +63,8 @@ export function createApp(config: AppConfig, repo: Repo, deps: AppDeps = {}): ex
   });
   app.use('/auth', rateLimit({ windowMs: 60_000, max: 30, keyPrefix: 'auth:' }), authRouter(config, repo, mailer));
   app.use('/api', rateLimit({ windowMs: 60_000, max: 600 }), refreshSession(repo));
-  app.use('/api/me', meRouter(repo, config.appName, notify));
-  app.use('/api/admin', adminRouter(repo));
+  app.use('/api/me', meRouter(repo, config.appName, notify, { geo, secureCookies: config.secureCookies }));
+  app.use('/api/admin', adminRouter(repo, geo));
   app.use('/api/admin', adminDealsRouter(repo, notify));
   app.use('/api/admin', adminPayrollRouter(repo, notify));
   app.use('/api/admin', adminSettingsRouter(repo, notify));

@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { api, post, type MeInfo, type TotpStatus } from '../lib/api';
+import { api, post, type MeInfo, type TotpStatus, type TrustedDeviceView } from '../lib/api';
 import { initials, type Period } from '../lib/format';
 import { useSession } from '../lib/session';
 
@@ -132,6 +132,7 @@ export function TwoFactor({ forced = false }: { forced?: boolean } = {}) {
       {enabled ? (
         <>
           <div style={{ fontSize: 13, color: 'var(--navy-text-3)' }}>Two-factor is <b style={{ color: '#fff' }}>on</b>. Enter a current code to turn it off.</div>
+          <Devices />
           <input inputMode="numeric" placeholder="Code from your app" value={code} onChange={(e) => setCode(e.target.value)} />
           <div style={{ display: 'flex', gap: 6 }}>
             <button className="btn" style={{ height: 30, padding: '0 10px' }} disabled={busy || code.replace(/\s/g, '').length !== 6} onClick={() => go(() => post('/api/me/totp/disable', { code }).then(() => undefined), 'Two-factor turned off')}>Turn off</button>
@@ -158,6 +159,30 @@ export function TwoFactor({ forced = false }: { forced?: boolean } = {}) {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/** Browsers remembered after a code: where and when, with a forget button. */
+function Devices() {
+  const { notify } = useSession();
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['me-devices'], queryFn: () => api<{ devices: TrustedDeviceView[] }>('/api/me/devices') });
+  const list = q.data?.devices ?? [];
+  const ago = (iso: string) => { const d = Math.round((Date.now() - Date.parse(iso)) / 86_400_000); return d <= 0 ? 'today' : d === 1 ? 'yesterday' : `${d}d ago`; };
+  const forget = async (id: string | null) => {
+    try { await post(id ? `/api/me/devices/${id}` : '/api/me/devices', {}, 'DELETE'); await qc.invalidateQueries({ queryKey: ['me-devices'] }); notify(id ? 'Device forgotten — it will ask for a code next time' : 'Every device forgotten'); } catch (e) { notify(e instanceof Error ? e.message : 'Could not forget'); }
+  };
+  return (
+    <div style={{ fontSize: 12.5, color: 'var(--navy-text-3)', display: 'grid', gap: 4, margin: '4px 0 6px' }}>
+      <div style={{ color: 'var(--navy-text-2)', fontWeight: 600 }}>Remembered devices{list.length ? ` · ${list.length}` : ''}</div>
+      {list.length === 0 ? <div>None — every sign-in asks for a code.</div> : list.map((d) => (
+        <div key={d.id} style={{ display: 'flex', gap: 6, alignItems: 'baseline', justifyContent: 'space-between' }}>
+          <span><b style={{ color: '#fff', fontWeight: 600 }}>{d.label}</b>{d.current ? ' (this one)' : ''}<div>{d.location ?? d.ip ?? '—'} · used {ago(d.lastUsedAt)} · until {new Date(d.expiresAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div></span>
+          <button type="button" className="linkish" style={{ padding: 0 }} onClick={() => void forget(d.id)}>forget</button>
+        </div>
+      ))}
+      {list.length > 1 && <button type="button" className="linkish" style={{ padding: 0, justifySelf: 'start' }} onClick={() => void forget(null)}>forget every device</button>}
     </div>
   );
 }

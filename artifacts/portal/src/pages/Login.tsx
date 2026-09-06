@@ -5,8 +5,10 @@ import { useSession } from '../lib/session';
 type Mode = 'signin' | 'totp' | 'forgot' | 'sent' | 'setup';
 
 export function Login({ oidc, devAuth, password: passwordAuth = true, setup = false }: { oidc: boolean; devAuth: boolean; password?: boolean; setup?: boolean }) {
-  const { refresh } = useSession();
+  const { refresh, signedOutWhy, clearSignedOut } = useSession();
   const [mode, setMode] = useState<Mode>(setup && !DEMO ? 'setup' : 'signin');
+  const [remember, setRemember] = useState(true);
+  const [rememberDays, setRememberDays] = useState(7);
   const [again, setAgain] = useState('');
   const brand = window.__GS_BRAND__;
   const [email, setEmail] = useState('');
@@ -33,10 +35,11 @@ export function Login({ oidc, devAuth, password: passwordAuth = true, setup = fa
     void guard(async () => {
       // With a password: email + password. Without one in a dev/demo build: the development sign-in.
       if (password || !devAuth) {
-        const r = await post<{ ok: boolean; totp?: boolean }>('/auth/password-login', { email, password });
+        const r = await post<{ ok: boolean; totp?: boolean; rememberDays?: number }>('/auth/password-login', { email, password });
         if (!r.ok && r.totp) {
           setMode('totp');
           setCode('');
+          setRememberDays(r.rememberDays ?? 0);
           return;
         }
       } else await api(`/auth/dev-login?email=${encodeURIComponent(email)}`);
@@ -47,7 +50,7 @@ export function Login({ oidc, devAuth, password: passwordAuth = true, setup = fa
   function submitCode(e: FormEvent) {
     e.preventDefault();
     void guard(async () => {
-      await post('/auth/totp', { code });
+      await post('/auth/totp', { code, remember: rememberDays > 0 && remember });
       await refresh();
     }, 'That code was not accepted');
   }
@@ -102,6 +105,7 @@ export function Login({ oidc, devAuth, password: passwordAuth = true, setup = fa
             <h2>Enter your code</h2>
             <div className="note">Open your authenticator app and type the 6-digit code for <b>{email}</b>.</div>
             <input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9 ]*" placeholder="123 456" value={code} onChange={(e) => setCode(e.target.value)} autoFocus />
+            {rememberDays > 0 && <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14, cursor: 'pointer' }}><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Remember this device for {rememberDays} day{rememberDays === 1 ? '' : 's'} — no code needed here until then</label>}
             <button className="btn primary big" disabled={busy || code.replace(/\s/g, '').length !== 6}>{busy ? 'Checking…' : 'Continue'}</button>
             <div className="subtle" style={{ fontSize: 13 }}>{linkBtn('Start over', () => { setMode('signin'); setCode(''); setErr(''); })} · Lost your phone? Ask your admin to reset two-factor in Settings › Reps.</div>
             {err && <div className="err">{err}</div>}
@@ -127,6 +131,7 @@ export function Login({ oidc, devAuth, password: passwordAuth = true, setup = fa
         ) : (
           <form onSubmit={signIn}>
             <h2>Sign in</h2>
+            {signedOutWhy && <div className="note" style={{ background: 'var(--amber-light)', borderColor: 'var(--amber-light-3)', color: 'var(--amber-deep)' }}>{signedOutWhy} <button type="button" className="linkish" style={{ color: 'inherit', padding: '0 0 0 6px', font: 'inherit' }} onClick={clearSignedOut}>✕</button></div>}
             {oidc && (
               <a className="btn primary big" style={{ display: 'grid', placeItems: 'center' }} href={`/auth/login?returnTo=${encodeURIComponent(window.location.pathname)}`}>
                 Continue with Greystone SSO

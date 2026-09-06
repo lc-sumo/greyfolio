@@ -27,13 +27,22 @@ export function refreshSession(repo: Repo): RequestHandler {
         req.session = null;
         return next(new HttpError(401, rep ? `${rep.name} is inactive — ask an admin to reactivate the account` : 'Sign in required'));
       }
+      // Idle sign-out: no request for `idleMinutes` ends the session; every request refreshes the clock.
+      const idle = (await repo.getSettings()).security.idleMinutes;
+      const now = Date.now();
+      if (idle > 0 && u.seen && now - Date.parse(u.seen) > idle * 60_000) {
+        await repo.writeAudit({ actorRepId: u.repId, action: 'session.idle', targetRepId: null, path: null, detail: { idleMinutes: idle } });
+        req.session = null;
+        return next(new HttpError(401, `Signed out after ${idle >= 60 && idle % 60 === 0 ? `${idle / 60} hour${idle === 60 ? '' : 's'}` : `${idle} minutes`} of inactivity — sign in again`));
+      }
+      if (!u.seen || now - Date.parse(u.seen) > 60_000) req.session = { ...req.session, user: { ...u, seen: new Date(now).toISOString() } };
       // A password change (by the rep, an admin, or a reset link) signs every other device out.
       const cutoff = await repo.getSessionCutoff(rep.id);
       if (cutoff && (!u.since || u.since < cutoff)) {
         req.session = null;
         return next(new HttpError(401, 'Signed out because the password on this account changed — sign in again'));
       }
-      if (rep.role !== u.role || rep.name !== u.name || rep.email !== u.email) req.session = { ...req.session, user: { ...u, repId: rep.id, email: rep.email, name: rep.name, role: rep.role } };
+      if (rep.role !== u.role || rep.name !== u.name || rep.email !== u.email) req.session = { ...req.session, user: { ...req.session?.user, ...u, repId: rep.id, email: rep.email, name: rep.name, role: rep.role, seen: req.session?.user?.seen ?? u.seen } };
       // Settings › Portal can require two-factor for admins: until enrolled, an admin may only reach the enrolment routes.
       // req.path is relative to the /api mount, so match on the original URL.
       const url = req.originalUrl.split('?')[0] ?? '';

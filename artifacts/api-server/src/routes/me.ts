@@ -11,12 +11,14 @@ import { addRepFile, fetchRepFile } from '../services/notes.js';
 import { createTask, logOutcome, merchantPreview, sendMerchantEmail, taskViews } from '../services/playbooks.js';
 import { TASK_OUTCOMES } from '../services/playbook-rules.js';
 import { issueCalendarToken, revokeCalendarToken } from '../services/calendar.js';
+import { forgetDeviceCookie, readCookie, DEVICE_COOKIE } from '../auth/devices.js';
+import type { Geo } from '../services/geo.js';
 
 /**
  * The rep portal. Every handler reads `scopeOf(req).effectiveRepId` — the
  * signed-in rep, or the View-as target — and returns rep-safe projections only.
  */
-export function meRouter(repo: Repo, appName = 'Greystone Commission Portal', notify?: Omit<NotifyDeps, 'repo'>): Router {
+export function meRouter(repo: Repo, appName = 'Greystone Commission Portal', notify?: Omit<NotifyDeps, 'repo'>, extras: { geo?: Geo; secureCookies?: boolean } = {}): Router {
   const r = Router();
   r.use(requireAuth, resolveScope(repo));
 
@@ -52,6 +54,34 @@ export function meRouter(repo: Repo, appName = 'Greystone Commission Portal', no
   r.post('/totp/enable', async (req, res) => {
     await enableTotp(repo, self(req), req.body?.code);
     res.json({ ok: true, enabled: true });
+  });
+  /** Browsers remembered after a two-factor sign-in. "This device" is the one making the request. */
+  r.get('/devices', async (req, res) => {
+    const scope = scopeOf(req);
+    const list = await repo.listTrustedDevices(scope.effectiveRepId);
+    const cookie = readCookie(req, DEVICE_COOKIE);
+    const thisId = cookie ? cookie.slice(0, cookie.indexOf('.')) : null;
+    const where = extras.geo ? await extras.geo.labels(list.map((d) => d.ip)) : new Map<string, string>();
+    res.json({ devices: list.map((d) => ({ id: d.id, label: d.label, ip: d.ip, location: d.ip ? where.get(d.ip) ?? null : null, createdAt: d.createdAt, lastUsedAt: d.lastUsedAt, expiresAt: d.expiresAt, current: d.id === thisId })) });
+  });
+  r.delete('/devices/:id', async (req, res) => {
+    const scope = scopeOf(req);
+    if (scope.viewAs) throw new HttpError(403, 'Devices belong to the account holder');
+    const d = (await repo.listTrustedDevices(scope.actor.repId)).find((x) => x.id === req.params.id);
+    if (!d) throw new HttpError(404, 'Device not found');
+    await repo.deleteTrustedDevice(d.id);
+    await repo.writeAudit({ actorRepId: scope.actor.repId, action: 'rep.device', targetRepId: null, path: `/api/me/devices/${d.id}`, detail: { forgot: true, label: d.label } });
+    const cookie = readCookie(req, DEVICE_COOKIE);
+    if (cookie && cookie.startsWith(`${d.id}.`)) forgetDeviceCookie(res, extras.secureCookies ?? false);
+    res.json({ ok: true });
+  });
+  r.delete('/devices', async (req, res) => {
+    const scope = scopeOf(req);
+    if (scope.viewAs) throw new HttpError(403, 'Devices belong to the account holder');
+    await repo.deleteTrustedDevices(scope.actor.repId);
+    await repo.writeAudit({ actorRepId: scope.actor.repId, action: 'rep.device', targetRepId: null, path: '/api/me/devices', detail: { forgotAll: true } });
+    forgetDeviceCookie(res, extras.secureCookies ?? false);
+    res.json({ ok: true });
   });
   r.post('/totp/disable', async (req, res) => {
     await disableTotp(repo, self(req), req.body?.code);

@@ -121,7 +121,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
   if (p === '/auth/setup' && method === 'POST') throw new ApiError(403, 'Demo: setup is already complete');
   if (p === '/auth/me') {
     if (!u) throw new ApiError(401, 'Sign in required');
-    return json({ user: u, canViewAs: u.role !== 'rep', oidc: false, devAuth: true, password: true, branding: settings.portal, mustEnrollTotp: false });
+    return json({ user: u, canViewAs: u.role !== 'rep', oidc: false, devAuth: true, password: true, branding: settings.portal, mustEnrollTotp: false, idleMinutes: 0 });
   }
   if (p === '/auth/dev-login') {
     const email = (q.get('email') ?? '').trim().toLowerCase();
@@ -130,6 +130,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     if (!rep.active) throw new ApiError(403, `${rep.name} is inactive — ask an admin to reactivate the account`);
     const su: SessionUser = { repId: rep.id, email: rep.email, name: rep.name, role: rep.role };
     setUser(su);
+    await repo.writeAudit({ actorRepId: rep.id, action: 'login', targetRepId: null, path: '/auth/dev-login', ip: '74.101.22.9' });
     return json({ ok: true, user: su });
   }
   if (p === '/auth/password-login' && method === 'POST') {
@@ -141,6 +142,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     if (!rep.active) throw new ApiError(403, `${rep.name} is inactive — ask an admin to reactivate the account`);
     const su: SessionUser = { repId: rep.id, email: rep.email, name: rep.name, role: rep.role };
     setUser(su);
+    await repo.writeAudit({ actorRepId: rep.id, action: 'login', targetRepId: null, path: '/auth/password-login', ip: '74.101.22.9' });
     return json({ ok: true, user: su });
   }
   if (p === '/auth/forgot' && method === 'POST') return json({ ok: true, message: 'Demo: no email goes out here. On a real portal a one-hour reset link lands in that inbox.' });
@@ -160,6 +162,8 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     return json({ ok: true });
   }
   if (p === '/api/me/totp') return json({ enabled: demoTotp.has(u.repId), pending: false });
+  if (p === '/api/me/devices') return json({ devices: demoTotp.has(u.repId) ? [{ id: 'dev-demo', label: 'Chrome · Mac', ip: '74.101.22.9', location: 'Brooklyn, New York, US', createdAt: new Date().toISOString(), lastUsedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(), current: true }] : [] });
+  if (p.startsWith('/api/me/devices') && method === 'DELETE') return json({ ok: true });
   if (p === '/api/me/totp/setup' && method === 'POST') return json({ secret: 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP', otpauth: `otpauth://totp/Greystone%20(demo):${encodeURIComponent(u.email)}?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=Greystone%20(demo)` });
   if (p === '/api/me/totp/enable' && method === 'POST') {
     if (!/^\d{6}$/.test(String(body.code ?? '').replace(/\s/g, ''))) throw new ApiError(400, 'Enter the 6-digit code');
@@ -269,7 +273,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
       }),
     });
   }
-  if (p === '/api/admin/audit') { const lim = Number(q.get('limit') ?? 100); const names = new Map(d.reps.map((r) => [r.id, r.name])); const all = (await repo.listAudit(lim)).filter((e) => (!q.get('action') || e.action === q.get('action')) && (!q.get('rep') || e.actorRepId === q.get('rep') || e.targetRepId === q.get('rep'))); return json({ entries: all.map((e) => ({ ...e, ip: e.ip ?? '127.0.0.1', actorName: names.get(e.actorRepId) ?? e.actorRepId, targetName: e.targetRepId ? names.get(e.targetRepId) ?? e.targetRepId : null })), limit: lim, offset: 0, hasMore: all.length === lim, actions: [...new Set(all.map((e) => e.action))].sort() }); }
+  if (p === '/api/admin/audit') { const lim = Number(q.get('limit') ?? 100); const names = new Map(d.reps.map((r) => [r.id, r.name])); const all = (await repo.listAudit(lim)).filter((e) => (!q.get('action') || e.action === q.get('action')) && (!q.get('rep') || e.actorRepId === q.get('rep') || e.targetRepId === q.get('rep'))); return json({ geo: true, entries: all.map((e) => ({ ...e, ip: e.ip ?? '74.101.22.9', location: 'Brooklyn, New York, US', actorName: names.get(e.actorRepId) ?? e.actorRepId, targetName: e.targetRepId ? names.get(e.targetRepId) ?? e.targetRepId : null })), limit: lim, offset: 0, hasMore: all.length === lim, actions: [...new Set(all.map((e) => e.action))].sort() }); }
   if (p === '/api/admin/settings') return json(settings);
   if (p === '/api/admin/settings/usage') return json(await usage(repo));
   try {

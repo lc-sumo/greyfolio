@@ -3,7 +3,7 @@ import type { PlaybookRule } from './services/playbook-rules.js';
 
 export interface AuditEntry {
   actorRepId: string;
-  action: 'login' | 'logout' | 'view-as' | 'deal.create' | 'deal.update' | 'deal.draw' | 'deal.collection' | 'payroll.run' | 'payroll.pay' | 'settings.update' | 'team.update' | 'rep.update' | 'rep.password' | 'login.failed' | 'deal.delete' | 'payroll.void' | 'deal.import' | 'password.reset' | 'rep.totp' | 'deal.note' | 'deal.file' | 'deal.clawback' | 'deal.remittance' | 'mail.sent' | 'deal.draw.delete' | 'payroll.run.delete' | 'deal.contact' | 'deal.draw.update' | 'deal.clawback.update' | 'deal.clawback.delete' | 'payroll.run.reopen' | 'settings.rename' | 'rep.invite' | 'rep.file' | 'rep.calendar' | 'deal.referral.paid' | 'settings.playbook' | 'playbook.fired' | 'task' | 'mail.merchant' | 'backup';
+  action: 'login' | 'logout' | 'view-as' | 'deal.create' | 'deal.update' | 'deal.draw' | 'deal.collection' | 'payroll.run' | 'payroll.pay' | 'settings.update' | 'team.update' | 'rep.update' | 'rep.password' | 'login.failed' | 'deal.delete' | 'payroll.void' | 'deal.import' | 'password.reset' | 'rep.totp' | 'deal.note' | 'deal.file' | 'deal.clawback' | 'deal.remittance' | 'mail.sent' | 'deal.draw.delete' | 'payroll.run.delete' | 'deal.contact' | 'deal.draw.update' | 'deal.clawback.update' | 'deal.clawback.delete' | 'payroll.run.reopen' | 'settings.rename' | 'rep.invite' | 'rep.device' | 'session.idle' | 'rep.file' | 'rep.calendar' | 'deal.referral.paid' | 'settings.playbook' | 'playbook.fired' | 'task' | 'mail.merchant' | 'backup';
   targetRepId: string | null;
   path: string | null;
   detail?: Record<string, unknown>;
@@ -31,20 +31,28 @@ export interface Settings {
   portal: { company: string; portal: string; supportEmail: string };
   /** Which automatic emails go out, and when the renewal digest lands (UTC hour). */
   notifications: { statements: boolean; clawbacks: boolean; renewalDigest: boolean; digestHourUtc: number; repQuestions: boolean; playbookHourUtc: number };
-  security: { requireTotpForAdmins: boolean };
+  security: {
+    requireTotpForAdmins: boolean;
+    /** Minutes of inactivity before a session is signed out; 0 = never. */
+    idleMinutes: number;
+    /** Days a device stays trusted after a two-factor sign-in; 0 = ask for a code every time. */
+    totpRememberDays: number;
+  };
   /** Email templates reps send to merchants from a deal. */
   templates: { merchant: Array<{ id: string; name: string; subject: string; body: string }> };
 }
 
 export const PORTAL_DEFAULTS: Settings['portal'] = { company: 'Greystone Merchant Partners', portal: 'Commission portal', supportEmail: '' };
 export const NOTIFICATION_DEFAULTS: Settings['notifications'] = { statements: true, clawbacks: true, renewalDigest: true, digestHourUtc: 13, repQuestions: true, playbookHourUtc: 12 };
-export const SECURITY_DEFAULTS: Settings['security'] = { requireTotpForAdmins: false };
+export const SECURITY_DEFAULTS: Settings['security'] = { requireTotpForAdmins: false, idleMinutes: 120, totpRememberDays: 7 };
 export { TEMPLATE_DEFAULTS } from './services/playbooks.js';
 
 /** A "forgot password" token on file (only its hash). */
 export interface PasswordReset { id: string; repId: string; tokenHash: string; expiresAt: string; usedAt: string | null }
 /** Two-factor state for a rep. `enabled` flips only after a code has been verified. */
 export interface TotpState { secret: string | null; enabled: boolean }
+/** A browser that may skip the authenticator code until `expiresAt`. */
+export interface TrustedDevice { id: string; repId: string; tokenHash: string; label: string; ip: string | null; createdAt: string; lastUsedAt: string; expiresAt: string }
 export interface DealNote { id: string; dealId: string; authorRepId: string; body: string; createdAt: string }
 export interface DealFileMeta { id: string; dealId: string; name: string; mime: string; size: number; uploadedBy: string; createdAt: string }
 export interface DealFile extends DealFileMeta { data: string }
@@ -132,6 +140,13 @@ export interface Repo {
   getTotp(repId: string): Promise<TotpState>;
   setTotp(repId: string, state: TotpState): Promise<void>;
   repsWithTotp(): Promise<string[]>;
+  /* Remembered devices for two-factor */
+  listTrustedDevices(repId: string): Promise<TrustedDevice[]>;
+  findTrustedDevice(tokenHash: string): Promise<TrustedDevice | null>;
+  insertTrustedDevice(d: TrustedDevice): Promise<void>;
+  touchTrustedDevice(id: string, patch: { lastUsedAt: string; ip: string | null }): Promise<void>;
+  deleteTrustedDevice(id: string): Promise<void>;
+  deleteTrustedDevices(repId: string): Promise<void>;
   /* Deal notes and files */
   listNotes(dealId: string): Promise<DealNote[]>;
   insertNote(n: DealNote): Promise<void>;

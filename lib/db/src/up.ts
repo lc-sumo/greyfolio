@@ -32,6 +32,7 @@ const FINGERPRINTS: Record<string, { table: string; column?: string }> = {
   '0006_loc_line_fee': { table: 'commission_deals', column: 'line_fee' },
   '0007_audit_ip': { table: 'commission_audit_log', column: 'ip' },
   '0008_session_cutoff_bookkeeping': { table: 'commission_reps', column: 'session_cutoff' },
+  '0009_trusted_devices': { table: 'commission_trusted_devices' },
 };
 
 interface JournalEntry { idx: number; when: number; tag: string }

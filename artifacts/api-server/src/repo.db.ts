@@ -18,6 +18,7 @@ import {
   commissionTasks,
   commissionSettings,
   commissionTeams,
+  commissionTrustedDevices,
   toClawback,
   toDeal,
   toPayoutLine,
@@ -25,14 +26,35 @@ import {
   toTeam,
   type Database,
 } from '@greystone/db';
-import { NOTIFICATION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AuditEntry, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Repo, type RepFile, type RepTask, type Settings, type TotpState } from './repo.js';
+import { NOTIFICATION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AuditEntry, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Repo, type RepFile, type RepTask, type Settings, type TotpState, type TrustedDevice } from './repo.js';
 import type { PlaybookRule } from './services/playbook-rules.js';
 import { requestMeta } from './auth/request-context.js';
 
 export function dbRepo(db: Database): Repo {
   const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
   const toTask = (t: typeof commissionTasks.$inferSelect): RepTask => ({ id: t.id, dealId: t.dealId, repId: t.repId, playbookId: t.playbookId, title: t.title, dueDate: t.dueDate, status: t.status as RepTask['status'], outcome: t.outcome as RepTask['outcome'], note: t.note, createdBy: t.createdBy, createdAt: t.createdAt.toISOString(), doneAt: iso(t.doneAt) });
+  const toDevice = (d: typeof commissionTrustedDevices.$inferSelect): TrustedDevice => ({ id: d.id, repId: d.repId, tokenHash: d.tokenHash, label: d.label, ip: d.ip, createdAt: d.createdAt.toISOString(), lastUsedAt: d.lastUsedAt.toISOString(), expiresAt: d.expiresAt.toISOString() });
   return {
+    async listTrustedDevices(repId) {
+      const rows = await db.select().from(commissionTrustedDevices).where(eq(commissionTrustedDevices.repId, repId)).orderBy(desc(commissionTrustedDevices.lastUsedAt));
+      return rows.map(toDevice);
+    },
+    async findTrustedDevice(tokenHash) {
+      const rows = await db.select().from(commissionTrustedDevices).where(eq(commissionTrustedDevices.tokenHash, tokenHash)).limit(1);
+      return rows[0] ? toDevice(rows[0]) : null;
+    },
+    async insertTrustedDevice(d) {
+      await db.insert(commissionTrustedDevices).values({ id: d.id, repId: d.repId, tokenHash: d.tokenHash, label: d.label, ip: d.ip, createdAt: new Date(d.createdAt), lastUsedAt: new Date(d.lastUsedAt), expiresAt: new Date(d.expiresAt) });
+    },
+    async touchTrustedDevice(id, patch) {
+      await db.update(commissionTrustedDevices).set({ lastUsedAt: new Date(patch.lastUsedAt), ip: patch.ip }).where(eq(commissionTrustedDevices.id, id));
+    },
+    async deleteTrustedDevice(id) {
+      await db.delete(commissionTrustedDevices).where(eq(commissionTrustedDevices.id, id));
+    },
+    async deleteTrustedDevices(repId) {
+      await db.delete(commissionTrustedDevices).where(eq(commissionTrustedDevices.repId, repId));
+    },
     async listAllNotes() {
       const rows = await db.select().from(commissionDealNotes).orderBy(commissionDealNotes.createdAt);
       return rows.map((n) => ({ id: n.id, dealId: n.dealId, authorRepId: n.authorRepId, body: n.body, createdAt: n.createdAt.toISOString() }));

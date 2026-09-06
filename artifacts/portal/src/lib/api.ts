@@ -6,7 +6,8 @@ export type PayoutStatus = 'Paid' | 'Partially paid' | 'Owed' | 'Awaiting lender
 
 export interface SessionUser { repId: string; email: string; name: string; role: 'rep' | 'manager' | 'admin' }
 export interface Branding { company: string; portal: string; supportEmail: string }
-export interface AuthMe { user: SessionUser; canViewAs: boolean; oidc: boolean; devAuth: boolean; branding?: Branding; mustEnrollTotp?: boolean }
+export interface AuthMe { user: SessionUser; canViewAs: boolean; oidc: boolean; devAuth: boolean; branding?: Branding; mustEnrollTotp?: boolean; idleMinutes?: number }
+export interface TrustedDeviceView { id: string; label: string; ip: string | null; location: string | null; createdAt: string; lastUsedAt: string; expiresAt: string; current: boolean }
 export interface RepRoleLine { role: Role; rate: number; amount: number; segment: string; segmentKey: string; paid: boolean; paidAmount: number; units: { paid: number; total: number; collected: number } | null }
 export interface RepDealView {
   id: string; crmId: string | null; date: string; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string; lender: string; product: string; funded: number; drawCount: number;
@@ -51,7 +52,11 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (viewAs) headers['X-View-As'] = viewAs;
   const res = await fetch(path, { credentials: 'same-origin', ...init, headers });
   const body = res.status === 204 ? null : await res.json().catch(() => null);
-  if (!res.ok) throw new ApiError(res.status, (body && body.error) || res.statusText);
+  if (!res.ok) {
+    // The server ended the session (idle sign-out, password change, deactivation): the whole app goes back to the sign-in screen with the reason.
+    if (res.status === 401 && !path.startsWith('/auth/')) window.dispatchEvent(new CustomEvent('gs:signed-out', { detail: (body && body.error) || 'Sign in again' }));
+    throw new ApiError(res.status, (body && body.error) || res.statusText);
+  }
   return body as T;
 }
 
@@ -76,7 +81,7 @@ export interface Settings {
   crm: { urlTemplate: string }; payroll: { cycle: string };
   portal: Branding;
   notifications: { statements: boolean; clawbacks: boolean; renewalDigest: boolean; digestHourUtc: number; repQuestions: boolean; playbookHourUtc: number };
-  security: { requireTotpForAdmins: boolean };
+  security: { requireTotpForAdmins: boolean; idleMinutes: number; totpRememberDays: number };
   templates: { merchant: MerchantTemplate[] };
 }
 export interface MerchantTemplate { id: string; name: string; subject: string; body: string }

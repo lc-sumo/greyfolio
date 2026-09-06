@@ -281,16 +281,10 @@ function TeamsTab({ teams, reps, usage, run }: { teams: Team[]; reps: RosterRep[
 }
 
 /* ---------- Reps ---------- */
-function RepsTab({ reps, teams, run, onViewAs, isSuper, permissions }: { reps: RosterRep[]; teams: Team[]; run: Run; onViewAs: (id: string) => void; isSuper: boolean; permissions: SettingsData['permissions'] }) {
-  type Draft = { name: string; email: string; teamId: string; openerRate: string; closerRate: string; overrideRate: string; role: string };
-  const toDraft = (r: RosterRep): Draft => ({ name: r.name, email: r.email, teamId: r.teamId ?? '', openerRate: pctIn(r.openerRate), closerRate: pctIn(r.closerRate), overrideRate: pctIn(r.overrideRate), role: r.role });
-  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
-  const [adding, setAdding] = useState<Draft | null>(null);
-  const cols = 'minmax(150px,1.1fr) minmax(190px,1.2fr) 150px 70px 70px 70px 100px 100px 130px 90px 110px 100px 380px 230px';
-  const [pw, setPw] = useState<{ id: string; value: string } | null>(null);
-  const [filesFor, setFilesFor] = useState<RosterRep | null>(null);
-  const label = (role: string) => (role === 'admin' ? 'Master' : role === 'manager' ? 'Team lead' : 'Rep');
-  const Editor = ({ v, onChange }: { v: Draft; onChange: (v: Draft) => void }) => (
+type RepDraft = { name: string; email: string; teamId: string; openerRate: string; closerRate: string; overrideRate: string; role: string };
+
+function RepEditor({ v, teams, onChange }: { v: RepDraft; teams: Team[]; onChange: (v: RepDraft) => void }) {
+  return (
     <>
       <input value={v.name} onChange={(e) => onChange({ ...v, name: e.target.value })} />
       <input value={v.email} onChange={(e) => onChange({ ...v, email: e.target.value })} />
@@ -300,7 +294,17 @@ function RepsTab({ reps, teams, run, onViewAs, isSuper, permissions }: { reps: R
       <input inputMode="decimal" placeholder="team" value={v.overrideRate} onChange={(e) => onChange({ ...v, overrideRate: e.target.value })} />
     </>
   );
-  const body = (v: Draft) => ({ name: v.name, email: v.email, teamId: v.teamId || null, openerRate: Number(v.openerRate), closerRate: Number(v.closerRate), overrideRate: v.overrideRate.trim() === '' ? null : Number(v.overrideRate), role: v.role });
+}
+
+function RepsTab({ reps, teams, run, onViewAs, isSuper, permissions }: { reps: RosterRep[]; teams: Team[]; run: Run; onViewAs: (id: string) => void; isSuper: boolean; permissions: SettingsData['permissions'] }) {
+  const toDraft = (r: RosterRep): RepDraft => ({ name: r.name, email: r.email, teamId: r.teamId ?? '', openerRate: pctIn(r.openerRate), closerRate: pctIn(r.closerRate), overrideRate: pctIn(r.overrideRate), role: r.role });
+  const [drafts, setDrafts] = useState<Record<string, RepDraft>>({});
+  const [adding, setAdding] = useState<RepDraft | null>(null);
+  const cols = 'minmax(150px,1.1fr) minmax(190px,1.2fr) 150px 70px 70px 70px 100px 100px 130px 90px 110px 100px 380px 230px';
+  const [pw, setPw] = useState<{ id: string; value: string } | null>(null);
+  const [filesFor, setFilesFor] = useState<RosterRep | null>(null);
+  const label = (role: string) => (role === 'admin' ? 'Master' : role === 'manager' ? 'Team lead' : 'Rep');
+  const body = (v: RepDraft) => ({ name: v.name, email: v.email, teamId: v.teamId || null, openerRate: Number(v.openerRate), closerRate: Number(v.closerRate), overrideRate: v.overrideRate.trim() === '' ? null : Number(v.overrideRate), role: v.role });
   return (
     <Card title="Reps" extra={`${reps.length} · ${reps.filter((r) => r.active).length} active`}>
       <div className="scroller">
@@ -311,7 +315,7 @@ function RepsTab({ reps, teams, run, onViewAs, isSuper, permissions }: { reps: R
             const dirty = !!drafts[r.id];
             return (
               <Row key={r.id} cols={cols}>
-                <Editor v={v} onChange={(nv) => setDrafts({ ...drafts, [r.id]: nv })} />
+                <RepEditor v={v} teams={teams} onChange={(nv) => setDrafts((current) => ({ ...current, [r.id]: nv }))} />
                 <span className="num">{compact(r.earned)}</span>
                 <span className={`num ${r.owed ? 'warn' : ''}`}>{compact(r.owed)}</span>
                 <select value={v.role} disabled={!isSuper && (r.role === 'admin' || !!r.superAdmin)} title={!isSuper && (r.role === 'admin' || r.superAdmin) ? 'Only a super admin can change an admin' : ''} onChange={(e) => setDrafts({ ...drafts, [r.id]: { ...v, role: e.target.value } })}><option value="rep">Rep</option><option value="manager">Team lead</option><option value="admin" disabled={!isSuper}>Master</option></select>
@@ -345,7 +349,7 @@ function RepsTab({ reps, teams, run, onViewAs, isSuper, permissions }: { reps: R
           })}
           {adding && (
             <Row cols={cols}>
-              <Editor v={adding} onChange={setAdding} />
+              <RepEditor v={adding} teams={teams} onChange={setAdding} />
               <span /><span />
               <select value={adding.role} onChange={(e) => setAdding({ ...adding, role: e.target.value })}><option value="rep">Rep</option><option value="manager">Team lead</option><option value="admin" disabled={!isSuper}>Master{isSuper ? '' : ' (super admin only)'}</option></select>
               <Pill tone="teal">new</Pill><span /><span />
@@ -424,13 +428,14 @@ function ImportTab() {
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [onlyProblems, setOnlyProblems] = useState(false);
-  const [skipExisting, setSkipExisting] = useState(false);
+  const [skipExisting, setSkipExisting] = useState(true);
   const [updateExisting, setUpdateExisting] = useState(false);
+  const [importError, setImportError] = useState('');
   const [done, setDone] = useState<{ deals: number; updated?: number; draws: number; clawbacks: number; payoutLines: number; runId: string | null } | null>(null);
   const body = () => (xlsx ? { xlsx: xlsx.data, skipExisting, updateExisting } : { csv, skipExisting, updateExisting });
   async function file(f: File | undefined) {
     if (!f) return;
-    setPreview(null); setDone(null);
+    setPreview(null); setDone(null); setImportError('');
     if (/\.xlsx?$/i.test(f.name)) {
       // The workbook itself (Google Sheets → File → Download → Microsoft Excel). The server picks the FUNDED DEALS tab.
       const data = await new Promise<string>((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(String(r.result)); r.onerror = () => reject(new Error('Could not read the file')); r.readAsDataURL(f); });
@@ -438,19 +443,26 @@ function ImportTab() {
     } else { setXlsx(null); setCsv(await f.text()); }
   }
   async function run() {
-    setBusy(true);
-    try { setPreview(await post<ImportPreview>('/api/admin/import/preview', body())); } catch (e) { notify(e instanceof Error ? e.message : 'Preview failed'); } finally { setBusy(false); }
+    setBusy(true); setImportError('');
+    try {
+      const result = await post<ImportPreview>('/api/admin/import/preview', body());
+      setPreview(result);
+      if (!result.rows.length) setImportError('No funded-deal rows were found. Export the FUNDED DEALS tab as Excel or CSV, then try again.');
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Preview failed';
+      setImportError(message); notify(message);
+    } finally { setBusy(false); }
   }
   async function commit() {
     if (!preview || preview.summary.problems) return;
     if (!window.confirm(`Import ${preview.summary.deals} deals and ${preview.summary.draws} draws (${compact(preview.summary.funded)} funded)? Rows with a Rep Paid Date become paid ledger lines in a run called "Imported from sheet".`)) return;
-    setBusy(true);
+    setBusy(true); setImportError('');
     try {
       const r = await post<{ deals: number; draws: number; clawbacks: number; payoutLines: number; runId: string | null }>('/api/admin/import', body());
       setDone(r); setPreview(null); setCsv(''); setXlsx(null);
       await qc.invalidateQueries();
       notify(`Imported ${r.deals} deals, ${r.draws} draws, ${r.payoutLines} paid lines`);
-    } catch (e) { notify(e instanceof Error ? e.message : 'Import failed'); } finally { setBusy(false); }
+    } catch (e) { const message = e instanceof Error ? e.message : 'Import failed'; setImportError(message); notify(message); } finally { setBusy(false); }
   }
   const rows = preview ? preview.rows.filter((r) => !onlyProblems || r.problems.length || r.warnings.length) : [];
   return (
@@ -459,11 +471,12 @@ function ImportTab() {
         <div className="toolbar">
           <input type="file" accept=".xlsx,.xls,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(e) => void file(e.target.files?.[0])} />
           <span className="count">{xlsx ? `${xlsx.name} loaded` : csv ? `${csv.length.toLocaleString()} characters loaded` : 'or paste the CSV below'}</span>
-          <label className="subtle" style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }} title="Re-exporting the whole sheet? Deals and draws the portal already holds are left alone; only new rows come in."><input type="checkbox" className="big" checked={skipExisting} onChange={(e) => { setSkipExisting(e.target.checked); setPreview(null); }} /> skip rows already in the portal</label>
+          <label className="subtle" style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }} title="Re-exporting the whole sheet? Deals and draws the portal already holds are left alone; only new rows come in."><input type="checkbox" className="big" checked={skipExisting} onChange={(e) => { setSkipExisting(e.target.checked); if (!e.target.checked) setUpdateExisting(false); setPreview(null); setImportError(''); }} /> skip rows already in the portal</label>
           {skipExisting && <label className="subtle" style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }} title="For rows already in the portal: take the sheet's Deal Status (Refinanced, Default, Slow Pay, Paid In Full) and Lender Paid Date. Money and the ledger are never touched."><input type="checkbox" className="big" checked={updateExisting} onChange={(e) => { setUpdateExisting(e.target.checked); setPreview(null); }} /> refresh status &amp; lender-paid on existing rows</label>}
           <button className="btn primary" disabled={(!csv.trim() && !xlsx) || busy} onClick={() => void run()}>{busy ? 'Working…' : 'Preview'}</button>
         </div>
-        <textarea rows={4} value={csv} onChange={(e) => { setCsv(e.target.value); setXlsx(null); setPreview(null); }} placeholder="Deal ID,Parent Deal,Date,Business Name,Lender,Product,…" style={{ border: '1px solid var(--border-strong)', borderRadius: 8, padding: '8px 10px', background: 'var(--input-bg)', color: 'inherit', font: 'inherit', fontFamily: 'var(--mono)', fontSize: 12.5, resize: 'vertical', outline: 'none' }} />
+          <textarea rows={4} value={csv} onChange={(e) => { setCsv(e.target.value); setXlsx(null); setPreview(null); setImportError(''); }} placeholder="Deal ID,Parent Deal,Date,Business Name,Lender,Product,…" style={{ border: '1px solid var(--border-strong)', borderRadius: 8, padding: '8px 10px', background: 'var(--input-bg)', color: 'inherit', font: 'inherit', fontFamily: 'var(--mono)', fontSize: 12.5, resize: 'vertical', outline: 'none' }} />
+          {importError && <div className="note" role="alert" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>{importError}</div>}
         {done && <div className="note" style={{ background: 'var(--teal-light)', borderColor: 'var(--teal-light-2)' }}>Imported <b>{done.deals}</b> deals{done.updated ? <>, refreshed <b>{done.updated}</b></> : null}, <b>{done.draws}</b> draws, <b>{done.clawbacks}</b> clawbacks and <b>{done.payoutLines}</b> paid ledger lines{done.runId ? ` (run ${done.runId})` : ''}. The master board, rep portals and payroll now reflect them.</div>}
         {preview && (
           <>
@@ -473,6 +486,8 @@ function ImportTab() {
               <section className="card"><div className="label">Already paid to reps</div><div className="metric">{preview.summary.withPayouts}</div><div className="sub">rows with a Rep Paid Date → ledger</div></section>
               <section className="card"><div className="label">Problems</div><div className={`metric ${preview.summary.problems ? 'neg' : 'pos'}`}>{preview.summary.problems}</div><div className="sub">{preview.summary.warnings} warning{preview.summary.warnings === 1 ? '' : 's'} · {preview.summary.clawbacks} clawbacks</div></section>
             </div>
+            {preview.summary.problems > 0 && <div className="note" role="alert" style={{ background: 'var(--amber-light)', borderColor: 'var(--amber-light-3)', color: 'var(--amber-deep)' }}><b>Preview completed, but nothing has been imported yet.</b> Resolve the {preview.summary.problems} problem{preview.summary.problems === 1 ? '' : 's'} listed below, then preview again. Existing deals are skipped automatically.</div>}
+            {!preview.summary.problems && preview.summary.deals + preview.summary.draws === 0 && <div className="note">Preview completed. Every row is already in the portal, so there is nothing new to import.</div>}
             {preview.problems.map((p, i) => <div key={i} className="note" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>{p}</div>)}
             <MissingRefsNotice missing={preview.missing} onAdded={() => void run()} />
             <div className="toolbar">

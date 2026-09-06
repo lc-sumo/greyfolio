@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Shell } from '../components/Shell';
-import { Card, Loading, Pill } from '../components/ui';
+import { Card, Drawer, Loading, Pill } from '../components/ui';
+import { FilesPanel } from '../components/FilesPanel';
 import { DEMO, api, post, type ClawbackBasis, type Lender, type ProductRule, type ReferralPartner, type RemittancePreview, type RosterRep, type Settings as SettingsData, type Team, type Usage } from '../lib/api';
 import { compact, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
@@ -81,7 +82,7 @@ function LendersTab({ lenders, products, thresholds, usage, run }: { lenders: Le
   const [rows, setRows] = useState(lenders);
   const [name, setName] = useState('');
   useEffect(() => setRows(lenders), [lenders]);
-  const cols = 'minmax(150px,1fr) minmax(300px,1.6fr) 150px 80px 80px 170px 100px 210px 90px 70px 90px 80px';
+  const cols = 'minmax(150px,1fr) minmax(300px,1.6fr) 150px 80px 80px 170px 100px 210px 90px 80px 70px 90px 80px';
   const save = (next: Lender[]) => run('Lenders saved', () => post('/api/admin/settings/lenders', { lenders: next }, 'PUT'));
   // Renaming keeps the original name alongside, so the server can move every deal that references it.
   const set = (i: number, patch: Partial<Lender>) => setRows(rows.map((x, j) => (j === i ? { ...x, ...patch, ...(patch.name !== undefined && x.renamedFrom === undefined ? { renamedFrom: x.name } : {}) } : x)));
@@ -102,8 +103,8 @@ function LendersTab({ lenders, products, thresholds, usage, run }: { lenders: Le
   };
   return (
     <Card title="Lenders" extra={`${rows.length} · toggle the products each lender funds; increments only apply to lenders that fund a consolidation · clawback policy drives "cleared clawback" on every deal`}>
-      <div className="scroller"><div style={{ minWidth: 1700 }}>
-      <Head cols={cols}><span>Lender</span><span>Products funded</span><span>Payout structure</span><span>Increments</span><span>Upfront %</span><span>Remainder</span><span>Cadence</span><span>Clawback policy</span><span>LOC line %</span><span>Active</span><span>Usage</span><span /></Head>
+      <div className="scroller"><div style={{ minWidth: 1800 }}>
+      <Head cols={cols}><span>Lender</span><span>Products funded</span><span>Payout structure</span><span>Increments</span><span>Upfront %</span><span>Remainder</span><span>Cadence</span><span>Clawback policy</span><span>LOC line %</span><span>Pays in (days)</span><span>Active</span><span>Usage</span><span /></Head>
       {rows.map((l, i) => {
         const inc = doesIncrements(l);
         return (
@@ -127,6 +128,7 @@ function LendersTab({ lenders, products, thresholds, usage, run }: { lenders: Le
             <input inputMode="numeric" disabled={!l.clawback || l.clawback.basis === 'none'} value={l.clawback && l.clawback.basis !== 'none' ? l.clawback.count : ''} placeholder="—" onChange={(e) => set(i, { clawback: { basis: l.clawback?.basis ?? 'days', count: Number(e.target.value) || 0 } })} />
           </div>
           <input inputMode="decimal" placeholder="—" title="LOC lenders that also pay a % of the credit line at open (Revenued): draw % × initial draw + this % × the line" value={l.locLineRate ? String(Math.round(l.locLineRate * 10000) / 100) : ''} onChange={(e) => set(i, { locLineRate: (Number(e.target.value) || 0) / 100 })} />
+          <input inputMode="numeric" placeholder={String(thresholds.paymentOverdueDays)} title="Days after funding by which this lender pays commission. Blank = the default under CRM & thresholds. Drives the receivables aging on Books." value={l.paymentTermsDays ?? ''} onChange={(e) => set(i, { paymentTermsDays: e.target.value === '' ? undefined : Number(e.target.value) })} />
           <button type="button" className={`tog ${l.active !== false ? 'on' : ''}`} title={l.active === false ? 'Retired — hidden from new deals, kept for history' : 'Active — offered on new deals'} onClick={() => set(i, { active: l.active === false ? true : false })} />
           <span className="num subtle">{usage[l.name] ? `${usage[l.name]} deal${usage[l.name] === 1 ? '' : 's'}` : 'unused'}</span>
           <button className="btn" disabled={!!usage[l.name]} title={usage[l.name] ? 'In use — retire it with the Active switch instead' : 'Remove'} onClick={() => setRows(rows.filter((_, j) => j !== i))}>Remove</button>
@@ -281,8 +283,9 @@ function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Tea
   const toDraft = (r: RosterRep): Draft => ({ name: r.name, email: r.email, teamId: r.teamId ?? '', openerRate: pctIn(r.openerRate), closerRate: pctIn(r.closerRate), overrideRate: pctIn(r.overrideRate), role: r.role });
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [adding, setAdding] = useState<Draft | null>(null);
-  const cols = 'minmax(150px,1.1fr) minmax(190px,1.2fr) 150px 70px 70px 70px 100px 100px 120px 90px 230px 160px';
+  const cols = 'minmax(150px,1.1fr) minmax(190px,1.2fr) 150px 70px 70px 70px 100px 100px 120px 90px 290px 220px';
   const [pw, setPw] = useState<{ id: string; value: string } | null>(null);
+  const [filesFor, setFilesFor] = useState<RosterRep | null>(null);
   const label = (role: string) => (role === 'admin' ? 'Master' : role === 'manager' ? 'Team lead' : 'Rep');
   const Editor = ({ v, onChange }: { v: Draft; onChange: (v: Draft) => void }) => (
     <>
@@ -330,6 +333,7 @@ function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Tea
                 <span style={{ display: 'flex', gap: 6 }}>
                   <button className="btn primary" disabled={!dirty} style={{ height: 30, padding: '0 10px' }} onClick={() => run(`${v.name} saved`, async () => { await post(`/api/admin/reps/${r.id}`, body(v), 'PATCH'); setDrafts((s) => { const n = { ...s }; delete n[r.id]; return n; }); })}>Save</button>
                   <button className="btn" style={{ height: 30, padding: '0 10px' }} onClick={() => onViewAs(r.id)}>View as</button>
+                  <button className="btn" style={{ height: 30, padding: '0 10px' }} title="W-9 and agreements on file for this rep" onClick={() => setFilesFor(r)}>Files</button>
                 </span>
               </Row>
             );
@@ -353,6 +357,11 @@ function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Tea
         <button className="btn" disabled={!!adding} onClick={() => setAdding({ name: '', email: '', teamId: '', openerRate: '20', closerRate: '20', overrideRate: '', role: 'rep' })}>+ Add rep</button>
         <span className="count">Access: Rep sees their own portal · Team lead can View as their team · Master runs everything. Sign-in: SSO when configured, or the email + password you set here (reps can change theirs from the sidebar).</span>
       </div>
+      {filesFor && (
+        <Drawer title={`${filesFor.name} · files`} sub="W-9, agreements. Reps can add their own from Pay history; only you can remove one." onClose={() => setFilesFor(null)}>
+          <FilesPanel base={`/api/admin/reps/${filesFor.id}/files`} title="On file" />
+        </Drawer>
+      )}
     </Card>
   );
 }

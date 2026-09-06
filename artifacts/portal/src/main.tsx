@@ -17,6 +17,7 @@ import { Payroll } from './pages/Payroll';
 import { Roster } from './pages/Roster';
 import { Settings } from './pages/Settings';
 import { Audit } from './pages/Audit';
+import { Books } from './pages/Books';
 import { PayHistory } from './pages/PayHistory';
 import { Renewals } from './pages/Renewals';
 import './styles.css';
@@ -51,6 +52,7 @@ function App() {
       <Route path="/renewals" element={repMode ? <Renewals admin={false} /> : auth.user.role === 'admin' ? <Renewals admin /> : <Navigate to="/" replace />} />
       <Route path="/settings" element={!repMode && auth.user.role === 'admin' ? <Settings /> : <Navigate to="/" replace />} />
       <Route path="/audit" element={!repMode && auth.user.role === 'admin' ? <Audit /> : <Navigate to="/" replace />} />
+      <Route path="/books" element={!repMode && auth.user.role === 'admin' ? <Books /> : <Navigate to="/" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

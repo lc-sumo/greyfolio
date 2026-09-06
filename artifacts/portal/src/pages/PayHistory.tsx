@@ -2,8 +2,9 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { DealDrawer } from '../components/DealDrawer';
 import { Shell } from '../components/Shell';
+import { FilesPanel } from '../components/FilesPanel';
 import { Card, Loading, Metric } from '../components/ui';
-import { api, type PayHistory as PayHistoryData } from '../lib/api';
+import { DEMO, api, type AnnualMe, type PayHistory as PayHistoryData } from '../lib/api';
 import { fullDay, moneyCents as money } from '../lib/format';
 import { useSession } from '../lib/session';
 
@@ -12,6 +13,8 @@ export function PayHistory() {
   const { viewAs } = useSession();
   const q = useQuery({ queryKey: ['payments', viewAs], queryFn: () => api<PayHistoryData>('/api/me/payments') });
   const [open, setOpen] = useState<string | null>(null);
+  const [year, setYear] = useState(new Date().getUTCFullYear());
+  const annual = useQuery({ queryKey: ['annual-me', viewAs, year], queryFn: () => api<AnnualMe>(`/api/me/annual?year=${year}`) });
   const h = q.data;
   return (
     <Shell eyebrow="Rep portal" title="Pay history">
@@ -23,6 +26,14 @@ export function PayHistory() {
             <Metric label="Cash received" value={money(h.summary.cash)} sub="gross − recovered" />
             <Metric label="Payouts" value={String(h.summary.payouts)} sub="distinct payout dates" />
           </div>
+          <Card title="Year-end statement" extra="the totals a 1099 will show · gross paid, clawbacks netted, cash received">
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <select value={year} onChange={(e) => setYear(Number(e.target.value))} style={{ width: 110 }}>{[...new Set([String(new Date().getUTCFullYear()), ...(annual.data?.years ?? [])])].sort().reverse().map((y) => <option key={y} value={y}>{y}</option>)}</select>
+              {annual.data && <span className="num"><b>{money(annual.data.cash)}</b> <span className="subtle">cash in {annual.data.year} · {money(annual.data.grossPaid)} gross − {money(annual.data.recovered)} recovered · {annual.data.payouts} payout{annual.data.payouts === 1 ? '' : 's'} · {annual.data.deals} deal{annual.data.deals === 1 ? '' : 's'}</span></span>}
+              {DEMO ? <span className="subtle" style={{ fontSize: 13 }}>Downloads are available on the live portal.</span> : <a className="btn" href="/api/me/payments.csv" download>Download pay history (CSV)</a>}
+            </div>
+          </Card>
+          <FilesPanel base="/api/me/files" title="My documents" hint="W-9 and agreements for the office · PDF or image · only an admin can remove one" canDelete={false} />
           {h.days.length > 1 && (() => {
             const years = new Map<string, { gross: number; recovered: number; cash: number; payouts: number }>();
             for (const d of h.days) {

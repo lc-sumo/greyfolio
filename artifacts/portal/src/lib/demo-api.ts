@@ -13,7 +13,8 @@ import { adminMerchants, adminOverview } from '../../../api-server/src/analytics
 import { memoryRepo } from '../../../api-server/src/repo.memory';
 import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repPayHistory, repRenewals, repStatements, repWallet } from '../../../api-server/src/scope';
 import { addDraw, createDeal, deleteClawback, deleteDeal, deleteDraw, recordClawback, setCollection, setCrmId, setDealStatus, updateClawback, updateContact, updateDrawTerms, updateSplits, updateTerms } from '../../../api-server/src/services/deals';
-import { addFile, addNote, removeFile, removeNote } from '../../../api-server/src/services/notes';
+import { addFile, addNote, addRepFile, removeFile, removeNote, removeRepFile } from '../../../api-server/src/services/notes';
+import { cashView, exceptions, markPartnerPaid, partnerPayables, receivables } from '../../../api-server/src/services/books';
 import { advanceRun, createRun, deleteRun, paySelected, reopenRun, voidPayout } from '../../../api-server/src/services/payroll';
 import { commitImport, previewImport } from '../../../api-server/src/services/import';
 import { commitRemittance, previewRemittance } from '../../../api-server/src/services/remittance';
@@ -204,6 +205,16 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
   if (p === '/api/me/clawbacks') return json({ clawbacks: repClawbackViews(ctx, effective) });
   if (p === '/api/me/statements') return json({ statements: repStatements(ctx, d.runs, effective) });
   if (p === '/api/me/payments') return json(repPayHistory(ctx, d.runs, effective));
+  if (p === '/api/me/annual') {
+    const y = Number(q.get('year') ?? today.slice(0, 4));
+    const me = d.reps.find((r) => r.id === effective);
+    const row = annualReport(ctx, d.reps, y).rows.find((r) => r.repId === effective) ?? { repId: effective, name: me?.name ?? effective, email: me?.email ?? '', active: true, grossPaid: 0, recovered: 0, cash: 0, payouts: 0, deals: 0 };
+    return json({ year: y, years: [...new Set(ctx.lines.filter((l) => l.repId === effective).map((l) => l.paidAt.slice(0, 4)))].sort().reverse(), ...row });
+  }
+  if (p === '/api/me/files') {
+    if (method === 'POST') { await addRepFile(repo, u.repId, body as never, u.repId); return json({ files: await repo.listRepFiles(u.repId) }); }
+    return json({ files: await repo.listRepFiles(effective) });
+  }
   if (p === '/api/me/renewals') return json({ renewals: repRenewals(ctx, effective, { renewalMark: settings.thresholds.renewalMark, additionalCapitalAfterDays: settings.thresholds.additionalCapitalAfterDays }, today), thresholds: { renewalMark: settings.thresholds.renewalMark, additionalCapitalAfterDays: settings.thresholds.additionalCapitalAfterDays } });
   if (p === '/api/me/leaderboard') return json({ rows: leaderboard(ctx, d.reps, effective) });
   if (p === '/api/me/monthly') return json({ series: repMonthly(ctx, effective, (q.get('months') ?? '').split(',').filter(Boolean)) });
@@ -264,6 +275,19 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     if (p === '/api/admin/remittance/preview' && method === 'POST') return json(await previewRemittance(repo, String(body.csv ?? '')));
     if (p === '/api/admin/remittance' && method === 'POST') return json(await commitRemittance(repo, String(body.csv ?? ''), me.repId));
     if (p === '/api/admin/reports/annual') return json(annualReport(ctx, d.reps, Number(q.get('year') ?? today.slice(0, 4))));
+    if (p === '/api/admin/books/receivables') return json(receivables(ctx, settings, today));
+    if (p === '/api/admin/books/partners') return json(partnerPayables(ctx, settings));
+    if (p === '/api/admin/books/partners/pay' && method === 'POST') return json(await markPartnerPaid(repo, body as never, me.repId));
+    if (p === '/api/admin/books/cash') return json(cashView(ctx, Number(q.get('year') ?? today.slice(0, 4))));
+    if (p === '/api/admin/books/exceptions') return json(exceptions(ctx, settings, today));
+    const rfm = p.match(/^\/api\/admin\/reps\/([^/]+)\/files(?:\/([^/]+))?$/);
+    if (rfm) {
+      const id = decodeURIComponent(rfm[1]!);
+      const names = new Map(d.reps.map((r) => [r.id, r.name]));
+      if (method === 'POST') await addRepFile(repo, id, body as never, me.repId);
+      if (method === 'DELETE' && rfm[2]) await removeRepFile(repo, id, rfm[2], me.repId);
+      return json({ files: (await repo.listRepFiles(id)).map((f) => ({ ...f, uploadedByName: names.get(f.uploadedBy) ?? f.uploadedBy })) });
+    }
     if (p === '/api/admin/reps' && method === 'POST') return json(await createRep(repo, body as never, me.repId));
     const rm = p.match(/^\/api\/admin\/reps\/([^/]+)$/);
     if (rm && method === 'PATCH') return json(await updateRep(repo, decodeURIComponent(rm[1]!), body as never, me.repId));

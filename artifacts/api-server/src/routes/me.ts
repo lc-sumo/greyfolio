@@ -5,7 +5,9 @@ import type { Repo } from '../repo.js';
 import { changeOwnPassword } from '../services/passwords.js';
 import { beginTotp, disableTotp, enableTotp, totpStatus } from '../services/twofactor.js';
 import { repQuestion, type NotifyDeps } from '../services/notify.js';
-import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repPayHistory, repRenewals, repStatements, repWallet } from '../scope.js';
+import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repPayHistory, repPayHistoryCsv, repRenewals, repStatements, repWallet } from '../scope.js';
+import { annualReport } from '../payroll-views.js';
+import { addRepFile, fetchRepFile } from '../services/notes.js';
 
 /**
  * The rep portal. Every handler reads `scopeOf(req).effectiveRepId` — the
@@ -119,6 +121,39 @@ export function meRouter(repo: Repo, appName = 'Greystone Commission Portal', no
   r.get('/payments', async (req, res) => {
     const [ctx, runs] = await Promise.all([repo.loadContext(), repo.listRuns()]);
     res.json(repPayHistory(ctx, runs, scopeOf(req).effectiveRepId));
+  });
+  r.get('/payments.csv', async (req, res) => {
+    const [ctx, runs] = await Promise.all([repo.loadContext(), repo.listRuns()]);
+    res.type('text/csv').attachment('my-pay-history.csv').send(repPayHistoryCsv(ctx, runs, scopeOf(req).effectiveRepId));
+  });
+  /** Year-end totals for the rep: what a 1099 will show. */
+  r.get('/annual', async (req, res) => {
+    const y = Number(req.query.year ?? new Date().getUTCFullYear());
+    if (!Number.isInteger(y) || y < 2000 || y > 2100) throw new HttpError(400, 'year must be a four-digit year');
+    const [ctx, reps] = await Promise.all([repo.loadContext(), repo.listReps()]);
+    const id = scopeOf(req).effectiveRepId;
+    const me = reps.find((x) => x.id === id);
+    const row = annualReport(ctx, reps, y).rows.find((x) => x.repId === id) ?? { repId: id, name: me?.name ?? id, email: me?.email ?? '', active: me?.active ?? true, grossPaid: 0, recovered: 0, cash: 0, payouts: 0, deals: 0 };
+    const years = [...new Set(ctx.lines.filter((l) => l.repId === id).map((l) => l.paidAt.slice(0, 4)))].sort().reverse();
+    res.json({ year: y, years, ...row });
+  });
+  /** My own files (W-9): a rep can add and read theirs; only an admin removes. */
+  r.get('/files', async (req, res) => {
+    const scope = scopeOf(req);
+    res.json({ files: await repo.listRepFiles(scope.effectiveRepId) });
+  });
+  r.post('/files', async (req, res) => {
+    const scope = scopeOf(req);
+    if (scope.viewAs) throw new HttpError(403, 'Files can only be added by the account holder');
+    await addRepFile(repo, scope.actor.repId, req.body ?? {}, scope.actor.repId);
+    res.status(201).json({ files: await repo.listRepFiles(scope.actor.repId) });
+  });
+  r.get('/files/:fileId', async (req, res) => {
+    const f = await fetchRepFile(repo, scopeOf(req).effectiveRepId, String(req.params.fileId));
+    res.setHeader('content-type', f.mime);
+    res.setHeader('content-disposition', `attachment; filename="${encodeURIComponent(f.name)}"`);
+    res.setHeader('cache-control', 'private, max-age=0');
+    res.send(Buffer.from(f.data, 'base64'));
   });
 
   /** The rep's own renewals, so they know when to follow up. Merchant contact included; other reps' names are not. */

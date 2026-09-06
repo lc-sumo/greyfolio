@@ -46,6 +46,8 @@ export interface Lender {
    * Subsequent draws pay the draw % only. Fraction; absent = no line fee.
    */
   locLineRate?: number;
+  /** Days after funding by which this lender pays commission; absent = Settings › thresholds › payment overdue. */
+  paymentTermsDays?: number;
   /** false = retired: kept for history, hidden from new-deal pickers. */
   active?: boolean;
 }

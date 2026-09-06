@@ -64,7 +64,7 @@ export const qs = (o: Record<string, string | undefined>) => {
 /* ---- Admin (Phase 4). Never served to reps. ---- */
 export type ClawbackBasis = 'none' | 'days' | 'payments';
 export interface LenderClawbackPolicy { basis: ClawbackBasis; count: number; note?: string }
-export interface Lender { name: string; terms: 'upfront' | 'weekly'; weeks: number; upfrontPct?: number; remainder?: 'spread' | 'at-end'; cadenceDays?: number; products?: string[]; clawback?: LenderClawbackPolicy; locLineRate?: number; active?: boolean; renamedFrom?: string }
+export interface Lender { name: string; terms: 'upfront' | 'weekly'; weeks: number; upfrontPct?: number; remainder?: 'spread' | 'at-end'; cadenceDays?: number; products?: string[]; clawback?: LenderClawbackPolicy; locLineRate?: number; paymentTermsDays?: number; active?: boolean; renamedFrom?: string }
 export interface ClawbackWindow { basis: ClawbackBasis; count: number; source: 'lender' | 'product' | 'default'; clearsOn: string | null; cleared: boolean; daysLeft: number | null; label: string }
 export interface ReferralPartner { name: string; pct: number; monthlyCap: number | null; active?: boolean; renamedFrom?: string }
 export interface ProductRule { name: string; basis: 'funded' | 'draw' | 'payback'; factor: boolean; term: boolean; parent: boolean; comm: number; clawback: boolean; renewal: boolean; multiDraw: boolean; drawInitial: number | null; drawSubsequent: number | null; incremental?: boolean; active?: boolean; renamedFrom?: string }
@@ -159,3 +159,26 @@ export interface RemittanceRow { line: number; ref: string; date: string; amount
 export interface RemittancePreview { rows: RemittanceRow[]; problems: string[]; summary: { rows: number; matched: number; amount: number; applied: number; unapplied: number; problems: number } }
 export interface AnnualRow { repId: string; name: string; email: string; active: boolean; grossPaid: number; recovered: number; cash: number; payouts: number; deals: number }
 export interface AnnualReport { year: number; rows: AnnualRow[]; total: { grossPaid: number; recovered: number; cash: number; payouts: number; deals: number } }
+
+/* ---- Books (bookkeeping). Admin only. ---- */
+export type AgeBucket = 'current' | '1-30' | '31-60' | '61-90' | '90+';
+export interface ReceivableRow { dealId: string; business: string; lender: string; product: string; fundedDate: string; segment: string; item: string; amount: number; expected: string | null; daysOverdue: number; bucket: AgeBucket }
+export interface Receivables { asOf: string; rows: ReceivableRow[]; total: number; byBucket: Record<AgeBucket, number>; byLender: Array<{ lender: string; outstanding: number; overdue: number; termsDays: number; rows: number }> }
+export interface PartnerPayableRow { dealId: string; business: string; lender: string; fundedDate: string; partner: string; fee: number; collected: boolean; commissionStatus: string; paidAt: string | null }
+export interface PartnerPayables { rows: PartnerPayableRow[]; partners: Array<{ partner: string; pct: number; owed: number; owedCollected: number; paid: number; deals: number; active: boolean }>; totals: { owed: number; owedCollected: number; paid: number } }
+export interface CashMonth { month: string; deals: number; funded: number; grossEarned: number; referralFees: number; repShares: number; houseNet: number; collected: number; outstanding: number; repPayouts: number; recovered: number; repCash: number }
+export interface CashView { year: number; months: CashMonth[]; total: Omit<CashMonth, 'month'> }
+export type ExceptionKind = 'funded-no-commission' | 'paid-before-collected' | 'past-maturity' | 'clawback-closing' | 'overdue-receipt' | 'partner-owed-collected';
+export interface ExceptionItem { kind: ExceptionKind; dealId: string; business: string; lender: string; amount: number; detail: string; days: number }
+export interface Exceptions { asOf: string; items: ExceptionItem[]; counts: Record<ExceptionKind, number>; totals: Record<ExceptionKind, number> }
+export const EXCEPTION_LABEL: Record<ExceptionKind, string> = {
+  'funded-no-commission': 'Funded, nothing received from the lender',
+  'paid-before-collected': 'Reps paid before the lender paid',
+  'past-maturity': 'Past maturity, still Performing',
+  'clawback-closing': 'Clawback window closes this week',
+  'overdue-receipt': 'Lender receipt overdue',
+  'partner-owed-collected': 'Partner fee owed on collected commission',
+};
+export const EXCEPTION_SHORT: Record<ExceptionKind, string> = { 'funded-no-commission': 'Nothing received', 'paid-before-collected': 'Paid ahead of lender', 'past-maturity': 'Past maturity', 'clawback-closing': 'Clawback closing', 'overdue-receipt': 'Receipt overdue', 'partner-owed-collected': 'Partner fee due' };
+export interface RepFileView { id: string; repId: string; name: string; mime: string; size: number; uploadedBy: string; uploadedByName?: string; createdAt: string }
+export interface AnnualMe { year: number; years: string[]; grossPaid: number; recovered: number; cash: number; payouts: number; deals: number }

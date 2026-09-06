@@ -76,6 +76,11 @@ export async function saveLenders(repo: Repo, input: unknown, actorRepId: string
     const lender: Lender = { name, terms, weeks };
     if (l.active === false) lender.active = false;
     if (l.locLineRate !== undefined && l.locLineRate !== null && l.locLineRate !== '' && Number(l.locLineRate) > 0) lender.locLineRate = asRate(Number(l.locLineRate));
+    if (l.paymentTermsDays !== undefined && l.paymentTermsDays !== null && l.paymentTermsDays !== '') {
+      const days = Math.round(Number(l.paymentTermsDays));
+      if (!Number.isFinite(days) || days < 0 || days > 365) throw new HttpError(400, `"${name}" payment terms must be 0–365 days`);
+      lender.paymentTermsDays = days;
+    }
     if (terms === 'weekly') {
       const up = Number(l.upfrontPct);
       if (Number.isFinite(up) && up > 0) lender.upfrontPct = asRate(up);

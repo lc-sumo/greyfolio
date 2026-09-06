@@ -471,3 +471,13 @@ export function repPayHistory(ctx: LedgerContext, runs: PayrollRun[], repId: str
   const f = paidFigures(ctx.lines.filter((l) => l.repId === repId));
   return { rows, days, summary: { grossPaid: f.gross, recovered: f.recovered, cash: f.cash, payouts: days.length } };
 }
+
+/** The rep's own pay history as a CSV (what they see on Pay history). */
+export function repPayHistoryCsv(ctx: LedgerContext, runs: PayrollRun[], repId: string): string {
+  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const h = repPayHistory(ctx, runs, repId);
+  const head = ['Paid on', 'Deal', 'Business', 'Role', 'Segment', 'Run', 'Amount', 'Voided'].map(esc).join(',');
+  const body = h.rows.map((r) => [r.paidAt, r.dealId, r.business, r.role, r.segmentLabel, r.runLabel ?? '', r.amount.toFixed(2), r.voided ? 'yes' : ''].map(esc).join(','));
+  const foot = ['TOTAL', '', '', '', '', '', h.summary.cash.toFixed(2), ''].map(esc).join(',');
+  return [head, ...body, foot].join('\r\n') + '\r\n';
+}

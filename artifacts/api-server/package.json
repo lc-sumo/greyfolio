@@ -14,6 +14,7 @@
   "dependencies": {
     "@greystone/commission": "workspace:*",
     "@greystone/db": "workspace:*",
+    "@replit/connectors-sdk": "^0.4.3",
     "cookie-session": "^2.1.1",
     "drizzle-orm": "^0.45.2",
     "express": "^5.2.1",

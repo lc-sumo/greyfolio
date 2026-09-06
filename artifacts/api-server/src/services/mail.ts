@@ -1,3 +1,5 @@
+import { ReplitConnectors } from '@replit/connectors-sdk';
+
 /**
  * Outbound email. One tiny interface, three providers:
  *  - resend   — HTTPS API (MAIL_PROVIDER=resend, MAIL_API_KEY=re_…)
@@ -23,24 +25,24 @@ export interface MailResult {
 }
 
 export interface Mailer {
-  readonly kind: 'resend' | 'postmark' | 'log' | 'off' | 'memory';
+  readonly kind: 'sendgrid' | 'resend' | 'postmark' | 'log' | 'off' | 'memory';
   /** True when a message will actually reach an inbox. */
   readonly live: boolean;
   send(mail: Mail): Promise<MailResult>;
 }
 
 export interface MailConfig {
-  provider: 'resend' | 'postmark' | 'log' | 'off';
+  provider: 'sendgrid' | 'resend' | 'postmark' | 'log' | 'off';
   apiKey: string | null;
   from: string;
 }
 
 export function mailConfigFromEnv(env: NodeJS.ProcessEnv, production: boolean): MailConfig {
   const raw = (env.MAIL_PROVIDER ?? (production ? 'off' : 'log')).toLowerCase();
-  const provider = raw === 'resend' || raw === 'postmark' || raw === 'log' || raw === 'off' ? raw : 'off';
+  const provider = raw === 'sendgrid' || raw === 'resend' || raw === 'postmark' || raw === 'log' || raw === 'off' ? raw : 'off';
   const apiKey = env.MAIL_API_KEY || null;
   if ((provider === 'resend' || provider === 'postmark') && !apiKey) throw new Error(`MAIL_PROVIDER=${provider} needs MAIL_API_KEY`);
-  return { provider, apiKey, from: env.MAIL_FROM || 'Greystone Commission Portal <portal@greystoneus.com>' };
+  return { provider, apiKey, from: env.MAIL_FROM || 'Greystone Funded Portal <portal@greystoneus.com>' };
 }
 
 const list = (to: string | string[]) => (Array.isArray(to) ? to : [to]);
@@ -61,6 +63,32 @@ export function mailerFor(cfg: MailConfig): Mailer {
       async send(m) {
         console.log(JSON.stringify({ t: new Date().toISOString(), level: 'info', mail: { to: list(m.to), subject: m.subject, text: m.text } }));
         return { ok: true, id: `log-${Date.now()}` };
+      },
+    };
+  }
+  if (cfg.provider === 'sendgrid') {
+    return {
+      kind: 'sendgrid',
+      live: true,
+      async send(m) {
+        const fromEmail = cfg.from.match(/<([^>]+)>/)?.[1] ?? cfg.from;
+        const fromName = cfg.from.split('<')[0]?.trim() || undefined;
+        const res = await new ReplitConnectors().proxy('sendgrid', '/v3/mail/send', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            personalizations: [{ to: list(m.to).map((email) => ({ email })) }],
+            from: { email: fromEmail, name: fromName },
+            subject: m.subject,
+            content: [
+              { type: 'text/plain', value: m.text },
+              { type: 'text/html', value: m.html ?? textToHtml(m.text) },
+            ],
+          }),
+        });
+        return res.ok
+          ? { ok: true, id: res.headers.get('x-message-id') ?? undefined }
+          : { ok: false, error: `SendGrid responded ${res.status}` };
       },
     };
   }

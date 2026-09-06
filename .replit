@@ -26,3 +26,12 @@ externalPort = 80
 [[ports]]
 localPort = 8099
 externalPort = 8099
+
+[userenv]
+
+[userenv.production]
+APP_ORIGIN = "https://folio.greystoneus.com"
+BASE_URL = "https://folio.greystoneus.com"
+MAIL_FROM = "Greystone Funded Portal <portal@greystoneus.com>"
+MAIL_PROVIDER = "sendgrid"
+NODE_ENV = "production"

@@ -22,6 +22,7 @@ import {
   type Database,
 } from '@greystone/db';
 import type { AuditEntry, DealFile, DealNote, DealPatch, PasswordReset, PayoutCommit, Repo, Settings, TotpState } from './repo.js';
+import { requestMeta } from './auth/request-context.js';
 
 export function dbRepo(db: Database): Repo {
   return {
@@ -231,6 +232,7 @@ export function dbRepo(db: Database): Repo {
         actorRepId: entry.actorRepId,
         action: entry.action,
         targetRepId: entry.targetRepId,
+        ip: entry.ip ?? requestMeta()?.ip ?? null,
         path: entry.path,
         detail: entry.detail ?? null,
       });
@@ -244,6 +246,7 @@ export function dbRepo(db: Database): Repo {
         path: r.path,
         detail: r.detail ?? undefined,
         at: r.at.toISOString(),
+        ip: r.ip,
       }));
     },
   };

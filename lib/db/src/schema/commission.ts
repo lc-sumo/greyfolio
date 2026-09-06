@@ -322,6 +322,8 @@ export const commissionAuditLog = pgTable(
     targetRepId: text('target_rep_id').references(() => commissionReps.id),
     path: text('path'),
     detail: jsonb('detail').$type<Record<string, unknown>>(),
+    /** Client address the request came from (behind the proxy: X-Forwarded-For). */
+    ip: text('ip'),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('commission_audit_log_actor_idx').on(t.actorRepId), index('commission_audit_log_at_idx').on(t.at)],

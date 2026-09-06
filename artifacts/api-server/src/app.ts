@@ -3,6 +3,7 @@ import cookieSession from 'cookie-session';
 import express, { type ErrorRequestHandler } from 'express';
 import { authRouter } from './auth/oidc.js';
 import { HttpError, refreshSession } from './auth/middleware.js';
+import { requestContext } from './auth/request-context.js';
 import type { AppConfig } from './config.js';
 import type { Repo } from './repo.js';
 import { adminRouter } from './routes/admin.js';
@@ -26,6 +27,7 @@ export function createApp(config: AppConfig, repo: Repo, deps: AppDeps = {}): ex
   app.locals.mailer = mailer;
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
+  app.use(requestContext());
   app.use(securityHeaders());
   app.use(requestLog(config.requestLog));
   app.use(express.json({ limit: '8mb' })); // a full tracker export is a few MB
@@ -59,8 +61,11 @@ export function createApp(config: AppConfig, repo: Repo, deps: AppDeps = {}): ex
 
   const onError: ErrorRequestHandler = (err, _req, res, _next) => {
     if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
-    console.error(JSON.stringify({ t: new Date().toISOString(), level: 'error', path: _req.originalUrl, message: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined }));
-    res.status(500).json({ error: 'Internal error' });
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(JSON.stringify({ t: new Date().toISOString(), level: 'error', path: _req.originalUrl, message, stack: err instanceof Error ? err.stack : undefined }));
+    // Admins see what actually failed (usually a database/schema problem); everyone else gets the generic line.
+    const admin = _req.session?.user?.role === 'admin';
+    res.status(500).json({ error: admin ? `Internal error: ${message}` : 'Internal error' });
   };
   app.use(onError);
   return app;

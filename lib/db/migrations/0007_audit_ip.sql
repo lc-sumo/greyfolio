@@ -1,0 +1,1 @@
+ALTER TABLE "commission_audit_log" ADD COLUMN "ip" text;

@@ -1,5 +1,6 @@
 import type { Clawback, Deal, DealDraw, LedgerContext, PayoutLine, PayrollRun, Rep, Team, WeeklySchedule } from '@greystone/commission';
 import type { AuditEntry, DealFile, DealNote, DealPatch, PasswordReset, PayoutCommit, Repo, Settings, TotpState } from './repo.js';
+import { requestMeta } from './auth/request-context.js';
 
 export interface MemoryData {
   reps: Rep[];
@@ -101,7 +102,7 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
       return data.settings;
     },
     async writeAudit(e) {
-      audit.push({ ...e, at: new Date().toISOString() });
+      audit.push({ ...e, ip: e.ip ?? requestMeta()?.ip ?? null, at: new Date().toISOString() });
     },
     async listAudit(limit = 100, offset = 0) {
       const all = [...audit].reverse();

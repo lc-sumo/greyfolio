@@ -50,6 +50,13 @@
       "when": 1788553208347,
       "tag": "0006_loc_line_fee",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788699193226,
+      "tag": "0007_audit_ip",
+      "breakpoints": true
     }
   ]
 }

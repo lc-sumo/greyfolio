@@ -7,6 +7,8 @@ export interface AuditEntry {
   path: string | null;
   detail?: Record<string, unknown>;
   at?: string;
+  /** Client IP; filled from the request context when the writer does not pass one. */
+  ip?: string | null;
 }
 
 export interface Thresholds {

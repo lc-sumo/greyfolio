@@ -75,17 +75,25 @@ export function adminRouter(repo: Repo): Router {
     const action = typeof req.query.action === 'string' && req.query.action ? req.query.action : null;
     const rep = typeof req.query.rep === 'string' && req.query.rep ? req.query.rep : null;
     // Filters apply after the page is fetched from storage, so fetch a wider page when filtering.
-    const raw = await repo.listAudit(action || rep ? Math.min(5000, limit * 20) : limit, action || rep ? 0 : offset);
+    const [raw, reps] = await Promise.all([repo.listAudit(action || rep ? Math.min(5000, limit * 20) : limit, action || rep ? 0 : offset), repo.listReps()]);
+    const name = new Map(reps.map((x) => [x.id, x.name]));
     const filtered = raw.filter((e) => (!action || e.action === action) && (!rep || e.actorRepId === rep || e.targetRepId === rep));
-    return { entries: action || rep ? filtered.slice(offset, offset + limit) : filtered, limit, offset, hasMore: (action || rep ? filtered.length : raw.length) > offset + limit || (!action && !rep && raw.length === limit) };
+    const page = action || rep ? filtered.slice(offset, offset + limit) : filtered;
+    return {
+      entries: page.map((e) => ({ ...e, actorName: name.get(e.actorRepId) ?? e.actorRepId, targetName: e.targetRepId ? name.get(e.targetRepId) ?? e.targetRepId : null })),
+      limit,
+      offset,
+      hasMore: (action || rep ? filtered.length : raw.length) > offset + limit || (!action && !rep && raw.length === limit),
+      actions: [...new Set(raw.map((e) => e.action))].sort(),
+    };
   };
   r.get('/audit', requireRole('admin'), async (req, res) => res.json(await auditQuery(req)));
   r.get('/audit.csv', requireRole('admin'), async (req, res) => {
     const [reps, all] = await Promise.all([repo.listReps(), repo.listAudit(5000, 0)]);
     const name = new Map(reps.map((x) => [x.id, x.name]));
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const head = ['At', 'Actor', 'Action', 'Target', 'Path', 'Detail'].map(esc).join(',');
-    const body = all.map((e) => [e.at ?? '', name.get(e.actorRepId) ?? e.actorRepId, e.action, e.targetRepId ? name.get(e.targetRepId) ?? e.targetRepId : '', e.path ?? '', e.detail ? JSON.stringify(e.detail) : ''].map(esc).join(','));
+    const head = ['At', 'Actor', 'Action', 'Target', 'IP', 'Path', 'Detail'].map(esc).join(',');
+    const body = all.map((e) => [e.at ?? '', name.get(e.actorRepId) ?? e.actorRepId, e.action, e.targetRepId ? name.get(e.targetRepId) ?? e.targetRepId : '', e.ip ?? '', e.path ?? '', e.detail ? JSON.stringify(e.detail) : ''].map(esc).join(','));
     res.type('text/csv').attachment('audit-log.csv').send([head, ...body].join('\r\n') + '\r\n');
   });
 

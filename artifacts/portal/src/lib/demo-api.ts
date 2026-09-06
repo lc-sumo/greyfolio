@@ -236,7 +236,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
       }),
     });
   }
-  if (p === '/api/admin/audit') { const lim = Number(q.get('limit') ?? 100); const entries = await repo.listAudit(lim); return json({ entries, limit: lim, offset: 0, hasMore: entries.length === lim }); }
+  if (p === '/api/admin/audit') { const lim = Number(q.get('limit') ?? 100); const names = new Map(d.reps.map((r) => [r.id, r.name])); const all = (await repo.listAudit(lim)).filter((e) => (!q.get('action') || e.action === q.get('action')) && (!q.get('rep') || e.actorRepId === q.get('rep') || e.targetRepId === q.get('rep'))); return json({ entries: all.map((e) => ({ ...e, ip: e.ip ?? '127.0.0.1', actorName: names.get(e.actorRepId) ?? e.actorRepId, targetName: e.targetRepId ? names.get(e.targetRepId) ?? e.targetRepId : null })), limit: lim, offset: 0, hasMore: all.length === lim, actions: [...new Set(all.map((e) => e.action))].sort() }); }
   if (p === '/api/admin/settings') return json(settings);
   if (p === '/api/admin/settings/usage') return json(await usage(repo));
   try {

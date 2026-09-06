@@ -9,11 +9,14 @@ import { repDeals, repLedger, repOptions, type Rep, type Team } from '@greystone
 import { buildDemo, type DemoData } from '@greystone/db/seed/demo';
 import { LENDERS, LISTS, PARTNERS, PRODUCTS, THRESHOLDS } from '@greystone/db/seed';
 import { adminDealDetail, adminDealRow, adminRenewals } from '../../../api-server/src/admin-views';
-import { adminMerchants, adminOverview } from '../../../api-server/src/analytics-views';
+import { adminMerchants, adminOverview, merchantKey } from '../../../api-server/src/analytics-views';
+import { scorecards } from '../../../api-server/src/services/scorecards';
+import { linkRenewal } from '../../../api-server/src/services/deals';
 import { memoryRepo } from '../../../api-server/src/repo.memory';
 import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repPayHistory, repRenewals, repStatements, repWallet } from '../../../api-server/src/scope';
 import { addDraw, createDeal, deleteClawback, deleteDeal, deleteDraw, recordClawback, setCollection, setCrmId, setDealStatus, updateClawback, updateContact, updateDrawTerms, updateSplits, updateTerms } from '../../../api-server/src/services/deals';
-import { addFile, addNote, removeFile, removeNote } from '../../../api-server/src/services/notes';
+import { addFile, addNote, addRepFile, removeFile, removeNote, removeRepFile } from '../../../api-server/src/services/notes';
+import { cashView, exceptions, markPartnerPaid, partnerPayables, receivables } from '../../../api-server/src/services/books';
 import { advanceRun, createRun, deleteRun, paySelected, reopenRun, voidPayout } from '../../../api-server/src/services/payroll';
 import { commitImport, previewImport } from '../../../api-server/src/services/import';
 import { commitRemittance, previewRemittance } from '../../../api-server/src/services/remittance';
@@ -29,9 +32,15 @@ async function demoSheetGrid(body: Record<string, unknown>): Promise<string[][] 
   if (!sheet) throw new ApiError(400, `No FUNDED DEALS tab found (sheets: ${wb.sheets.map((s) => s.name).join(', ')})`);
   return sheet.grid;
 }
-import { createRep, createTeam, deleteTeam, saveCrm, saveLenders, savePartners, savePayroll, saveProducts, saveThresholds, updateRep, updateTeam, usage } from '../../../api-server/src/services/settings';
+import { createRep, createTeam, deleteTeam, saveCrm, saveLenders, saveLists, saveNotifications, savePartners, savePayroll, savePermissions, savePortal, saveProducts, saveSecurity, saveThresholds, updateRep, updateTeam, usage } from '../../../api-server/src/services/settings';
 import { annualReport, payrollRepDetail, payrollReps, preview, runSummary } from '../../../api-server/src/payroll-views';
 import { ApiError, type SessionUser } from './api';
+import { memoryMailer } from '../../../api-server/src/services/mail';
+import { MERGE_FIELD_HELP, TASK_OUTCOMES, TRIGGER_KINDS } from '../../../api-server/src/services/playbook-rules';
+import { createPlaybook, createTask, deletePlaybook, dryRun, ensureStarterPlaybooks, logOutcome, merchantPreview, runPlaybooks, saveTemplates, sendMerchantEmail, taskViews, updatePlaybook } from '../../../api-server/src/services/playbooks';
+
+const demoMailer = memoryMailer();
+const demoNotify = { mailer: demoMailer, origin: 'https://portal.greystoneus.com', appName: 'Greystone Commission Portal' };
 
 let repo: ReturnType<typeof memoryRepo> | null = null;
 let demo: DemoData | null = null;
@@ -39,6 +48,9 @@ function board() {
   if (!demo) {
     demo = buildDemo(new Date().toISOString().slice(0, 10));
     repo = memoryRepo({ reps: demo.reps, teams: demo.teams, runs: demo.runs, deals: demo.deals, lines: demo.lines, clawbacks: demo.clawbacks, settings: { lenders: [...LENDERS], partners: [...PARTNERS], products: [...PRODUCTS], thresholds: THRESHOLDS, lists: LISTS, crm: { urlTemplate: '' }, payroll: { cycle: 'Twice monthly' } } });
+    // Demo owner: the seeded admin is the super admin (on a real portal that is lc@greystoneus.com).
+    const leor = demo.reps.find((r) => r.role === 'admin');
+    if (leor) leor.superAdmin = true;
   }
   return { d: demo!, repo: repo! };
 }
@@ -108,10 +120,12 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
   const today = d.today;
   const settings = await repo.getSettings();
 
-  if (p === '/auth/methods') return json({ oidc: false, devAuth: true, password: true });
+  if (p === '/auth/methods') return json({ oidc: false, devAuth: true, password: true, setup: false, branding: settings.portal });
+  if (p === '/auth/setup' && method === 'POST') throw new ApiError(403, 'Demo: setup is already complete');
   if (p === '/auth/me') {
     if (!u) throw new ApiError(401, 'Sign in required');
-    return json({ user: u, canViewAs: u.role !== 'rep', oidc: false, devAuth: true, password: true });
+    const meRep = d.reps.find((r) => r.id === u.repId);
+    return json({ user: u, canViewAs: u.role !== 'rep', oidc: false, devAuth: true, password: true, branding: settings.portal, mustEnrollTotp: false, idleMinutes: 0, superAdmin: !!meRep?.superAdmin, canEmailMerchants: settings.permissions.merchantEmail && meRep?.perms?.merchantEmail !== false, canEditContacts: settings.permissions.contactEdit });
   }
   if (p === '/auth/dev-login') {
     const email = (q.get('email') ?? '').trim().toLowerCase();
@@ -120,6 +134,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     if (!rep.active) throw new ApiError(403, `${rep.name} is inactive — ask an admin to reactivate the account`);
     const su: SessionUser = { repId: rep.id, email: rep.email, name: rep.name, role: rep.role };
     setUser(su);
+    await repo.writeAudit({ actorRepId: rep.id, action: 'login', targetRepId: null, path: '/auth/dev-login', ip: '74.101.22.9' });
     return json({ ok: true, user: su });
   }
   if (p === '/auth/password-login' && method === 'POST') {
@@ -131,6 +146,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     if (!rep.active) throw new ApiError(403, `${rep.name} is inactive — ask an admin to reactivate the account`);
     const su: SessionUser = { repId: rep.id, email: rep.email, name: rep.name, role: rep.role };
     setUser(su);
+    await repo.writeAudit({ actorRepId: rep.id, action: 'login', targetRepId: null, path: '/auth/password-login', ip: '74.101.22.9' });
     return json({ ok: true, user: su });
   }
   if (p === '/auth/forgot' && method === 'POST') return json({ ok: true, message: 'Demo: no email goes out here. On a real portal a one-hour reset link lands in that inbox.' });
@@ -150,6 +166,8 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     return json({ ok: true });
   }
   if (p === '/api/me/totp') return json({ enabled: demoTotp.has(u.repId), pending: false });
+  if (p === '/api/me/devices') return json({ devices: demoTotp.has(u.repId) ? [{ id: 'dev-demo', label: 'Chrome · Mac', ip: '74.101.22.9', location: 'Brooklyn, New York, US', createdAt: new Date().toISOString(), lastUsedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(), current: true }] : [] });
+  if (p.startsWith('/api/me/devices') && method === 'DELETE') return json({ ok: true });
   if (p === '/api/me/totp/setup' && method === 'POST') return json({ secret: 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP', otpauth: `otpauth://totp/Greystone%20(demo):${encodeURIComponent(u.email)}?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=Greystone%20(demo)` });
   if (p === '/api/me/totp/enable' && method === 'POST') {
     if (!/^\d{6}$/.test(String(body.code ?? '').replace(/\s/g, ''))) throw new ApiError(400, 'Enter the 6-digit code');
@@ -203,6 +221,36 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
   if (p === '/api/me/clawbacks') return json({ clawbacks: repClawbackViews(ctx, effective) });
   if (p === '/api/me/statements') return json({ statements: repStatements(ctx, d.runs, effective) });
   if (p === '/api/me/payments') return json(repPayHistory(ctx, d.runs, effective));
+  if (p === '/api/me/annual') {
+    const y = Number(q.get('year') ?? today.slice(0, 4));
+    const me = d.reps.find((r) => r.id === effective);
+    const row = annualReport(ctx, d.reps, y).rows.find((r) => r.repId === effective) ?? { repId: effective, name: me?.name ?? effective, email: me?.email ?? '', active: true, grossPaid: 0, recovered: 0, cash: 0, payouts: 0, deals: 0 };
+    return json({ year: y, years: [...new Set(ctx.lines.filter((l) => l.repId === effective).map((l) => l.paidAt.slice(0, 4)))].sort().reverse(), ...row });
+  }
+  if (p === '/api/me/tasks') return json({ tasks: await taskViews(repo, { repId: effective, status: q.get('status') === 'open' || q.get('status') === 'done' ? (q.get('status') as 'open' | 'done') : undefined }, today), outcomes: TASK_OUTCOMES, today });
+  const tkm = p.match(/^\/api\/me\/tasks\/([^/]+)$/);
+  if (tkm && method === 'PATCH') return json(await logOutcome(repo, tkm[1]!, body as never, u.repId, today, { asAdmin: false }));
+  const dtm = p.match(/^\/api\/me\/deals\/([^/]+)\/tasks$/);
+  if (dtm && method === 'POST') return json(await createTask(repo, { dealId: decodeURIComponent(dtm[1]!), repId: u.repId, title: body.title, dueDate: body.dueDate }, u.repId, today));
+  if (p === '/api/me/templates') { const meRep = d.reps.find((r) => r.id === effective); return json({ merchant: settings.templates.merchant, live: true, allowed: settings.permissions.merchantEmail && meRep?.perms?.merchantEmail !== false }); }
+  const mcm = p.match(/^\/api\/me\/deals\/([^/]+)\/contact$/);
+  if (mcm && method === 'PATCH') {
+    const deal = repDeals(ctx.deals, u.repId).find((x) => x.id === decodeURIComponent(mcm[1]!));
+    if (!deal) throw new ApiError(404, 'Deal not found');
+    const r2 = await updateContact(repo, deal.id, { merchantContact: body.merchantContact, merchantEmail: body.merchantEmail, merchantPhone: body.merchantPhone, applyToMerchant: body.applyToMerchant }, u.repId);
+    return json({ ...repDealView(r2.deal, u.repId, ctx.lines, ctx.clawbacks, settings), updatedDeals: r2.updated });
+  }
+  const mpm = p.match(/^\/api\/me\/deals\/([^/]+)\/merchant-email(?:\/preview)?$/);
+  if (mpm) {
+    const deal = repDeals(ctx.deals, u.repId).find((x) => x.id === decodeURIComponent(mpm[1]!));
+    if (!deal) throw new ApiError(404, 'Deal not found');
+    if (method === 'POST') return json(await sendMerchantEmail({ repo, ...demoNotify }, deal, u.repId, body as never, today));
+    return json(await merchantPreview(repo, deal, u.repId, q.get('template') ?? '', today, demoNotify.appName));
+  }
+  if (p === '/api/me/files') {
+    if (method === 'POST') { await addRepFile(repo, u.repId, body as never, u.repId); return json({ files: await repo.listRepFiles(u.repId) }); }
+    return json({ files: await repo.listRepFiles(effective) });
+  }
   if (p === '/api/me/renewals') return json({ renewals: repRenewals(ctx, effective, { renewalMark: settings.thresholds.renewalMark, additionalCapitalAfterDays: settings.thresholds.additionalCapitalAfterDays }, today), thresholds: { renewalMark: settings.thresholds.renewalMark, additionalCapitalAfterDays: settings.thresholds.additionalCapitalAfterDays } });
   if (p === '/api/me/leaderboard') return json({ rows: leaderboard(ctx, d.reps, effective) });
   if (p === '/api/me/monthly') return json({ series: repMonthly(ctx, effective, (q.get('months') ?? '').split(',').filter(Boolean)) });
@@ -232,15 +280,15 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     return json({
       reps: d.reps.map((rep) => {
         const l = repLedger(ctx, rep.id);
-        return { id: rep.id, name: rep.name, email: rep.email, role: rep.role, teamId: rep.teamId, team: rep.teamId ? teamName.get(rep.teamId) ?? null : null, openerRate: rep.openerRate, closerRate: rep.closerRate, overrideRate: rep.overrideRate, active: rep.active, hasPassword: demoPasswords.has(rep.id), hasTotp: demoTotp.has(rep.id), earned: l.earned, paid: l.paid, held: l.held, owed: l.owed, dealCount: l.deals.length };
+        return { id: rep.id, name: rep.name, email: rep.email, role: rep.role, teamId: rep.teamId, team: rep.teamId ? teamName.get(rep.teamId) ?? null : null, openerRate: rep.openerRate, closerRate: rep.closerRate, overrideRate: rep.overrideRate, active: rep.active, hasPassword: demoPasswords.has(rep.id), hasTotp: demoTotp.has(rep.id), superAdmin: !!rep.superAdmin, perms: rep.perms ?? null, earned: l.earned, paid: l.paid, held: l.held, owed: l.owed, dealCount: l.deals.length };
       }),
     });
   }
-  if (p === '/api/admin/audit') { const lim = Number(q.get('limit') ?? 100); const entries = await repo.listAudit(lim); return json({ entries, limit: lim, offset: 0, hasMore: entries.length === lim }); }
+  if (p === '/api/admin/audit') { const lim = Number(q.get('limit') ?? 100); const names = new Map(d.reps.map((r) => [r.id, r.name])); const all = (await repo.listAudit(lim)).filter((e) => (!q.get('action') || e.action === q.get('action')) && (!q.get('rep') || e.actorRepId === q.get('rep') || e.targetRepId === q.get('rep'))); return json({ geo: true, entries: all.map((e) => ({ ...e, ip: e.ip ?? '74.101.22.9', location: 'Brooklyn, New York, US', actorName: names.get(e.actorRepId) ?? e.actorRepId, targetName: e.targetRepId ? names.get(e.targetRepId) ?? e.targetRepId : null })), limit: lim, offset: 0, hasMore: all.length === lim, actions: [...new Set(all.map((e) => e.action))].sort() }); }
   if (p === '/api/admin/settings') return json(settings);
   if (p === '/api/admin/settings/usage') return json(await usage(repo));
   try {
-    const sm = p.match(/^\/api\/admin\/settings\/(lenders|partners|products|thresholds|crm|payroll)$/);
+    const sm = p.match(/^\/api\/admin\/settings\/(lenders|partners|products|thresholds|crm|payroll|portal|notifications|security|lists|permissions)$/);
     if (sm && method === 'PUT') {
       const k = sm[1]!;
       if (k === 'lenders') return json({ lenders: await saveLenders(repo, body.lenders, me.repId) });
@@ -248,22 +296,65 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
       if (k === 'products') return json({ products: await saveProducts(repo, body.products, me.repId) });
       if (k === 'thresholds') return json({ thresholds: await saveThresholds(repo, body, me.repId) });
       if (k === 'crm') return json({ crm: await saveCrm(repo, body, me.repId) });
+      if (k === 'portal') return json({ portal: await savePortal(repo, body, me.repId) });
+      if (k === 'notifications') return json({ notifications: await saveNotifications(repo, body, me.repId) });
+      if (k === 'security') return json({ security: await saveSecurity(repo, body, me.repId) });
+      if (k === 'lists') return json({ lists: await saveLists(repo, body, me.repId) });
+      if (k === 'permissions') return json({ permissions: await savePermissions(repo, body, me.repId) });
       return json({ payroll: await savePayroll(repo, body, me.repId) });
     }
     if (p === '/api/admin/teams' && method === 'POST') return json(await createTeam(repo, body as never, me.repId));
     const tm = p.match(/^\/api\/admin\/teams\/([^/]+)$/);
     if (tm && method === 'PATCH') return json(await updateTeam(repo, decodeURIComponent(tm[1]!), body as never, me.repId));
     if (tm && method === 'DELETE') { await deleteTeam(repo, decodeURIComponent(tm[1]!), me.repId); return json(null); }
-    if (p === '/api/admin/import/preview' && method === 'POST') return json(await previewImport(repo, String(body.csv ?? ''), { skipExisting: !!body.skipExisting, grid: await demoSheetGrid(body) }));
-    if (p === '/api/admin/import' && method === 'POST') return json(await commitImport(repo, String(body.csv ?? ''), me.repId, { skipExisting: !!body.skipExisting, grid: await demoSheetGrid(body) }));
+    if (p === '/api/admin/import/preview' && method === 'POST') return json(await previewImport(repo, String(body.csv ?? ''), { skipExisting: !!body.skipExisting || !!body.updateExisting, updateExisting: !!body.updateExisting, grid: await demoSheetGrid(body) }));
+    if (p === '/api/admin/import' && method === 'POST') return json(await commitImport(repo, String(body.csv ?? ''), me.repId, { skipExisting: !!body.skipExisting || !!body.updateExisting, updateExisting: !!body.updateExisting, grid: await demoSheetGrid(body) }));
     if (p === '/api/admin/remittance/preview' && method === 'POST') return json(await previewRemittance(repo, String(body.csv ?? '')));
     if (p === '/api/admin/remittance' && method === 'POST') return json(await commitRemittance(repo, String(body.csv ?? ''), me.repId));
     if (p === '/api/admin/reports/annual') return json(annualReport(ctx, d.reps, Number(q.get('year') ?? today.slice(0, 4))));
+    if (p === '/api/admin/playbooks') {
+      await ensureStarterPlaybooks(repo);
+      const [playbooks, firings, tasks] = await Promise.all([repo.listPlaybooks(), repo.listFirings({ limit: 100000 }), repo.listTasks()]);
+      if (method === 'POST') return json(await createPlaybook(repo, body as never, me.repId));
+      return json({ playbooks: playbooks.map((pb) => { const mine = firings.filter((f) => f.playbookId === pb.id); const ts = tasks.filter((t) => t.playbookId === pb.id); return { ...pb, firings: mine.length, lastFired: mine.map((f) => f.firedAt).sort().at(-1) ?? null, openTasks: ts.filter((t) => t.status === 'open').length, doneTasks: ts.filter((t) => t.status === 'done').length }; }), triggers: TRIGGER_KINDS, outcomes: TASK_OUTCOMES, mergeFields: MERGE_FIELD_HELP, lastRun: (await repo.getSetting<string>('playbooks.lastRun')) ?? null });
+    }
+    if (p === '/api/admin/playbooks/dry-run' && method === 'POST') return json(await dryRun(repo, body.rule, today, typeof body.playbookId === 'string' ? body.playbookId : undefined));
+    if (p === '/api/admin/playbooks/run' && method === 'POST') { await ensureStarterPlaybooks(repo); return json(await runPlaybooks({ repo, ...demoNotify }, today, me.repId)); }
+    if (p === '/api/admin/playbooks/log') {
+      const [firings, playbooks] = await Promise.all([repo.listFirings({ limit: Number(q.get('limit') ?? 200) }), repo.listPlaybooks()]);
+      const pbn = new Map(playbooks.map((x) => [x.id, x.name]));
+      const rn = new Map(d.reps.map((r) => [r.id, r.name]));
+      return json({ firings: firings.map((f) => ({ ...f, playbookName: pbn.get(f.playbookId) ?? f.playbookId, repName: f.repId ? rn.get(f.repId) ?? f.repId : null })) });
+    }
+    const pbm = p.match(/^\/api\/admin\/playbooks\/([^/]+)$/);
+    if (pbm && method === 'PATCH') return json(await updatePlaybook(repo, pbm[1]!, body as never, me.repId));
+    if (pbm && method === 'DELETE') { await deletePlaybook(repo, pbm[1]!, me.repId); return json({ ok: true }); }
+    if (p === '/api/admin/tasks') return json({ tasks: await taskViews(repo, { status: q.get('status') === 'open' || q.get('status') === 'done' ? (q.get('status') as 'open' | 'done') : undefined, repId: q.get('rep') ?? undefined, dealId: q.get('deal') ?? undefined }, today) });
+    const atm = p.match(/^\/api\/admin\/tasks\/([^/]+)$/);
+    if (atm && method === 'PATCH') return json(await logOutcome(repo, atm[1]!, body as never, me.repId, today, { asAdmin: true }));
+    const adtm = p.match(/^\/api\/admin\/deals\/([^/]+)\/tasks$/);
+    if (adtm && method === 'POST') return json(await createTask(repo, { dealId: decodeURIComponent(adtm[1]!), ...(body as object) }, me.repId, today));
+    if (p === '/api/admin/settings/templates' && method === 'PUT') return json({ templates: await saveTemplates(repo, body as never, me.repId) });
+    if (p === '/api/admin/books/receivables') return json(receivables(ctx, settings, today));
+    if (p === '/api/admin/books/partners') return json(partnerPayables(ctx, settings));
+    if (p === '/api/admin/books/partners/pay' && method === 'POST') return json(await markPartnerPaid(repo, body as never, me.repId));
+    if (p === '/api/admin/books/cash') return json(cashView(ctx, Number(q.get('year') ?? today.slice(0, 4))));
+    if (p === '/api/admin/books/exceptions') return json(exceptions(ctx, settings, today));
+    const rfm = p.match(/^\/api\/admin\/reps\/([^/]+)\/files(?:\/([^/]+))?$/);
+    if (rfm) {
+      const id = decodeURIComponent(rfm[1]!);
+      const names = new Map(d.reps.map((r) => [r.id, r.name]));
+      if (method === 'POST') await addRepFile(repo, id, body as never, me.repId);
+      if (method === 'DELETE' && rfm[2]) await removeRepFile(repo, id, rfm[2], me.repId);
+      return json({ files: (await repo.listRepFiles(id)).map((f) => ({ ...f, uploadedByName: names.get(f.uploadedBy) ?? f.uploadedBy })) });
+    }
     if (p === '/api/admin/reps' && method === 'POST') return json(await createRep(repo, body as never, me.repId));
     const rm = p.match(/^\/api\/admin\/reps\/([^/]+)$/);
     if (rm && method === 'PATCH') return json(await updateRep(repo, decodeURIComponent(rm[1]!), body as never, me.repId));
     const tm2 = p.match(/^\/api\/admin\/reps\/([^/]+)\/totp$/);
     if (tm2 && method === 'DELETE') { demoTotp.delete(decodeURIComponent(tm2[1]!)); return json({ ok: true, hasTotp: false }); }
+    const im = p.match(/^\/api\/admin\/reps\/([^/]+)\/invite$/);
+    if (im && method === 'POST') { const rep = d.reps.find((r) => r.id === im[1]); if (!rep) throw new ApiError(404, 'Rep not found'); await repo.writeAudit({ actorRepId: u.repId, action: 'rep.invite', targetRepId: rep.id, path: p, detail: { email: rep.email, demo: true } }); return json({ ok: true, email: rep.email }); }
     const pm = p.match(/^\/api\/admin\/reps\/([^/]+)\/password$/);
     if (pm && method === 'POST') {
       const id = decodeURIComponent(pm[1]!);
@@ -277,7 +368,20 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     rethrow(e);
   }
   if (p === '/api/admin/renewals') return json({ renewals: adminRenewals(ctx, d.reps, settings, today) });
-  if (p === '/api/admin/merchants') return json({ merchants: adminMerchants(ctx, settings, today) });
+  if (p === '/api/admin/merchants') return json({ merchants: adminMerchants(ctx, settings, today, d.reps) });
+  const mkm = p.match(/^\/api\/admin\/merchants\/([^/]+)$/);
+  if (mkm) {
+    const key = decodeURIComponent(mkm[1]!).toLowerCase();
+    const row = adminMerchants(ctx, settings, today, d.reps).find((m) => merchantKey({ merchantEmail: m.email, business: m.business }) === key);
+    if (!row) throw new ApiError(404, 'Merchant not found');
+    const names = new Map(d.reps.map((r) => [r.id, r.name]));
+    const ids = row.deals.map((x) => x.id);
+    const notes = (await Promise.all(ids.map((id) => repo.listNotes(id)))).flat().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const tasks = (await Promise.all(ids.map((id) => repo.listTasks({ dealId: id, status: 'open' })))).flat();
+    return json({ merchant: row, notes: notes.map((n) => ({ ...n, author: names.get(n.authorRepId) ?? n.authorRepId })), tasks: tasks.map((t) => ({ ...t, repName: names.get(t.repId) ?? t.repId })), files: [] });
+  }
+  if (p === '/api/admin/scorecards') { const y = Number(q.get('year') ?? today.slice(0, 4)); return json({ year: y, rows: scorecards(ctx, d.reps, d.teams, settings, await repo.listTasks(), y, today) }); }
+  if (p === '/api/me/calendar') return json({ url: null, enabled: false });
   if (p === '/api/admin/overview') {
     const to = q.get('to') ?? today;
     const from = q.get('from') ?? `${to.slice(0, 4)}-01-01`;
@@ -362,7 +466,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     if (dm2 && method === 'DELETE') { await deleteDraw(repo, decodeURIComponent(dm2[1]!), dm2[2]!, me.repId); return json(await detail(decodeURIComponent(dm2[1]!))); }
     const cm = p.match(/^\/api\/admin\/deals\/([^/]+)\/contact$/);
     if (cm && method === 'PATCH') { const r2 = await updateContact(repo, decodeURIComponent(cm[1]!), body as never, me.repId); return json({ ...(await detail(decodeURIComponent(cm[1]!))), updatedDeals: r2.updated }); }
-    const m = p.match(/^\/api\/admin\/deals\/([^/]+)(?:\/(splits|status|draws|collection|crm|terms))?$/);
+    const m = p.match(/^\/api\/admin\/deals\/([^/]+)(?:\/(splits|status|draws|collection|crm|terms|renewal))?$/);
     if (m) {
       const id = decodeURIComponent(m[1]!);
       const sub = m[2];
@@ -372,6 +476,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
       if (sub === 'splits') await updateSplits(repo, id, body as never, me.repId);
       if (sub === 'status') await setDealStatus(repo, id, String(body.dealStatus ?? ''), me.repId);
       if (sub === 'crm') await setCrmId(repo, id, body.crmId === null ? null : String(body.crmId ?? ''), me.repId);
+      if (sub === 'renewal') await linkRenewal(repo, id, body.renewedFromId, me.repId);
       if (sub === 'draws') await addDraw(repo, id, body as never, me.repId);
       if (sub === 'collection') await setCollection(repo, id, body as never, me.repId);
       return json(await detail(id));

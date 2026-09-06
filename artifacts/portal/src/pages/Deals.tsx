@@ -35,7 +35,7 @@ export function Deals() {
             <option value="Awaiting lender">Awaiting lender</option>
             <option value="Paid">Paid</option>
           </select>
-          <span className="count">{rows.length} of {q.data?.count ?? 0} deals</span>
+          <span className="count">{rows.length} of {q.data?.count ?? 0} deals{(() => { const n = (q.data?.deals ?? []).filter((d) => d.missingContact.length).length; return n ? <> · <span className="warn">{n} merchant profile{n === 1 ? '' : 's'} missing info</span></> : null; })()}</span>
         </div>
         {!q.data ? (
           <Loading error={q.error} />
@@ -53,7 +53,7 @@ export function Deals() {
                   <div className="td num">{d.crmId ?? <span className="subtle">—</span>}{d.clawback && <span className="neg" title="Clawback on this deal"> ●</span>}</div>
                   <div className="td num subtle">{d.id}</div>
                   <div className="td num">{day(d.date)}</div>
-                  <div className="td ellipsis">{d.business}{d.drawCount > 0 && <span className="subtle"> · {d.drawCount} draw{d.drawCount > 1 ? 's' : ''}</span>}</div>
+                  <div className="td ellipsis">{d.business}{d.drawCount > 0 && <span className="subtle"> · {d.drawCount} draw{d.drawCount > 1 ? 's' : ''}</span>}{d.missingContact.length > 0 && <div><Pill tone="amber">missing {d.missingContact.join(', ')}</Pill></div>}</div>
                   <div className="td ellipsis">{d.lender}</div>
                   <div className="td ellipsis">{d.product}</div>
                   <div className="td r num">{money(d.funded)}</div>

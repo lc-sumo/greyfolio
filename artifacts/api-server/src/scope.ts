@@ -67,6 +67,12 @@ export interface RepDealView {
   crmId: string | null;
   date: string;
   business: string;
+  /** The merchant's contact details — the rep's to use for follow-ups. */
+  merchantContact: string;
+  merchantEmail: string;
+  merchantPhone: string;
+  /** Which of contact / email / phone are blank — the rep is asked to fill them in. */
+  missingContact: Array<'contact' | 'email' | 'phone'>;
   lender: string;
   product: string;
   /** Total funded across every segment (initial + draws). */
@@ -120,6 +126,10 @@ export function repDealView(deal: Deal, repId: string, lines: PayoutLine[], claw
     crmId: deal.crmId,
     date: deal.date,
     business: deal.business,
+    merchantContact: deal.merchantContact,
+    merchantEmail: deal.merchantEmail,
+    merchantPhone: deal.merchantPhone,
+    missingContact: [...(deal.merchantContact.trim() ? [] : ['contact' as const]), ...(deal.merchantEmail.trim() ? [] : ['email' as const]), ...(deal.merchantPhone.trim() ? [] : ['phone' as const])],
     lender: deal.lender,
     product: deal.product,
     funded: totalFunded(deal),
@@ -470,4 +480,14 @@ export function repPayHistory(ctx: LedgerContext, runs: PayrollRun[], repId: str
   }
   const f = paidFigures(ctx.lines.filter((l) => l.repId === repId));
   return { rows, days, summary: { grossPaid: f.gross, recovered: f.recovered, cash: f.cash, payouts: days.length } };
+}
+
+/** The rep's own pay history as a CSV (what they see on Pay history). */
+export function repPayHistoryCsv(ctx: LedgerContext, runs: PayrollRun[], repId: string): string {
+  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const h = repPayHistory(ctx, runs, repId);
+  const head = ['Paid on', 'Deal', 'Business', 'Role', 'Segment', 'Run', 'Amount', 'Voided'].map(esc).join(',');
+  const body = h.rows.map((r) => [r.paidAt, r.dealId, r.business, r.role, r.segmentLabel, r.runLabel ?? '', r.amount.toFixed(2), r.voided ? 'yes' : ''].map(esc).join(','));
+  const foot = ['TOTAL', '', '', '', '', '', h.summary.cash.toFixed(2), ''].map(esc).join(',');
+  return [head, ...body, foot].join('\r\n') + '\r\n';
 }

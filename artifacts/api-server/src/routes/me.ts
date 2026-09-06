@@ -5,13 +5,21 @@ import type { Repo } from '../repo.js';
 import { changeOwnPassword } from '../services/passwords.js';
 import { beginTotp, disableTotp, enableTotp, totpStatus } from '../services/twofactor.js';
 import { repQuestion, type NotifyDeps } from '../services/notify.js';
-import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repPayHistory, repRenewals, repStatements, repWallet } from '../scope.js';
+import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repPayHistory, repPayHistoryCsv, repRenewals, repStatements, repWallet } from '../scope.js';
+import { annualReport } from '../payroll-views.js';
+import { addRepFile, fetchRepFile } from '../services/notes.js';
+import { createTask, logOutcome, merchantPreview, sendMerchantEmail, taskViews } from '../services/playbooks.js';
+import { updateContact } from '../services/deals.js';
+import { TASK_OUTCOMES } from '../services/playbook-rules.js';
+import { issueCalendarToken, revokeCalendarToken } from '../services/calendar.js';
+import { forgetDeviceCookie, readCookie, DEVICE_COOKIE } from '../auth/devices.js';
+import type { Geo } from '../services/geo.js';
 
 /**
  * The rep portal. Every handler reads `scopeOf(req).effectiveRepId` — the
  * signed-in rep, or the View-as target — and returns rep-safe projections only.
  */
-export function meRouter(repo: Repo, appName = 'Greystone Commission Portal', notify?: Omit<NotifyDeps, 'repo'>): Router {
+export function meRouter(repo: Repo, appName = 'Greystone Commission Portal', notify?: Omit<NotifyDeps, 'repo'>, extras: { geo?: Geo; secureCookies?: boolean } = {}): Router {
   const r = Router();
   r.use(requireAuth, resolveScope(repo));
 
@@ -30,7 +38,9 @@ export function meRouter(repo: Repo, appName = 'Greystone Commission Portal', no
   r.post('/password', async (req, res) => {
     const scope = scopeOf(req);
     if (scope.viewAs) throw new HttpError(403, 'Passwords can only be changed by the account holder');
-    await changeOwnPassword(repo, scope.actor.repId, req.body?.current, req.body?.next);
+    const { since } = await changeOwnPassword(repo, scope.actor.repId, req.body?.current, req.body?.next);
+    // This device stays signed in; every other one is cut off.
+    req.session = { ...req.session, user: { ...scope.actor, since } };
     res.json({ ok: true });
   });
 
@@ -45,6 +55,34 @@ export function meRouter(repo: Repo, appName = 'Greystone Commission Portal', no
   r.post('/totp/enable', async (req, res) => {
     await enableTotp(repo, self(req), req.body?.code);
     res.json({ ok: true, enabled: true });
+  });
+  /** Browsers remembered after a two-factor sign-in. "This device" is the one making the request. */
+  r.get('/devices', async (req, res) => {
+    const scope = scopeOf(req);
+    const list = await repo.listTrustedDevices(scope.effectiveRepId);
+    const cookie = readCookie(req, DEVICE_COOKIE);
+    const thisId = cookie ? cookie.slice(0, cookie.indexOf('.')) : null;
+    const where = extras.geo ? await extras.geo.labels(list.map((d) => d.ip)) : new Map<string, string>();
+    res.json({ devices: list.map((d) => ({ id: d.id, label: d.label, ip: d.ip, location: d.ip ? where.get(d.ip) ?? null : null, createdAt: d.createdAt, lastUsedAt: d.lastUsedAt, expiresAt: d.expiresAt, current: d.id === thisId })) });
+  });
+  r.delete('/devices/:id', async (req, res) => {
+    const scope = scopeOf(req);
+    if (scope.viewAs) throw new HttpError(403, 'Devices belong to the account holder');
+    const d = (await repo.listTrustedDevices(scope.actor.repId)).find((x) => x.id === req.params.id);
+    if (!d) throw new HttpError(404, 'Device not found');
+    await repo.deleteTrustedDevice(d.id);
+    await repo.writeAudit({ actorRepId: scope.actor.repId, action: 'rep.device', targetRepId: null, path: `/api/me/devices/${d.id}`, detail: { forgot: true, label: d.label } });
+    const cookie = readCookie(req, DEVICE_COOKIE);
+    if (cookie && cookie.startsWith(`${d.id}.`)) forgetDeviceCookie(res, extras.secureCookies ?? false);
+    res.json({ ok: true });
+  });
+  r.delete('/devices', async (req, res) => {
+    const scope = scopeOf(req);
+    if (scope.viewAs) throw new HttpError(403, 'Devices belong to the account holder');
+    await repo.deleteTrustedDevices(scope.actor.repId);
+    await repo.writeAudit({ actorRepId: scope.actor.repId, action: 'rep.device', targetRepId: null, path: '/api/me/devices', detail: { forgotAll: true } });
+    forgetDeviceCookie(res, extras.secureCookies ?? false);
+    res.json({ ok: true });
   });
   r.post('/totp/disable', async (req, res) => {
     await disableTotp(repo, self(req), req.body?.code);
@@ -117,6 +155,112 @@ export function meRouter(repo: Repo, appName = 'Greystone Commission Portal', no
   r.get('/payments', async (req, res) => {
     const [ctx, runs] = await Promise.all([repo.loadContext(), repo.listRuns()]);
     res.json(repPayHistory(ctx, runs, scopeOf(req).effectiveRepId));
+  });
+  r.get('/payments.csv', async (req, res) => {
+    const [ctx, runs] = await Promise.all([repo.loadContext(), repo.listRuns()]);
+    res.type('text/csv').attachment('my-pay-history.csv').send(repPayHistoryCsv(ctx, runs, scopeOf(req).effectiveRepId));
+  });
+  /** Year-end totals for the rep: what a 1099 will show. */
+  r.get('/annual', async (req, res) => {
+    const y = Number(req.query.year ?? new Date().getUTCFullYear());
+    if (!Number.isInteger(y) || y < 2000 || y > 2100) throw new HttpError(400, 'year must be a four-digit year');
+    const [ctx, reps] = await Promise.all([repo.loadContext(), repo.listReps()]);
+    const id = scopeOf(req).effectiveRepId;
+    const me = reps.find((x) => x.id === id);
+    const row = annualReport(ctx, reps, y).rows.find((x) => x.repId === id) ?? { repId: id, name: me?.name ?? id, email: me?.email ?? '', active: me?.active ?? true, grossPaid: 0, recovered: 0, cash: 0, payouts: 0, deals: 0 };
+    const years = [...new Set(ctx.lines.filter((l) => l.repId === id).map((l) => l.paidAt.slice(0, 4)))].sort().reverse();
+    res.json({ year: y, years, ...row });
+  });
+  /* ---- Tasks: what the playbooks (or an admin, or I) put on my list ---- */
+  const today = () => new Date().toISOString().slice(0, 10);
+  r.get('/tasks', async (req, res) => {
+    const status = req.query.status === 'open' || req.query.status === 'done' ? req.query.status : undefined;
+    res.json({ tasks: await taskViews(repo, { repId: scopeOf(req).effectiveRepId, status }, today()), outcomes: TASK_OUTCOMES, today: today() });
+  });
+  r.post('/deals/:id/tasks', async (req, res) => {
+    const s = scopeOf(req);
+    if (s.viewAs) throw new HttpError(403, 'Tasks are added by the rep, not from View as');
+    const ctx = await repo.loadContext();
+    if (!repDeals(ctx.deals, s.actor.repId).some((d) => d.id === req.params.id)) throw new HttpError(404, 'Deal not found');
+    res.status(201).json(await createTask(repo, { dealId: String(req.params.id), repId: s.actor.repId, title: req.body?.title, dueDate: req.body?.dueDate }, s.actor.repId, today()));
+  });
+  r.patch('/tasks/:id', async (req, res) => {
+    const s = scopeOf(req);
+    if (s.viewAs) throw new HttpError(403, 'Outcomes are logged by the rep, not from View as');
+    res.json(await logOutcome(repo, String(req.params.id), req.body ?? {}, s.actor.repId, today(), { asAdmin: false }));
+  });
+
+  /* ---- Private calendar feed ---- */
+  const feedUrl = (token: string) => `${notify?.origin ?? ''}/calendar/${token}.ics`;
+  r.get('/calendar', async (req, res) => {
+    const s = scopeOf(req);
+    const token = await repo.getCalendarToken(s.effectiveRepId);
+    res.json({ url: token && !s.viewAs ? feedUrl(token) : null, enabled: !!token });
+  });
+  r.post('/calendar', async (req, res) => {
+    const s = scopeOf(req);
+    if (s.viewAs) throw new HttpError(403, 'The feed belongs to the account holder');
+    res.json({ url: feedUrl(await issueCalendarToken(repo, s.actor.repId)), enabled: true });
+  });
+  r.delete('/calendar', async (req, res) => {
+    const s = scopeOf(req);
+    if (s.viewAs) throw new HttpError(403, 'The feed belongs to the account holder');
+    await revokeCalendarToken(repo, s.actor.repId);
+    res.json({ url: null, enabled: false });
+  });
+
+  /* ---- Fill in the merchant's profile on my own deal: contact name, email, phone (never the money) ---- */
+  r.patch('/deals/:id/contact', async (req, res) => {
+    if (scopeOf(req).viewAs) throw new HttpError(403, 'Contact details are edited by the rep, not from View as');
+    const { s, deal } = await myDeal(req);
+    if (!(await repo.getSettings()).permissions.contactEdit) throw new HttpError(403, 'Editing merchant details is turned off for reps — ask an admin');
+    const r2 = await updateContact(repo, deal.id, { merchantContact: req.body?.merchantContact, merchantEmail: req.body?.merchantEmail, merchantPhone: req.body?.merchantPhone, applyToMerchant: req.body?.applyToMerchant }, s.actor.repId);
+    const [ctx, settings] = await Promise.all([repo.loadContext(), repo.getSettings()]);
+    res.json({ ...repDealView(r2.deal, s.actor.repId, ctx.lines, ctx.clawbacks, settings), updatedDeals: r2.updated });
+  });
+
+  /* ---- Email the merchant from a template, under my name ---- */
+  const myDeal = async (req: Parameters<Router>[0]) => {
+    const s = scopeOf(req);
+    const ctx = await repo.loadContext();
+    const deal = repDeals(ctx.deals, s.actor.repId).find((d) => d.id === req.params.id);
+    if (!deal) throw new HttpError(404, 'Deal not found');
+    return { s, deal };
+  };
+  const mayEmail = async (repId: string) => {
+    const [settings, rep] = await Promise.all([repo.getSettings(), repo.findRep(repId)]);
+    return settings.permissions.merchantEmail && rep?.perms?.merchantEmail !== false;
+  };
+  r.get('/templates', async (req, res) => res.json({ merchant: (await repo.getSettings()).templates.merchant, live: !!notify && (notify.mailer.live || notify.mailer.kind === 'log'), allowed: await mayEmail(scopeOf(req).effectiveRepId) }));
+  r.get('/deals/:id/merchant-email/preview', async (req, res) => {
+    const { s, deal } = await myDeal(req);
+    if (!(await mayEmail(s.actor.repId))) throw new HttpError(403, 'Emailing merchants is turned off for your account — ask an admin');
+    res.json(await merchantPreview(repo, deal, s.actor.repId, String(req.query.template ?? ''), today(), appName));
+  });
+  r.post('/deals/:id/merchant-email', async (req, res) => {
+    const { s, deal } = await myDeal(req);
+    if (s.viewAs) throw new HttpError(403, 'Merchant emails go out from the rep, not from View as');
+    if (!(await mayEmail(s.actor.repId))) throw new HttpError(403, 'Emailing merchants is turned off for your account — ask an admin');
+    res.json(await sendMerchantEmail({ repo, mailer: notify?.mailer ?? { kind: 'off', live: false, send: async () => ({ ok: false }) }, origin: notify?.origin ?? '', appName: notify?.appName ?? appName }, deal, s.actor.repId, req.body ?? {}, today()));
+  });
+
+  /** My own files (W-9): a rep can add and read theirs; only an admin removes. */
+  r.get('/files', async (req, res) => {
+    const scope = scopeOf(req);
+    res.json({ files: await repo.listRepFiles(scope.effectiveRepId) });
+  });
+  r.post('/files', async (req, res) => {
+    const scope = scopeOf(req);
+    if (scope.viewAs) throw new HttpError(403, 'Files can only be added by the account holder');
+    await addRepFile(repo, scope.actor.repId, req.body ?? {}, scope.actor.repId);
+    res.status(201).json({ files: await repo.listRepFiles(scope.actor.repId) });
+  });
+  r.get('/files/:fileId', async (req, res) => {
+    const f = await fetchRepFile(repo, scopeOf(req).effectiveRepId, String(req.params.fileId));
+    res.setHeader('content-type', f.mime);
+    res.setHeader('content-disposition', `attachment; filename="${encodeURIComponent(f.name)}"`);
+    res.setHeader('cache-control', 'private, max-age=0');
+    res.send(Buffer.from(f.data, 'base64'));
   });
 
   /** The rep's own renewals, so they know when to follow up. Merchant contact included; other reps' names are not. */

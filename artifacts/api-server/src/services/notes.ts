@@ -5,7 +5,7 @@
  * touching routes.
  */
 import { HttpError } from '../http-error.js';
-import type { DealFile, DealFileMeta, DealNote, Repo } from '../repo.js';
+import type { DealFile, DealFileMeta, DealNote, Repo, RepFile, RepFileMeta } from '../repo.js';
 
 export const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_MIME = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'image/gif', 'text/plain', 'text/csv', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/msword', 'application/vnd.ms-excel']);
@@ -44,8 +44,8 @@ export interface FileUpload {
   data: unknown;
 }
 
-export async function addFile(repo: Repo, dealId: string, upload: FileUpload, actorRepId: string): Promise<DealFileMeta> {
-  await requireDeal(repo, dealId);
+/** Shared checks for any upload: name, type, base64, size. */
+export function validateUpload(upload: FileUpload): { name: string; mime: string; data: string; size: number } {
   const name = String(upload.name ?? '').trim().replace(/[\\/]/g, '_').slice(0, 200);
   const mime = String(upload.mime ?? '').toLowerCase().split(';')[0]!.trim();
   const data = String(upload.data ?? '').replace(/^data:[^,]*,/, '');
@@ -55,7 +55,13 @@ export async function addFile(repo: Repo, dealId: string, upload: FileUpload, ac
   const size = Math.floor((data.replace(/\s/g, '').length * 3) / 4) - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0);
   if (size <= 0) throw new HttpError(400, 'The file is empty');
   if (size > MAX_FILE_BYTES) throw new HttpError(400, `Files are capped at ${MAX_FILE_BYTES / 1024 / 1024} MB`);
-  const file: DealFile = { id: id('file'), dealId, name, mime, size, data: data.replace(/\s/g, ''), uploadedBy: actorRepId, createdAt: new Date().toISOString() };
+  return { name, mime, data: data.replace(/\s/g, ''), size };
+}
+
+export async function addFile(repo: Repo, dealId: string, upload: FileUpload, actorRepId: string): Promise<DealFileMeta> {
+  await requireDeal(repo, dealId);
+  const { name, mime, data, size } = validateUpload(upload);
+  const file: DealFile = { id: id('file'), dealId, name, mime, size, data, uploadedBy: actorRepId, createdAt: new Date().toISOString() };
   await repo.insertFile(file);
   await repo.writeAudit({ actorRepId, action: 'deal.file', targetRepId: null, path: `/api/admin/deals/${dealId}/files`, detail: { fileId: file.id, name, size } });
   const { data: _d, ...meta } = file;
@@ -72,4 +78,29 @@ export async function removeFile(repo: Repo, dealId: string, fileId: string, act
   await fetchFile(repo, dealId, fileId);
   await repo.deleteFile(fileId);
   await repo.writeAudit({ actorRepId, action: 'deal.file', targetRepId: null, path: `/api/admin/deals/${dealId}/files/${fileId}`, detail: { deleted: true } });
+}
+
+/* ---- Rep files: W-9s, agreements. Admins see all; a rep sees their own. ---- */
+
+export async function addRepFile(repo: Repo, repId: string, upload: FileUpload, actorRepId: string): Promise<RepFileMeta> {
+  const rep = await repo.findRep(repId);
+  if (!rep) throw new HttpError(404, 'Rep not found');
+  const { name, mime, data, size } = validateUpload(upload);
+  const file: RepFile = { id: id('rfile'), repId, name, mime, size, data, uploadedBy: actorRepId, createdAt: new Date().toISOString() };
+  await repo.insertRepFile(file);
+  await repo.writeAudit({ actorRepId, action: 'rep.file', targetRepId: repId, path: `/api/admin/reps/${repId}/files`, detail: { fileId: file.id, name, size } });
+  const { data: _d, ...meta } = file;
+  return meta;
+}
+
+export async function fetchRepFile(repo: Repo, repId: string, fileId: string): Promise<RepFile> {
+  const f = await repo.getRepFile(fileId);
+  if (!f || f.repId !== repId) throw new HttpError(404, 'File not found');
+  return f;
+}
+
+export async function removeRepFile(repo: Repo, repId: string, fileId: string, actorRepId: string): Promise<void> {
+  await fetchRepFile(repo, repId, fileId);
+  await repo.deleteRepFile(fileId);
+  await repo.writeAudit({ actorRepId, action: 'rep.file', targetRepId: repId, path: `/api/admin/reps/${repId}/files/${fileId}`, detail: { deleted: true } });
 }

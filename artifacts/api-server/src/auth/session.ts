@@ -6,6 +6,10 @@ export interface SessionUser {
   email: string;
   name: string;
   role: Rep['role'];
+  /** When this session was issued (ISO). A password change sets a cut-off; sessions issued before it are refused. */
+  since?: string;
+  /** Last request (ISO), refreshed at most once a minute; the idle sign-out clock. */
+  seen?: string;
 }
 
 export interface OidcHandshake {
@@ -43,5 +47,6 @@ declare global {
 }
 
 export function sessionUserFrom(rep: Rep): SessionUser {
-  return { repId: rep.id, email: rep.email, name: rep.name, role: rep.role };
+  const now = new Date().toISOString();
+  return { repId: rep.id, email: rep.email, name: rep.name, role: rep.role, since: now, seen: now };
 }

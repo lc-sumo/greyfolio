@@ -1,6 +1,7 @@
 import { asRate, type Lender, type ProductRule, type ReferralPartner, type Rep, type Team } from '@greystone/commission';
 import { HttpError } from '../http-error.js';
-import type { Repo, Settings, Thresholds } from '../repo.js';
+import { actorOf, requireSuper } from './superadmin.js';
+import { NOTIFICATION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, type Repo, type Settings, type Thresholds } from '../repo.js';
 
 const audit = (repo: Repo, actorRepId: string, action: 'settings.update' | 'team.update' | 'rep.update' | 'rep.password' | 'settings.rename', path: string, detail: Record<string, unknown>) =>
   repo.writeAudit({ actorRepId, action, targetRepId: null, path, detail });
@@ -76,6 +77,11 @@ export async function saveLenders(repo: Repo, input: unknown, actorRepId: string
     const lender: Lender = { name, terms, weeks };
     if (l.active === false) lender.active = false;
     if (l.locLineRate !== undefined && l.locLineRate !== null && l.locLineRate !== '' && Number(l.locLineRate) > 0) lender.locLineRate = asRate(Number(l.locLineRate));
+    if (l.paymentTermsDays !== undefined && l.paymentTermsDays !== null && l.paymentTermsDays !== '') {
+      const days = Math.round(Number(l.paymentTermsDays));
+      if (!Number.isFinite(days) || days < 0 || days > 365) throw new HttpError(400, `"${name}" payment terms must be 0–365 days`);
+      lender.paymentTermsDays = days;
+    }
     if (terms === 'weekly') {
       const up = Number(l.upfrontPct);
       if (Number.isFinite(up) && up > 0) lender.upfrontPct = asRate(up);
@@ -253,11 +259,15 @@ export interface RepInput {
   overrideRate?: number | null;
   role?: Rep['role'];
   active?: boolean;
+  superAdmin?: boolean;
+  perms?: { merchantEmail?: boolean } | null;
 }
 
 const ROLES: Rep['role'][] = ['rep', 'manager', 'admin'];
 
 export async function createRep(repo: Repo, input: RepInput, actorRepId: string): Promise<Rep> {
+  const actor = await actorOf(repo, actorRepId);
+  if (input.role === 'admin' || input.superAdmin) requireSuper(actor, 'create an admin');
   const name = cleanName(input.name, 'Rep');
   const email = String(input.email ?? '').trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpError(400, 'A valid email is required — it is how the rep signs in');
@@ -276,16 +286,41 @@ export async function createRep(repo: Repo, input: RepInput, actorRepId: string)
     closerRate: asRate(input.closerRate ?? 0.2),
     overrideRate: input.overrideRate === null || input.overrideRate === undefined || input.overrideRate === ('' as unknown) ? null : asRate(input.overrideRate),
     active: input.active ?? true,
+    superAdmin: !!input.superAdmin && (input.role === 'admin'),
+    perms: input.perms === undefined ? null : cleanPerms(input.perms),
   };
   await repo.insertRep(rep);
   await audit(repo, actorRepId, 'rep.update', `/api/admin/reps/${id}`, { created: name, email });
   return rep;
 }
 
+function cleanPerms(v: unknown): { merchantEmail?: boolean } | null {
+  if (v === null || v === undefined) return null;
+  const o = v as Record<string, unknown>;
+  const out: { merchantEmail?: boolean } = {};
+  if (o.merchantEmail === false) out.merchantEmail = false;
+  return Object.keys(out).length ? out : null;
+}
+
 export async function updateRep(repo: Repo, id: string, input: RepInput, actorRepId: string): Promise<Rep> {
   const rep = await repo.findRep(id);
   if (!rep) throw new HttpError(404, `Rep ${id} not found`);
+  const actor = await actorOf(repo, actorRepId);
+  const touchesAdmin = rep.role === 'admin' || input.role === 'admin' || rep.superAdmin || input.superAdmin !== undefined;
+  // Admins edit reps and team leads; only a super admin edits an admin (or makes one). Anyone may edit their own name, email and team.
+  const selfSafe = id === actorRepId && input.role === undefined && input.active === undefined && input.superAdmin === undefined;
+  if (touchesAdmin && !selfSafe) requireSuper(actor, rep.role === 'admin' || rep.superAdmin ? 'change an admin' : 'make someone an admin');
   const patch: Partial<Omit<Rep, 'id'>> = {};
+  if (input.superAdmin !== undefined) {
+    const want = !!input.superAdmin;
+    if (want && (input.role ?? rep.role) !== 'admin') throw new HttpError(400, 'A super admin must have Master access');
+    if (!want && rep.superAdmin) {
+      const others = (await repo.listReps()).filter((r) => r.superAdmin && r.active && r.id !== id);
+      if (!others.length) throw new HttpError(400, `${rep.name} is the last super admin`);
+    }
+    patch.superAdmin = want;
+  }
+  if (input.perms !== undefined) patch.perms = cleanPerms(input.perms);
   if (input.name !== undefined) patch.name = cleanName(input.name, 'Rep');
   if (input.email !== undefined) {
     const email = String(input.email).trim().toLowerCase();
@@ -310,6 +345,11 @@ export async function updateRep(repo: Repo, id: string, input: RepInput, actorRe
   if ((patch.role && patch.role !== 'admin' && rep.role === 'admin') || (patch.active === false && rep.role === 'admin')) {
     const admins = (await repo.listReps()).filter((r) => r.role === 'admin' && r.active && r.id !== id);
     if (!admins.length) throw new HttpError(400, `${rep.name} is the last active admin`);
+    if (rep.superAdmin && patch.superAdmin !== false) {
+      const supers = (await repo.listReps()).filter((r) => r.superAdmin && r.active && r.id !== id);
+      if (!supers.length) throw new HttpError(400, `${rep.name} is the last super admin — hand the role to someone first`);
+      if (patch.role && patch.role !== 'admin') patch.superAdmin = false;
+    }
   }
   if (id === actorRepId && (patch.active === false || (patch.role && patch.role !== 'admin'))) throw new HttpError(400, 'You cannot deactivate or demote yourself');
   await repo.updateRep(id, patch);
@@ -317,3 +357,66 @@ export async function updateRep(repo: Repo, id: string, input: RepInput, actorRe
   return { ...rep, ...patch };
 }
 
+
+export async function savePortal(repo: Repo, input: Record<string, unknown>, actorRepId: string): Promise<Settings['portal']> {
+  const str = (v: unknown, max: number) => String(v ?? '').trim().slice(0, max);
+  const portal: Settings['portal'] = { company: str(input.company, 80) || PORTAL_DEFAULTS.company, portal: str(input.portal, 60) || PORTAL_DEFAULTS.portal, supportEmail: str(input.supportEmail, 120).toLowerCase() };
+  if (portal.supportEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(portal.supportEmail)) throw new HttpError(400, 'Support email does not look right');
+  await repo.putSetting('portal', portal);
+  await audit(repo, actorRepId, 'settings.update', '/api/admin/settings/portal', portal);
+  return portal;
+}
+
+export async function saveNotifications(repo: Repo, input: Record<string, unknown>, actorRepId: string): Promise<Settings['notifications']> {
+  const hour = Number(input.digestHourUtc ?? NOTIFICATION_DEFAULTS.digestHourUtc);
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) throw new HttpError(400, 'Digest hour must be 0–23 (UTC)');
+  const pbHour = Number(input.playbookHourUtc ?? NOTIFICATION_DEFAULTS.playbookHourUtc);
+  if (!Number.isInteger(pbHour) || pbHour < 0 || pbHour > 23) throw new HttpError(400, 'Playbook hour must be 0–23 (UTC)');
+  const n: Settings['notifications'] = { statements: input.statements !== false, clawbacks: input.clawbacks !== false, renewalDigest: input.renewalDigest !== false, repQuestions: input.repQuestions !== false, digestHourUtc: hour, playbookHourUtc: pbHour };
+  await repo.putSetting('notifications', n);
+  await audit(repo, actorRepId, 'settings.update', '/api/admin/settings/notifications', n);
+  return n;
+}
+
+export async function savePermissions(repo: Repo, input: Record<string, unknown>, actorRepId: string): Promise<Settings['permissions']> {
+  const p: Settings['permissions'] = { merchantEmail: input.merchantEmail !== false, contactEdit: input.contactEdit !== false };
+  await repo.putSetting('permissions', p);
+  await audit(repo, actorRepId, 'settings.update', '/api/admin/settings/permissions', p);
+  return p;
+}
+
+export async function saveSecurity(repo: Repo, input: Record<string, unknown>, actorRepId: string): Promise<Settings['security']> {
+  requireSuper(await actorOf(repo, actorRepId), 'change security settings');
+  const current = (await repo.getSettings()).security;
+  const idle = input.idleMinutes === undefined ? current.idleMinutes : Math.round(Number(input.idleMinutes));
+  if (!Number.isFinite(idle) || idle < 0 || idle > 24 * 60) throw new HttpError(400, 'Idle sign-out must be 0 (never) to 1440 minutes');
+  const remember = input.totpRememberDays === undefined ? current.totpRememberDays : Math.round(Number(input.totpRememberDays));
+  if (!Number.isFinite(remember) || remember < 0 || remember > 90) throw new HttpError(400, 'Remembered devices must be 0 (ask every time) to 90 days');
+  const sec: Settings['security'] = { requireTotpForAdmins: input.requireTotpForAdmins === true, idleMinutes: idle, totpRememberDays: remember };
+  if (sec.requireTotpForAdmins) {
+    // Never lock out the person flipping the switch: the actor must already be enrolled.
+    const mine = await repo.getTotp(actorRepId);
+    if (!mine.enabled) throw new HttpError(400, 'Turn on two-factor for your own account first (sidebar › Two-factor sign-in), then require it for every admin');
+  }
+  await repo.putSetting('security', sec);
+  await audit(repo, actorRepId, 'settings.update', '/api/admin/settings/security', sec);
+  return sec;
+}
+
+/** Dropdown lists. Commission statuses drive collection logic, so they stay fixed; frequencies and deal statuses are yours. */
+export async function saveLists(repo: Repo, input: Record<string, unknown>, actorRepId: string): Promise<Settings['lists']> {
+  const clean = (v: unknown, what: string) => {
+    if (!Array.isArray(v)) throw new HttpError(400, `${what} must be a list`);
+    const out = [...new Set(v.map((x) => String(x).trim()).filter(Boolean))];
+    if (out.length === 0) throw new HttpError(400, `${what} needs at least one entry`);
+    return out;
+  };
+  const current = await repo.getSettings();
+  const frequencies = clean(input.frequencies ?? current.lists.frequencies, 'Frequencies');
+  const dealStatuses = clean(input.dealStatuses ?? current.lists.dealStatuses, 'Deal statuses');
+  for (const must of ['Performing', 'Prospecting', 'Refi Ready']) if (!dealStatuses.includes(must)) throw new HttpError(400, `Deal statuses must keep "${must}" — the portal sets it automatically`);
+  const lists = { ...current.lists, frequencies, dealStatuses };
+  await repo.putSetting('lists', lists);
+  await audit(repo, actorRepId, 'settings.update', '/api/admin/settings/lists', { frequencies: frequencies.length, dealStatuses: dealStatuses.length });
+  return lists;
+}

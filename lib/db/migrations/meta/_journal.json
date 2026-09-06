@@ -50,6 +50,34 @@
       "when": 1788553208347,
       "tag": "0006_loc_line_fee",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788699193226,
+      "tag": "0007_audit_ip",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788705813514,
+      "tag": "0008_session_cutoff_bookkeeping",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788708650659,
+      "tag": "0009_trusted_devices",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788709540966,
+      "tag": "0010_super_admin_perms",
+      "breakpoints": true
     }
   ]
 }

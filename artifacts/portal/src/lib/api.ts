@@ -1,13 +1,16 @@
+import type { PlaybookRule as PlaybookRuleT } from '../../../api-server/src/services/playbook-rules';
 /* Types mirror artifacts/api-server/src/scope.ts. */
 export type Role = 'Opener' | 'Closer' | 'Override';
 export type CommissionStatus = 'Waiting for payment' | 'Invoice Sent' | 'Partially Paid' | 'YES - Paid In Full';
 export type PayoutStatus = 'Paid' | 'Partially paid' | 'Owed' | 'Awaiting lender';
 
 export interface SessionUser { repId: string; email: string; name: string; role: 'rep' | 'manager' | 'admin' }
-export interface AuthMe { user: SessionUser; canViewAs: boolean; oidc: boolean; devAuth: boolean }
+export interface Branding { company: string; portal: string; supportEmail: string }
+export interface AuthMe { user: SessionUser; canViewAs: boolean; oidc: boolean; devAuth: boolean; branding?: Branding; mustEnrollTotp?: boolean; idleMinutes?: number; superAdmin?: boolean; canEmailMerchants?: boolean; canEditContacts?: boolean }
+export interface TrustedDeviceView { id: string; label: string; ip: string | null; location: string | null; createdAt: string; lastUsedAt: string; expiresAt: string; current: boolean }
 export interface RepRoleLine { role: Role; rate: number; amount: number; segment: string; segmentKey: string; paid: boolean; paidAmount: number; units: { paid: number; total: number; collected: number } | null }
 export interface RepDealView {
-  id: string; crmId: string | null; date: string; business: string; lender: string; product: string; funded: number; drawCount: number;
+  id: string; crmId: string | null; date: string; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string; missingContact: Array<'contact' | 'email' | 'phone'>; lender: string; product: string; funded: number; drawCount: number;
   disbursement: Disbursement | null;
   roles: Role[]; lines: RepRoleLine[]; share: number; accrued: number; paid: number; owed: number; payoutStatus: PayoutStatus;
   commissionStatus: CommissionStatus; lenderPaidLabel: string; dealStatus: string; repPaid: string | null; clawbackWindow: ClawbackWindow;
@@ -27,7 +30,7 @@ export interface RepDashboard {
 export interface RepClawbackView { id: string; dealId: string; date: string; business: string; dealClawback: number; chargedToMe: number; recovered: number; remaining: number; reason: string; status: 'open' | 'recovered' }
 export interface RepStatement { runId: string; period: string; status: 'draft' | 'approved' | 'paid'; dealCount: number; grossPaid: number; clawbacks: number; netPaid: number }
 export interface MeInfo { rep: { id: string; name: string; email: string; role: string; active: boolean }; viewAs: boolean; actor: { id: string; name: string; role: string } | null }
-export interface RosterRep { id: string; name: string; email: string; role: string; teamId: string | null; team: string | null; openerRate: number; closerRate: number; overrideRate: number | null; active: boolean; hasPassword?: boolean; hasTotp?: boolean; earned: number; paid: number; held: number; owed: number; dealCount: number }
+export interface RosterRep { id: string; name: string; email: string; role: string; teamId: string | null; team: string | null; openerRate: number; closerRate: number; overrideRate: number | null; active: boolean; hasPassword?: boolean; hasTotp?: boolean; superAdmin?: boolean; perms?: { merchantEmail?: boolean } | null; earned: number; paid: number; held: number; owed: number; dealCount: number }
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -49,7 +52,11 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (viewAs) headers['X-View-As'] = viewAs;
   const res = await fetch(path, { credentials: 'same-origin', ...init, headers });
   const body = res.status === 204 ? null : await res.json().catch(() => null);
-  if (!res.ok) throw new ApiError(res.status, (body && body.error) || res.statusText);
+  if (!res.ok) {
+    // The server ended the session (idle sign-out, password change, deactivation): the whole app goes back to the sign-in screen with the reason.
+    if (res.status === 401 && !path.startsWith('/auth/')) window.dispatchEvent(new CustomEvent('gs:signed-out', { detail: (body && body.error) || 'Sign in again' }));
+    throw new ApiError(res.status, (body && body.error) || res.statusText);
+  }
   return body as T;
 }
 
@@ -63,7 +70,7 @@ export const qs = (o: Record<string, string | undefined>) => {
 /* ---- Admin (Phase 4). Never served to reps. ---- */
 export type ClawbackBasis = 'none' | 'days' | 'payments';
 export interface LenderClawbackPolicy { basis: ClawbackBasis; count: number; note?: string }
-export interface Lender { name: string; terms: 'upfront' | 'weekly'; weeks: number; upfrontPct?: number; remainder?: 'spread' | 'at-end'; cadenceDays?: number; products?: string[]; clawback?: LenderClawbackPolicy; locLineRate?: number; active?: boolean; renamedFrom?: string }
+export interface Lender { name: string; terms: 'upfront' | 'weekly'; weeks: number; upfrontPct?: number; remainder?: 'spread' | 'at-end'; cadenceDays?: number; products?: string[]; clawback?: LenderClawbackPolicy; locLineRate?: number; paymentTermsDays?: number; active?: boolean; renamedFrom?: string }
 export interface ClawbackWindow { basis: ClawbackBasis; count: number; source: 'lender' | 'product' | 'default'; clearsOn: string | null; cleared: boolean; daysLeft: number | null; label: string }
 export interface ReferralPartner { name: string; pct: number; monthlyCap: number | null; active?: boolean; renamedFrom?: string }
 export interface ProductRule { name: string; basis: 'funded' | 'draw' | 'payback'; factor: boolean; term: boolean; parent: boolean; comm: number; clawback: boolean; renewal: boolean; multiDraw: boolean; drawInitial: number | null; drawSubsequent: number | null; incremental?: boolean; active?: boolean; renamedFrom?: string }
@@ -72,10 +79,16 @@ export interface Settings {
   thresholds: { clawbackWindowDays: number; paymentOverdueDays: number; renewalMark: number; additionalCapitalAfterDays: number };
   lists: { frequencies: string[]; commissionStatuses: string[]; dealStatuses: string[] };
   crm: { urlTemplate: string }; payroll: { cycle: string };
+  portal: Branding;
+  notifications: { statements: boolean; clawbacks: boolean; renewalDigest: boolean; digestHourUtc: number; repQuestions: boolean; playbookHourUtc: number };
+  security: { requireTotpForAdmins: boolean; idleMinutes: number; totpRememberDays: number };
+  templates: { merchant: MerchantTemplate[] };
+  permissions: { merchantEmail: boolean; contactEdit: boolean };
 }
+export interface MerchantTemplate { id: string; name: string; subject: string; body: string }
 export interface RoleView { role: Role; repId: string | null; name: string | null; rate: number; amount: number; paid: number }
 export interface AdminDealRow {
-  id: string; opportunityId: string; parentId: string | null; date: string; business: string; drawCount: number;
+  id: string; renewedFromId: string | null; renewedById: string | null; opportunityId: string; parentId: string | null; date: string; business: string; drawCount: number;
   merchantContact: string; merchantEmail: string; merchantPhone: string; lender: string; product: string;
   funded: number; factor: number | null; apr: number | null; termDays: number | null; frequency: string; payback: number | null;
   commRate: number; psfPct: number; originationFee: number; lineRate: number | null; lineFee: number; gross: number; referralPartner: string | null; referralRate: number; referralFee: number; net: number;
@@ -131,8 +144,10 @@ export const MANUAL_DEAL_STATUSES = ['Refinanced', 'Default', 'Slow Pay', 'Paid 
 export const DEAL_STATUS_OPTIONS = [{ value: 'Performing', label: 'Auto (Performing → Prospecting → Refi Ready)' }, ...MANUAL_DEAL_STATUSES.map((v) => ({ value: v, label: v }))];
 
 /* ---- Merchants + overview (Phase 6b). Admin only. ---- */
-export interface MerchantDealRow { id: string; crmId: string | null; date: string; business: string; lender: string; product: string; funded: number; gross: number; outstanding: number; commissionStatus: string; dealStatus: string; drawCount: number; crmUrl: string }
-export interface MerchantRow { email: string; business: string; contact: string; phone: string; dealCount: number; funded: number; gross: number; outstanding: number; firstFunded: string; lastFunded: string; deals: MerchantDealRow[] }
+export interface MerchantDealRow { id: string; crmId: string | null; date: string; business: string; lender: string; product: string; funded: number; gross: number; outstanding: number; commissionStatus: string; dealStatus: string; drawCount: number; crmUrl: string; renewedFromId: string | null; renewedById: string | null; prospectingDate: string; bucket: string; bucketLabel: string; ownerRepId: string | null; owner: string }
+export interface MerchantRow { email: string; business: string; contact: string; phone: string; dealCount: number; funded: number; gross: number; outstanding: number; firstFunded: string; lastFunded: string; houseNet: number; openPositions: number; renewals: number; nextEligible: string | null; stage: string; deals: MerchantDealRow[] }
+export interface MerchantDetail { merchant: MerchantRow; notes: Array<DealNoteView>; tasks: Array<{ id: string; dealId: string; title: string; dueDate: string; repName: string }>; files: Array<{ id: string; dealId: string; name: string; size: number; createdAt: string }> }
+export interface Scorecard { repId: string; name: string; team: string | null; active: boolean; deals: number; funded: number; gross: number; renewable: number; renewed: number; renewalRate: number | null; tasksClosed: number; tasksWon: number; taskWinRate: number | null; onTimeRate: number | null; openTasks: number; overdueTasks: number; daysToClose: number | null }
 export interface Overview {
   period: { from: string; to: string };
   cards: { funded: number; commissions: number; opportunities: number; drawLines: number; avgDealSize: number; avgFactor: number | null; paid: number; owed: number; clawbackExposure: number; renewalReady: number; renewalGross: number; expected30: number; expected30Count: number; overdueReceipts: number };
@@ -155,3 +170,40 @@ export interface RemittanceRow { line: number; ref: string; date: string; amount
 export interface RemittancePreview { rows: RemittanceRow[]; problems: string[]; summary: { rows: number; matched: number; amount: number; applied: number; unapplied: number; problems: number } }
 export interface AnnualRow { repId: string; name: string; email: string; active: boolean; grossPaid: number; recovered: number; cash: number; payouts: number; deals: number }
 export interface AnnualReport { year: number; rows: AnnualRow[]; total: { grossPaid: number; recovered: number; cash: number; payouts: number; deals: number } }
+
+/* ---- Books (bookkeeping). Admin only. ---- */
+export type AgeBucket = 'current' | '1-30' | '31-60' | '61-90' | '90+';
+export interface ReceivableRow { dealId: string; business: string; lender: string; product: string; fundedDate: string; segment: string; item: string; amount: number; expected: string | null; daysOverdue: number; bucket: AgeBucket }
+export interface Receivables { asOf: string; rows: ReceivableRow[]; total: number; byBucket: Record<AgeBucket, number>; byLender: Array<{ lender: string; outstanding: number; overdue: number; termsDays: number; rows: number }> }
+export interface PartnerPayableRow { dealId: string; business: string; lender: string; fundedDate: string; partner: string; fee: number; collected: boolean; commissionStatus: string; paidAt: string | null }
+export interface PartnerPayables { rows: PartnerPayableRow[]; partners: Array<{ partner: string; pct: number; owed: number; owedCollected: number; paid: number; deals: number; active: boolean }>; totals: { owed: number; owedCollected: number; paid: number } }
+export interface CashMonth { month: string; deals: number; funded: number; grossEarned: number; referralFees: number; repShares: number; houseNet: number; collected: number; outstanding: number; repPayouts: number; recovered: number; repCash: number }
+export interface CashView { year: number; months: CashMonth[]; total: Omit<CashMonth, 'month'> }
+export type ExceptionKind = 'funded-no-commission' | 'paid-before-collected' | 'past-maturity' | 'clawback-closing' | 'overdue-receipt' | 'partner-owed-collected';
+export interface ExceptionItem { kind: ExceptionKind; dealId: string; business: string; lender: string; amount: number; detail: string; days: number }
+export interface Exceptions { asOf: string; items: ExceptionItem[]; counts: Record<ExceptionKind, number>; totals: Record<ExceptionKind, number> }
+export const EXCEPTION_LABEL: Record<ExceptionKind, string> = {
+  'funded-no-commission': 'Funded, nothing received from the lender',
+  'paid-before-collected': 'Reps paid before the lender paid',
+  'past-maturity': 'Past maturity, still Performing',
+  'clawback-closing': 'Clawback window closes this week',
+  'overdue-receipt': 'Lender receipt overdue',
+  'partner-owed-collected': 'Partner fee owed on collected commission',
+};
+export const EXCEPTION_SHORT: Record<ExceptionKind, string> = { 'funded-no-commission': 'Nothing received', 'paid-before-collected': 'Paid ahead of lender', 'past-maturity': 'Past maturity', 'clawback-closing': 'Clawback closing', 'overdue-receipt': 'Receipt overdue', 'partner-owed-collected': 'Partner fee due' };
+export interface RepFileView { id: string; repId: string; name: string; mime: string; size: number; uploadedBy: string; uploadedByName?: string; createdAt: string }
+export interface AnnualMe { year: number; years: string[]; grossPaid: number; recovered: number; cash: number; payouts: number; deals: number }
+
+/* ---- Playbooks and tasks ---- */
+export type { PlaybookAction, PlaybookFilters, PlaybookRule, PlaybookTrigger } from '../../../api-server/src/services/playbook-rules';
+export { MERGE_FIELD_HELP, TASK_OUTCOMES, TRIGGER_KINDS } from '../../../api-server/src/services/playbook-rules';
+export interface PlaybookView { id: string; name: string; enabled: boolean; rule: PlaybookRuleT; createdAt: string; updatedAt: string; firings: number; lastFired: string | null; openTasks: number; doneTasks: number }
+export interface PlaybookList { playbooks: PlaybookView[]; triggers: Array<{ kind: PlaybookRuleT['trigger']['kind']; label: string; param?: 'atLeast' | 'atMost' | 'withinDays' | 'in'; unit?: string }>; outcomes: Array<{ value: TaskOutcome; label: string; closes: boolean }>; mergeFields: string[]; lastRun: string | null }
+export interface DryRunRow { dealId: string; business: string; lender: string; funded: number; rep: string; stage: string; paidIn: string; daysSinceFunding: number; held: string | null }
+export interface DryRun { rows: DryRunRow[]; wouldFire: number; matched: number; preview: { subject: string; body: string } | null }
+export interface RunResult { date: string; fired: number; emails: number; tasks: number; statuses: number; byPlaybook: Array<{ id: string; name: string; deals: number }> }
+export interface FiringView { id: string; playbookId: string; dealId: string; repId: string | null; firedAt: string; detail?: Record<string, unknown> | null; playbookName: string; repName: string | null }
+export type TaskOutcome = 'called' | 'no_answer' | 'app_submitted' | 'funded' | 'declined' | 'not_interested';
+export interface TaskView { id: string; dealId: string; repId: string; playbookId: string | null; title: string; dueDate: string; status: 'open' | 'done'; outcome: TaskOutcome | null; note: string | null; createdBy: string | null; createdAt: string; doneAt: string | null; business: string; lender: string; funded: number; repName: string; playbookName: string | null; overdue: boolean; merchantContact: string; merchantPhone: string; merchantEmail: string }
+export interface MyTasks { tasks: TaskView[]; outcomes: Array<{ value: TaskOutcome; label: string; closes: boolean }>; today: string }
+export interface MerchantPreview { to: string; subject: string; body: string; template: MerchantTemplate }

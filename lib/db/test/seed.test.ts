@@ -113,7 +113,7 @@ describe('PARTNERS tab', () => {
 
 describe('seedSettings', () => {
   it('writes one row per settings key', () => {
-    expect(seedSettings().map((s) => s.key)).toEqual(['lenders', 'partners', 'products', 'thresholds', 'lists', 'crm', 'payroll']);
+    expect(seedSettings().map((s) => s.key)).toEqual(['lenders', 'partners', 'products', 'thresholds', 'lists', 'crm', 'payroll', 'portal', 'notifications', 'security']);
   });
   it('ships a blank CRM template so no link renders until the real pattern is known', () => {
     expect(seedSettings().find((s) => s.key === 'crm')?.value).toEqual({ urlTemplate: '' });

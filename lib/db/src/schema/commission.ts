@@ -75,6 +75,14 @@ export const commissionReps = pgTable(
     /** Base32 TOTP secret for two-factor sign-in; null = not enrolled. Enabled only once a code has been verified. */
     totpSecret: text('totp_secret'),
     totpEnabled: boolean('totp_enabled').notNull().default(false),
+    /** Sessions issued before this instant are refused — set when a password changes. */
+    sessionCutoff: timestamp('session_cutoff', { withTimezone: true }),
+    /** Secret in the rep's private calendar-feed URL; null = feed off. */
+    calendarToken: text('calendar_token'),
+    /** Owner tier: creates and changes admins, changes security settings. */
+    superAdmin: boolean('super_admin').notNull().default(false),
+    /** Per-rep permission switches ({ merchantEmail?: boolean }). */
+    perms: jsonb('perms').$type<{ merchantEmail?: boolean } | null>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -132,6 +140,10 @@ export const commissionDeals = pgTable(
     /** LOC line fee (Revenued): % of the credit line paid at open, and the dollars it added to gross. */
     lineRate: rate('line_rate'),
     lineFee: money('line_fee').notNull().default(0),
+    /** When the referral partner's fee for this deal was paid out; null = still owed. */
+    referralPaidAt: isoDate('referral_paid_at'),
+    /** The deal this one renewed or refinanced (renewal chain). */
+    renewedFromId: text('renewed_from_id'),
     drawSubsequentPct: rate('draw_subsequent_pct'),
     psfPct: rate('psf_pct').notNull().default(0),
     originationFee: money('origination_fee').notNull().default(0),
@@ -322,6 +334,8 @@ export const commissionAuditLog = pgTable(
     targetRepId: text('target_rep_id').references(() => commissionReps.id),
     path: text('path'),
     detail: jsonb('detail').$type<Record<string, unknown>>(),
+    /** Client address the request came from (behind the proxy: X-Forwarded-For). */
+    ip: text('ip'),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('commission_audit_log_actor_idx').on(t.actorRepId), index('commission_audit_log_at_idx').on(t.at)],
@@ -383,6 +397,98 @@ export const commissionDealFiles = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index('commission_deal_files_deal_idx').on(t.dealId)],
+);
+
+/** Files on a rep (W-9, agreements). Same shape as deal files. */
+export const commissionRepFiles = pgTable(
+  'commission_rep_files',
+  {
+    id: text('id').primaryKey(),
+    repId: text('rep_id')
+      .notNull()
+      .references(() => commissionReps.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    mime: text('mime').notNull(),
+    size: integer('size').notNull(),
+    data: text('data').notNull(),
+    uploadedBy: text('uploaded_by')
+      .notNull()
+      .references(() => commissionReps.id),
+    createdAt: createdAt(),
+  },
+  (t) => [index('commission_rep_files_rep_idx').on(t.repId)],
+);
+
+/** If/then automation rules (Settings › Playbooks). The rule body is JSON so new triggers need no migration. */
+export const commissionPlaybooks = pgTable('commission_playbooks', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  enabled: boolean('enabled').notNull().default(true),
+  rule: jsonb('rule').notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/** One row per rule firing per deal, so a rule never nags twice inside its repeat window. */
+export const commissionPlaybookFirings = pgTable(
+  'commission_playbook_firings',
+  {
+    id: text('id').primaryKey(),
+    playbookId: text('playbook_id')
+      .notNull()
+      .references(() => commissionPlaybooks.id, { onDelete: 'cascade' }),
+    dealId: text('deal_id')
+      .notNull()
+      .references(() => commissionDeals.id, { onDelete: 'cascade' }),
+    repId: text('rep_id').references(() => commissionReps.id, { onDelete: 'set null' }),
+    firedAt: timestamp('fired_at', { withTimezone: true }).notNull().defaultNow(),
+    detail: jsonb('detail'),
+  },
+  (t) => [index('commission_playbook_firings_deal_idx').on(t.dealId, t.playbookId)],
+);
+
+/** A rep's to-do on a deal: opened by a playbook or by hand, closed with an outcome. */
+export const commissionTasks = pgTable(
+  'commission_tasks',
+  {
+    id: text('id').primaryKey(),
+    dealId: text('deal_id')
+      .notNull()
+      .references(() => commissionDeals.id, { onDelete: 'cascade' }),
+    repId: text('rep_id')
+      .notNull()
+      .references(() => commissionReps.id, { onDelete: 'cascade' }),
+    playbookId: text('playbook_id').references(() => commissionPlaybooks.id, { onDelete: 'set null' }),
+    title: text('title').notNull(),
+    dueDate: isoDate('due_date').notNull(),
+    status: text('status').notNull().default('open'),
+    /** called | no_answer | app_submitted | funded | declined | not_interested */
+    outcome: text('outcome'),
+    note: text('note'),
+    createdBy: text('created_by').references(() => commissionReps.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+    doneAt: timestamp('done_at', { withTimezone: true }),
+  },
+  (t) => [index('commission_tasks_rep_idx').on(t.repId, t.status), index('commission_tasks_deal_idx').on(t.dealId)],
+);
+
+/** "Remember this device" after a two-factor sign-in: the browser holds a secret, this row holds its hash. */
+export const commissionTrustedDevices = pgTable(
+  'commission_trusted_devices',
+  {
+    id: text('id').primaryKey(),
+    repId: text('rep_id')
+      .notNull()
+      .references(() => commissionReps.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    /** Browser / OS summary from the user agent, for the "your devices" list. */
+    label: text('label').notNull().default(''),
+    ip: text('ip'),
+    createdAt: createdAt(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [index('commission_trusted_devices_rep_idx').on(t.repId), uniqueIndex('commission_trusted_devices_hash_idx').on(t.tokenHash)],
 );
 
 /* ------------------------------------------------------------------ */

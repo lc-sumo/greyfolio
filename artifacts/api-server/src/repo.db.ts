@@ -1,4 +1,4 @@
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import type { Clawback, Deal, DealDraw, LedgerContext, PayrollRun, Rep, Team, WeeklySchedule } from '@greystone/commission';
 import {
   commissionAuditLog,
@@ -11,9 +11,14 @@ import {
   commissionPayoutLines,
   commissionPayrollRuns,
   commissionPayrollRuns as runsTable,
+  commissionPlaybookFirings,
+  commissionPlaybooks,
+  commissionRepFiles,
   commissionReps,
+  commissionTasks,
   commissionSettings,
   commissionTeams,
+  commissionTrustedDevices,
   toClawback,
   toDeal,
   toPayoutLine,
@@ -21,10 +26,121 @@ import {
   toTeam,
   type Database,
 } from '@greystone/db';
-import type { AuditEntry, DealFile, DealNote, DealPatch, PasswordReset, PayoutCommit, Repo, Settings, TotpState } from './repo.js';
+import { NOTIFICATION_DEFAULTS, PERMISSION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AuditEntry, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Repo, type RepFile, type RepTask, type Settings, type TotpState, type TrustedDevice } from './repo.js';
+import type { PlaybookRule } from './services/playbook-rules.js';
+import { requestMeta } from './auth/request-context.js';
 
 export function dbRepo(db: Database): Repo {
+  const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
+  const toTask = (t: typeof commissionTasks.$inferSelect): RepTask => ({ id: t.id, dealId: t.dealId, repId: t.repId, playbookId: t.playbookId, title: t.title, dueDate: t.dueDate, status: t.status as RepTask['status'], outcome: t.outcome as RepTask['outcome'], note: t.note, createdBy: t.createdBy, createdAt: t.createdAt.toISOString(), doneAt: iso(t.doneAt) });
+  const toDevice = (d: typeof commissionTrustedDevices.$inferSelect): TrustedDevice => ({ id: d.id, repId: d.repId, tokenHash: d.tokenHash, label: d.label, ip: d.ip, createdAt: d.createdAt.toISOString(), lastUsedAt: d.lastUsedAt.toISOString(), expiresAt: d.expiresAt.toISOString() });
   return {
+    async listTrustedDevices(repId) {
+      const rows = await db.select().from(commissionTrustedDevices).where(eq(commissionTrustedDevices.repId, repId)).orderBy(desc(commissionTrustedDevices.lastUsedAt));
+      return rows.map(toDevice);
+    },
+    async findTrustedDevice(tokenHash) {
+      const rows = await db.select().from(commissionTrustedDevices).where(eq(commissionTrustedDevices.tokenHash, tokenHash)).limit(1);
+      return rows[0] ? toDevice(rows[0]) : null;
+    },
+    async insertTrustedDevice(d) {
+      await db.insert(commissionTrustedDevices).values({ id: d.id, repId: d.repId, tokenHash: d.tokenHash, label: d.label, ip: d.ip, createdAt: new Date(d.createdAt), lastUsedAt: new Date(d.lastUsedAt), expiresAt: new Date(d.expiresAt) });
+    },
+    async touchTrustedDevice(id, patch) {
+      await db.update(commissionTrustedDevices).set({ lastUsedAt: new Date(patch.lastUsedAt), ip: patch.ip }).where(eq(commissionTrustedDevices.id, id));
+    },
+    async deleteTrustedDevice(id) {
+      await db.delete(commissionTrustedDevices).where(eq(commissionTrustedDevices.id, id));
+    },
+    async deleteTrustedDevices(repId) {
+      await db.delete(commissionTrustedDevices).where(eq(commissionTrustedDevices.repId, repId));
+    },
+    async listAllNotes() {
+      const rows = await db.select().from(commissionDealNotes).orderBy(commissionDealNotes.createdAt);
+      return rows.map((n) => ({ id: n.id, dealId: n.dealId, authorRepId: n.authorRepId, body: n.body, createdAt: n.createdAt.toISOString() }));
+    },
+    async listAllFiles() {
+      const rows = await db.select().from(commissionDealFiles).orderBy(commissionDealFiles.createdAt);
+      return rows.map((f) => ({ ...f, createdAt: f.createdAt.toISOString() }));
+    },
+    async listAllRepFiles() {
+      const rows = await db.select().from(commissionRepFiles).orderBy(commissionRepFiles.createdAt);
+      return rows.map((f) => ({ ...f, createdAt: f.createdAt.toISOString() }));
+    },
+    async getSessionCutoff(repId) {
+      const rows = await db.select({ at: commissionReps.sessionCutoff }).from(commissionReps).where(eq(commissionReps.id, repId)).limit(1);
+      return iso(rows[0]?.at);
+    },
+    async setSessionCutoff(repId, at) {
+      await db.update(commissionReps).set({ sessionCutoff: new Date(at), updatedAt: sql`now()` }).where(eq(commissionReps.id, repId));
+    },
+    async getCalendarToken(repId) {
+      const rows = await db.select({ t: commissionReps.calendarToken }).from(commissionReps).where(eq(commissionReps.id, repId)).limit(1);
+      return rows[0]?.t ?? null;
+    },
+    async setCalendarToken(repId, token) {
+      await db.update(commissionReps).set({ calendarToken: token, updatedAt: sql`now()` }).where(eq(commissionReps.id, repId));
+    },
+    async findRepByCalendarToken(token) {
+      const rows = await db.select().from(commissionReps).where(eq(commissionReps.calendarToken, token)).limit(1);
+      return rows[0] ? toRep(rows[0]) : null;
+    },
+    async listRepFiles(repId) {
+      const rows = await db
+        .select({ id: commissionRepFiles.id, repId: commissionRepFiles.repId, name: commissionRepFiles.name, mime: commissionRepFiles.mime, size: commissionRepFiles.size, uploadedBy: commissionRepFiles.uploadedBy, createdAt: commissionRepFiles.createdAt })
+        .from(commissionRepFiles)
+        .where(eq(commissionRepFiles.repId, repId))
+        .orderBy(desc(commissionRepFiles.createdAt));
+      return rows.map((f) => ({ ...f, createdAt: f.createdAt.toISOString() }));
+    },
+    async getRepFile(id): Promise<RepFile | null> {
+      const rows = await db.select().from(commissionRepFiles).where(eq(commissionRepFiles.id, id)).limit(1);
+      const f = rows[0];
+      return f ? { ...f, createdAt: f.createdAt.toISOString() } : null;
+    },
+    async insertRepFile(f) {
+      await db.insert(commissionRepFiles).values({ id: f.id, repId: f.repId, name: f.name, mime: f.mime, size: f.size, data: f.data, uploadedBy: f.uploadedBy, createdAt: new Date(f.createdAt) });
+    },
+    async deleteRepFile(id) {
+      await db.delete(commissionRepFiles).where(eq(commissionRepFiles.id, id));
+    },
+    async listPlaybooks(): Promise<Playbook[]> {
+      const rows = await db.select().from(commissionPlaybooks).orderBy(commissionPlaybooks.createdAt);
+      return rows.map((p) => ({ id: p.id, name: p.name, enabled: p.enabled, rule: p.rule as PlaybookRule, createdAt: p.createdAt.toISOString(), updatedAt: p.updatedAt.toISOString() }));
+    },
+    async insertPlaybook(p) {
+      await db.insert(commissionPlaybooks).values({ id: p.id, name: p.name, enabled: p.enabled, rule: p.rule, createdAt: new Date(p.createdAt), updatedAt: new Date(p.updatedAt) });
+    },
+    async updatePlaybook(id, patch) {
+      await db.update(commissionPlaybooks).set({ ...patch, updatedAt: sql`now()` }).where(eq(commissionPlaybooks.id, id));
+    },
+    async deletePlaybook(id) {
+      await db.delete(commissionPlaybooks).where(eq(commissionPlaybooks.id, id));
+    },
+    async listFirings(opts = {}): Promise<PlaybookFiring[]> {
+      const where = [opts.playbookId ? eq(commissionPlaybookFirings.playbookId, opts.playbookId) : undefined, opts.dealId ? eq(commissionPlaybookFirings.dealId, opts.dealId) : undefined].filter(Boolean);
+      const q = db.select().from(commissionPlaybookFirings).orderBy(desc(commissionPlaybookFirings.firedAt)).limit(opts.limit ?? 500);
+      const rows = where.length ? await q.where(and(...(where as never[]))) : await q;
+      return rows.map((f) => ({ id: f.id, playbookId: f.playbookId, dealId: f.dealId, repId: f.repId, firedAt: f.firedAt.toISOString(), detail: (f.detail as Record<string, unknown> | null) ?? null }));
+    },
+    async insertFiring(f) {
+      await db.insert(commissionPlaybookFirings).values({ id: f.id, playbookId: f.playbookId, dealId: f.dealId, repId: f.repId, firedAt: new Date(f.firedAt), detail: f.detail ?? null });
+    },
+    async listTasks(filter = {}) {
+      const where = [filter.repId ? eq(commissionTasks.repId, filter.repId) : undefined, filter.dealId ? eq(commissionTasks.dealId, filter.dealId) : undefined, filter.status ? eq(commissionTasks.status, filter.status) : undefined].filter(Boolean);
+      const q = db.select().from(commissionTasks).orderBy(commissionTasks.dueDate, commissionTasks.createdAt);
+      const rows = where.length ? await q.where(and(...(where as never[]))) : await q;
+      return rows.map(toTask);
+    },
+    async insertTask(t) {
+      await db.insert(commissionTasks).values({ id: t.id, dealId: t.dealId, repId: t.repId, playbookId: t.playbookId, title: t.title, dueDate: t.dueDate, status: t.status, outcome: t.outcome, note: t.note, createdBy: t.createdBy, createdAt: new Date(t.createdAt), doneAt: t.doneAt ? new Date(t.doneAt) : null });
+    },
+    async updateTask(id, patch) {
+      await db
+        .update(commissionTasks)
+        .set({ ...(patch.status ? { status: patch.status } : {}), ...(patch.outcome !== undefined ? { outcome: patch.outcome } : {}), ...(patch.note !== undefined ? { note: patch.note } : {}), ...(patch.title ? { title: patch.title } : {}), ...(patch.dueDate ? { dueDate: patch.dueDate } : {}), ...(patch.doneAt !== undefined ? { doneAt: patch.doneAt ? new Date(patch.doneAt) : null } : {}) })
+        .where(eq(commissionTasks.id, id));
+    },
     async findRepByEmail(email) {
       const rows = await db
         .select()
@@ -71,6 +187,11 @@ export function dbRepo(db: Database): Repo {
         lists: map.lists ?? { frequencies: [], commissionStatuses: [], dealStatuses: [] },
         crm: map.crm ?? { urlTemplate: '' },
         payroll: map.payroll ?? { cycle: 'Twice monthly' },
+        portal: { ...PORTAL_DEFAULTS, ...(map.portal ?? {}) },
+        notifications: { ...NOTIFICATION_DEFAULTS, ...(map.notifications ?? {}) },
+        security: { ...SECURITY_DEFAULTS, ...(map.security ?? {}) },
+        templates: { ...TEMPLATE_DEFAULTS, ...(map.templates ?? {}) },
+        permissions: { ...PERMISSION_DEFAULTS, ...(map.permissions ?? {}) },
       };
     },
     async insertClawback(c: Clawback) {
@@ -135,7 +256,7 @@ export function dbRepo(db: Database): Repo {
       await db.delete(commissionTeams).where(eq(commissionTeams.id, id));
     },
     async insertRep(rep: Rep) {
-      await db.insert(commissionReps).values({ id: rep.id, name: rep.name, email: rep.email, role: rep.role, teamId: rep.teamId, openerRate: rep.openerRate, closerRate: rep.closerRate, overrideRate: rep.overrideRate, active: rep.active });
+      await db.insert(commissionReps).values({ id: rep.id, name: rep.name, email: rep.email, role: rep.role, teamId: rep.teamId, openerRate: rep.openerRate, closerRate: rep.closerRate, overrideRate: rep.overrideRate, active: rep.active, superAdmin: !!rep.superAdmin, perms: rep.perms ?? null });
     },
     async updateRep(id: string, patch: Partial<Omit<Rep, 'id'>>) {
       await db.update(commissionReps).set({ ...patch, updatedAt: sql`now()` }).where(eq(commissionReps.id, id));
@@ -231,6 +352,7 @@ export function dbRepo(db: Database): Repo {
         actorRepId: entry.actorRepId,
         action: entry.action,
         targetRepId: entry.targetRepId,
+        ip: entry.ip ?? requestMeta()?.ip ?? null,
         path: entry.path,
         detail: entry.detail ?? null,
       });
@@ -244,6 +366,7 @@ export function dbRepo(db: Database): Repo {
         path: r.path,
         detail: r.detail ?? undefined,
         at: r.at.toISOString(),
+        ip: r.ip,
       }));
     },
   };

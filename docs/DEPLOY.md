@@ -1,6 +1,14 @@
 # Deploying the commission portal
 
-Two supported paths. Both run the same Docker image: the Express API serving the built portal, migrations applied on boot.
+Three supported paths. All run the same thing: the Express API serving the built portal, with the schema pushed or migrated on boot.
+
+## Option 0 — Replit (what is live today)
+
+`.replit` is set up for it: import the GitHub repo, add the Postgres database, set `SESSION_SECRET`, `BASE_URL`/`APP_ORIGIN` (the published URL), `MAIL_PROVIDER=sendgrid` + `SENDGRID_API_KEY` + `MAIL_FROM`, and `SEED=workbook` in Secrets, then **Publish → Autoscale**. Later releases: push to GitHub, **Pull** in the Replit Git pane, **Republish**. The run command applies schema changes with `pnpm db:up` before starting: the first time it records the tables a push already created into the migration ledger, after that it only runs reviewed migration files, so a pull never needs a manual step and nothing is dropped by surprise.
+
+**Uptime:** create a free monitor (UptimeRobot, Better Stack) on `https://<your-app>/health` every 5 minutes. It returns 503 with the database error when the database is unreachable.
+
+**Backups:** Settings › Portal › *Download everything* gives one JSON file with every table (no secrets). Do it weekly and after every import; keep the copies outside Replit.
 
 ## Option A — Render (managed, ~15 minutes)
 
@@ -8,17 +16,14 @@ Two supported paths. Both run the same Docker image: the Express API serving the
 2. First deploy boots with `SEED=workbook`, which loads reps, lenders, products and referral partners from the tracker tabs. After it is up, change `SEED` to `none` so later boots leave the data alone.
 3. Set `BASE_URL` and `APP_ORIGIN` to the service URL (`https://greystone-portal.onrender.com`) or your domain once it is attached under **Settings → Custom domains**.
 4. Email: create a [Resend](https://resend.com) account, verify the sending domain, paste the key into `MAIL_API_KEY`. `MAIL_FROM` must be on that domain. Postmark works the same way with `MAIL_PROVIDER=postmark`.
-5. Sign in with `leor@greystoneus.com` after setting its password from a one-off shell (`Shell` tab → `pnpm --filter @greystone/api-server exec tsx -e "…"`) — or simpler: temporarily set `AUTH_MODE=dev`, sign in, set passwords in Settings › Reps, then remove `AUTH_MODE`. Production refuses `AUTH_MODE=dev`, so do this on a preview deploy or use the SQL below.
+5. Open the portal. With no password set yet and no SSO, the sign-in screen offers **Set up the first admin**: enter the admin email from the roster and choose a password. That screen closes itself once any password exists. Everything else (names, emails, two-factor policy, lists, reps, lenders) is then configured under Settings.
 6. Import the FUNDED DEALS tab: Settings › Import from sheet.
 
 **Backups on Render**: paid Postgres plans take daily snapshots (Dashboard → database → Backups). Also run `scripts/backup.sh` from your laptop weekly against the external connection string for an off-platform copy.
 
-### Setting the first admin password by SQL
+### If the first-admin screen does not appear
 
-```sql
--- generate the hash locally: pnpm --filter @greystone/api-server exec tsx -e "import('./src/auth/password.ts').then(async m => console.log(await m.hashPassword('Your-Password-1234')))"
-update commission_reps set password_hash = 'scrypt$16384$…' where email = 'leor@greystoneus.com';
-```
+It is hidden when SSO (`OIDC_ISSUER`) is configured, when `AUTH_PASSWORD=off`, or when any rep already has a password. In the last case use **Forgot password** on the sign-in screen (needs email) or ask another admin to set one in Settings › Reps.
 
 ## Option B — Your own server with Docker Compose
 
@@ -45,8 +50,11 @@ Set `SEED=workbook` for the very first boot only, then `none`.
 | `BASE_URL`, `APP_ORIGIN` | yes | Public URL; used in emails and reset links |
 | `NODE_ENV=production` | yes | Secure cookies, refuses dev sign-in, requires the above |
 | `AUTH_PASSWORD` | no | `off` to disable email + password sign-in (then SSO is required) |
+| `MAIL_PROVIDER` | no | `sendgrid`, `resend`, `postmark`, `log` (dev) or `off` |
+| `SENDGRID_API_KEY` | no | Accepted in place of `MAIL_API_KEY` when the provider is SendGrid |
+| `SUPER_ADMIN_EMAIL` | no | Guaranteed on every boot as an active super admin (default `lc@greystoneus.com`) |
+| `GEO_PROVIDER` | no | `ipapi` (default: IP → city on the audit log and device list, one lookup per address, cached) or `off` |
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | no | SSO (Google Workspace, Okta, Entra) |
-| `MAIL_PROVIDER` | no | `resend`, `postmark`, `log` (print only), `off` (default in production) |
 | `MAIL_API_KEY`, `MAIL_FROM` | with mail | Provider key and verified sender |
 | `RENEWAL_DIGEST_HOUR_UTC` | no | Hour the renewal digest goes to admins (default 13); `off` disables |
 | `SEED` | no | `workbook` on first boot, `none` afterwards, `demo` only for previews |

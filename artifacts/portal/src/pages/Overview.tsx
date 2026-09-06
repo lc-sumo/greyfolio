@@ -3,7 +3,8 @@ import { useState } from 'react';
 import { AdminDealDrawer } from '../components/AdminDealDrawer';
 import { Shell } from '../components/Shell';
 import { Card, Loading, Metric } from '../components/ui';
-import { api, qs, type Overview as OverviewData, type Settings } from '../lib/api';
+import { Link } from 'react-router-dom';
+import { EXCEPTION_LABEL, api, qs, type ExceptionKind, type Exceptions, type Overview as OverviewData, type Settings } from '../lib/api';
 import { compact, day, money, monthLabel, periodRange } from '../lib/format';
 import { useSession } from '../lib/session';
 
@@ -12,7 +13,9 @@ export function Overview() {
   const range = periodRange(period);
   const q = useQuery({ queryKey: ['overview', range.from, range.to], queryFn: () => api<OverviewData>(`/api/admin/overview${qs(range)}`) });
   const settings = useQuery({ queryKey: ['settings'], queryFn: () => api<Settings>('/api/admin/settings') });
+  const ex = useQuery({ queryKey: ['books-exceptions'], queryFn: () => api<Exceptions>('/api/admin/books/exceptions') });
   const [open, setOpen] = useState<string | null>(null);
+  const flagged = ex.data ? (Object.keys(EXCEPTION_LABEL) as ExceptionKind[]).filter((k) => ex.data!.counts[k] > 0) : [];
   const o = q.data;
   const max = o ? Math.max(1, ...o.monthly.map((m) => m.funded)) : 1;
   const maxC = o ? Math.max(1, ...o.monthly.map((m) => m.commission)) : 1;
@@ -33,6 +36,22 @@ export function Overview() {
             <Metric label="Renewal pipeline" value={String(o.cards.renewalReady)} tone="pos" sub={`renewable now · ${compact(o.cards.renewalGross)} est. commission`} />
             <Metric label="Expected from lenders · 30 days" value={money(o.cards.expected30)} tone={o.cards.overdueReceipts ? 'neg' : undefined} sub={`${o.cards.expected30Count} receipt${o.cards.expected30Count === 1 ? '' : 's'} due${o.cards.overdueReceipts ? ` · ${money(o.cards.overdueReceipts)} overdue` : ''}`} />
           </div>
+
+          {ex.data && (
+            <Card title="Needs a look" extra={flagged.length ? <Link to="/books" style={{ color: 'var(--teal)', fontWeight: 600 }}>open Books →</Link> : 'the books are clean'}>
+              {flagged.length === 0 ? <div className="muted">No exceptions: every funded deal has a receipt on the way, nobody was paid ahead of a lender, and no partner fee is waiting on collected commission.</div> : (
+                <div className="pl">
+                  {flagged.map((k) => (
+                    <div className="row" key={k}>
+                      <span><b>{EXCEPTION_LABEL[k]}</b></span>
+                      <span className="subtle num">{ex.data!.counts[k]} deal{ex.data!.counts[k] === 1 ? '' : 's'}</span>
+                      <span className={`num ${k === 'clawback-closing' ? 'warn' : 'neg'}`}>{money(ex.data!.totals[k])}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+          )}
 
           <div className="two">
             <Card title="Funded volume and commission" extra="by funded month">

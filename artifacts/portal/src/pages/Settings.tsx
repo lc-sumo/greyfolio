@@ -1,25 +1,29 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Shell } from '../components/Shell';
-import { Card, Loading, Pill } from '../components/ui';
-import { api, post, type ClawbackBasis, type Lender, type ProductRule, type ReferralPartner, type RemittancePreview, type RosterRep, type Settings as SettingsData, type Team, type Usage } from '../lib/api';
+import { Card, Drawer, Loading, Pill } from '../components/ui';
+import { FilesPanel } from '../components/FilesPanel';
+import { PlaybooksTab } from '../components/PlaybooksTab';
+import { DEMO, api, post, type ClawbackBasis, type Lender, type ProductRule, type ReferralPartner, type RemittancePreview, type RosterRep, type Settings as SettingsData, type Team, type Usage } from '../lib/api';
 import { compact, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 
-type TabKey = 'lenders' | 'partners' | 'products' | 'teams' | 'reps' | 'crm' | 'import' | 'remittance';
+type TabKey = 'portal' | 'lenders' | 'partners' | 'products' | 'teams' | 'reps' | 'crm' | 'playbooks' | 'import' | 'remittance';
 const TABS: Array<{ key: TabKey; label: string; hint: string }> = [
+  { key: 'portal', label: 'Portal', hint: 'Names, automatic emails, security and the dropdown lists — everything about how the portal itself behaves.' },
   { key: 'lenders', label: 'Lenders', hint: 'Each lender funds certain products and has its own clawback policy. Lenders that fund consolidations pay commission in increments; everyone else pays straight commission.' },
   { key: 'partners', label: 'Referral partners', hint: 'Fee % of gross commission and an optional monthly cap. Blank cap = uncapped.' },
   { key: 'products', label: 'Product rules', hint: 'The product decides which fields the new-deal form shows and how commission is based.' },
   { key: 'teams', label: 'Teams', hint: 'A team has a leader who earns the override on the team’s deals. Set the leader here.' },
   { key: 'reps', label: 'Reps', hint: 'Rates default onto new deals and can be overridden per deal. Deactivating never changes history.' },
   { key: 'crm', label: 'CRM & thresholds', hint: 'CRM deep link template and the day counts that drive at-risk, Prospecting and renewals.' },
+  { key: 'playbooks', label: 'Playbooks', hint: 'If/then rules on the renewal engine: when a deal reaches a paid-in mark, a stage, an unused line or a maturity date, open a task for the rep, email them, email you, or set a status. Dry-run any rule to see exactly which deals it would touch today.' },
   { key: 'import', label: 'Import from sheet', hint: 'Bring the FUNDED DEALS tab in from a CSV export. Preview first; nothing is written until the file is clean.' },
   { key: 'remittance', label: 'Lender remittance', hint: 'Paste the lender’s weekly payment report. Each line is matched to a deal and marks the increments or dollars that arrived — no ticking receipts one by one.' },
 ];
 
 export function Settings() {
-  const { notify, setViewAs } = useSession();
+  const { notify, setViewAs, auth } = useSession();
   const qc = useQueryClient();
   const settings = useQuery({ queryKey: ['settings'], queryFn: () => api<SettingsData>('/api/admin/settings') });
   const usage = useQuery({ queryKey: ['usage'], queryFn: () => api<Usage>('/api/admin/settings/usage') });
@@ -50,11 +54,13 @@ export function Settings() {
       {err && <div className="note" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>{err}</div>}
       {!ready ? <Loading error={settings.error ?? usage.error ?? teams.error ?? roster.error} /> : (
         <>
+          {tab === 'portal' && <PortalTab settings={settings.data!} run={run} />}
           {tab === 'lenders' && <LendersTab lenders={settings.data!.lenders} products={settings.data!.products} thresholds={settings.data!.thresholds} usage={usage.data!.lenders} run={run} />}
           {tab === 'partners' && <PartnersTab partners={settings.data!.partners} usage={usage.data!.partners} run={run} />}
           {tab === 'products' && <ProductsTab products={settings.data!.products} usage={usage.data!.products} run={run} />}
           {tab === 'teams' && <TeamsTab teams={teams.data!.teams} reps={roster.data!.reps} usage={usage.data!.teams} run={run} />}
-          {tab === 'reps' && <RepsTab reps={roster.data!.reps} teams={teams.data!.teams} run={run} onViewAs={(id) => setViewAs(id)} />}
+          {tab === 'reps' && <RepsTab reps={roster.data!.reps} teams={teams.data!.teams} run={run} onViewAs={(id) => setViewAs(id)} isSuper={!!auth?.superAdmin} permissions={settings.data!.permissions} />}
+          {tab === 'playbooks' && <PlaybooksTab settings={settings.data!} teams={teams.data!.teams} reps={roster.data!.reps} run={run} />}
           {tab === 'crm' && <CrmTab settings={settings.data!} run={run} />}
           {tab === 'import' && <ImportTab />}
           {tab === 'remittance' && <RemittanceTab />}
@@ -79,7 +85,7 @@ function LendersTab({ lenders, products, thresholds, usage, run }: { lenders: Le
   const [rows, setRows] = useState(lenders);
   const [name, setName] = useState('');
   useEffect(() => setRows(lenders), [lenders]);
-  const cols = 'minmax(150px,1fr) minmax(300px,1.6fr) 150px 80px 80px 170px 100px 210px 90px 70px 90px 80px';
+  const cols = 'minmax(150px,1fr) minmax(300px,1.6fr) 150px 80px 80px 170px 100px 210px 90px 80px 70px 90px 80px';
   const save = (next: Lender[]) => run('Lenders saved', () => post('/api/admin/settings/lenders', { lenders: next }, 'PUT'));
   // Renaming keeps the original name alongside, so the server can move every deal that references it.
   const set = (i: number, patch: Partial<Lender>) => setRows(rows.map((x, j) => (j === i ? { ...x, ...patch, ...(patch.name !== undefined && x.renamedFrom === undefined ? { renamedFrom: x.name } : {}) } : x)));
@@ -100,8 +106,8 @@ function LendersTab({ lenders, products, thresholds, usage, run }: { lenders: Le
   };
   return (
     <Card title="Lenders" extra={`${rows.length} · toggle the products each lender funds; increments only apply to lenders that fund a consolidation · clawback policy drives "cleared clawback" on every deal`}>
-      <div className="scroller"><div style={{ minWidth: 1700 }}>
-      <Head cols={cols}><span>Lender</span><span>Products funded</span><span>Payout structure</span><span>Increments</span><span>Upfront %</span><span>Remainder</span><span>Cadence</span><span>Clawback policy</span><span>LOC line %</span><span>Active</span><span>Usage</span><span /></Head>
+      <div className="scroller"><div style={{ minWidth: 1800 }}>
+      <Head cols={cols}><span>Lender</span><span>Products funded</span><span>Payout structure</span><span>Increments</span><span>Upfront %</span><span>Remainder</span><span>Cadence</span><span>Clawback policy</span><span>LOC line %</span><span>Pays in (days)</span><span>Active</span><span>Usage</span><span /></Head>
       {rows.map((l, i) => {
         const inc = doesIncrements(l);
         return (
@@ -125,6 +131,7 @@ function LendersTab({ lenders, products, thresholds, usage, run }: { lenders: Le
             <input inputMode="numeric" disabled={!l.clawback || l.clawback.basis === 'none'} value={l.clawback && l.clawback.basis !== 'none' ? l.clawback.count : ''} placeholder="—" onChange={(e) => set(i, { clawback: { basis: l.clawback?.basis ?? 'days', count: Number(e.target.value) || 0 } })} />
           </div>
           <input inputMode="decimal" placeholder="—" title="LOC lenders that also pay a % of the credit line at open (Revenued): draw % × initial draw + this % × the line" value={l.locLineRate ? String(Math.round(l.locLineRate * 10000) / 100) : ''} onChange={(e) => set(i, { locLineRate: (Number(e.target.value) || 0) / 100 })} />
+          <input inputMode="numeric" placeholder={String(thresholds.paymentOverdueDays)} title="Days after funding by which this lender pays commission. Blank = the default under CRM & thresholds. Drives the receivables aging on Books." value={l.paymentTermsDays ?? ''} onChange={(e) => set(i, { paymentTermsDays: e.target.value === '' ? undefined : Number(e.target.value) })} />
           <button type="button" className={`tog ${l.active !== false ? 'on' : ''}`} title={l.active === false ? 'Retired — hidden from new deals, kept for history' : 'Active — offered on new deals'} onClick={() => set(i, { active: l.active === false ? true : false })} />
           <span className="num subtle">{usage[l.name] ? `${usage[l.name]} deal${usage[l.name] === 1 ? '' : 's'}` : 'unused'}</span>
           <button className="btn" disabled={!!usage[l.name]} title={usage[l.name] ? 'In use — retire it with the Active switch instead' : 'Remove'} onClick={() => setRows(rows.filter((_, j) => j !== i))}>Remove</button>
@@ -274,13 +281,14 @@ function TeamsTab({ teams, reps, usage, run }: { teams: Team[]; reps: RosterRep[
 }
 
 /* ---------- Reps ---------- */
-function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Team[]; run: Run; onViewAs: (id: string) => void }) {
+function RepsTab({ reps, teams, run, onViewAs, isSuper, permissions }: { reps: RosterRep[]; teams: Team[]; run: Run; onViewAs: (id: string) => void; isSuper: boolean; permissions: SettingsData['permissions'] }) {
   type Draft = { name: string; email: string; teamId: string; openerRate: string; closerRate: string; overrideRate: string; role: string };
   const toDraft = (r: RosterRep): Draft => ({ name: r.name, email: r.email, teamId: r.teamId ?? '', openerRate: pctIn(r.openerRate), closerRate: pctIn(r.closerRate), overrideRate: pctIn(r.overrideRate), role: r.role });
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [adding, setAdding] = useState<Draft | null>(null);
-  const cols = 'minmax(150px,1.1fr) minmax(190px,1.2fr) 150px 70px 70px 70px 100px 100px 120px 90px 230px 160px';
+  const cols = 'minmax(150px,1.1fr) minmax(190px,1.2fr) 150px 70px 70px 70px 100px 100px 130px 90px 110px 100px 380px 230px';
   const [pw, setPw] = useState<{ id: string; value: string } | null>(null);
+  const [filesFor, setFilesFor] = useState<RosterRep | null>(null);
   const label = (role: string) => (role === 'admin' ? 'Master' : role === 'manager' ? 'Team lead' : 'Rep');
   const Editor = ({ v, onChange }: { v: Draft; onChange: (v: Draft) => void }) => (
     <>
@@ -296,8 +304,8 @@ function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Tea
   return (
     <Card title="Reps" extra={`${reps.length} · ${reps.filter((r) => r.active).length} active`}>
       <div className="scroller">
-        <div style={{ minWidth: 1700 }}>
-          <Head cols={cols}><span>Name</span><span>Email</span><span>Team</span><span>Opener %</span><span>Closer %</span><span>Override %</span><span>Earned</span><span>Owed</span><span>Access</span><span>Active</span><span>Sign-in</span><span /></Head>
+        <div style={{ minWidth: 2050 }}>
+          <Head cols={cols}><span>Name</span><span>Email</span><span>Team</span><span>Opener %</span><span>Closer %</span><span>Override %</span><span>Earned</span><span>Owed</span><span>Access</span><span>Active</span><span title="Owner tier: creates and changes admins, changes security. Only a super admin can grant it.">Super admin</span><span title="May this rep email merchants from a deal? The portal-wide switch is under Portal › Permissions.">Merchant email</span><span>Sign-in</span><span /></Head>
           {reps.map((r) => {
             const v = drafts[r.id] ?? toDraft(r);
             const dirty = !!drafts[r.id];
@@ -306,8 +314,10 @@ function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Tea
                 <Editor v={v} onChange={(nv) => setDrafts({ ...drafts, [r.id]: nv })} />
                 <span className="num">{compact(r.earned)}</span>
                 <span className={`num ${r.owed ? 'warn' : ''}`}>{compact(r.owed)}</span>
-                <select value={v.role} onChange={(e) => setDrafts({ ...drafts, [r.id]: { ...v, role: e.target.value } })}><option value="rep">Rep</option><option value="manager">Team lead</option><option value="admin">Master</option></select>
-                <button type="button" className={`tog ${r.active ? 'on' : ''}`} aria-pressed={r.active} title={r.active ? 'Deactivate — history stays' : 'Reactivate'} onClick={() => run(`${r.name} ${r.active ? 'deactivated' : 'reactivated'}`, () => post(`/api/admin/reps/${r.id}`, { active: !r.active }, 'PATCH'))}><i /></button>
+                <select value={v.role} disabled={!isSuper && (r.role === 'admin' || !!r.superAdmin)} title={!isSuper && (r.role === 'admin' || r.superAdmin) ? 'Only a super admin can change an admin' : ''} onChange={(e) => setDrafts({ ...drafts, [r.id]: { ...v, role: e.target.value } })}><option value="rep">Rep</option><option value="manager">Team lead</option><option value="admin" disabled={!isSuper}>Master</option></select>
+                <button type="button" className={`tog ${r.active ? 'on' : ''}`} aria-pressed={r.active} disabled={!isSuper && (r.role === 'admin' || !!r.superAdmin)} title={!isSuper && (r.role === 'admin' || r.superAdmin) ? 'Only a super admin can change an admin' : r.active ? 'Deactivate — history stays' : 'Reactivate'} onClick={() => run(`${r.name} ${r.active ? 'deactivated' : 'reactivated'}`, () => post(`/api/admin/reps/${r.id}`, { active: !r.active }, 'PATCH'))}><i /></button>
+                <span>{isSuper ? <button type="button" className={`tog ${r.superAdmin ? 'on' : ''}`} aria-pressed={!!r.superAdmin} disabled={r.role !== 'admin'} title={r.role !== 'admin' ? 'Give Master access first' : r.superAdmin ? 'Remove super admin' : 'Make super admin'} onClick={() => run(`${r.name} — super admin ${r.superAdmin ? 'removed' : 'granted'}`, () => post(`/api/admin/reps/${r.id}`, { superAdmin: !r.superAdmin }, 'PATCH'))}><i /></button> : r.superAdmin ? <Pill tone="teal">yes</Pill> : <span className="subtle">—</span>}</span>
+                <span>{r.role === 'rep' || r.role === 'manager' ? <button type="button" className={`tog ${permissions.merchantEmail && r.perms?.merchantEmail !== false ? 'on' : ''}`} aria-pressed={permissions.merchantEmail && r.perms?.merchantEmail !== false} disabled={!permissions.merchantEmail} title={!permissions.merchantEmail ? 'Turned off for everyone under Portal › Permissions' : r.perms?.merchantEmail === false ? 'Allow this rep to email merchants' : 'Stop this rep emailing merchants'} onClick={() => run(`${r.name} — merchant email ${r.perms?.merchantEmail === false ? 'allowed' : 'blocked'}`, () => post(`/api/admin/reps/${r.id}`, { perms: { merchantEmail: r.perms?.merchantEmail === false ? true : false } }, 'PATCH'))}><i /></button> : <span className="subtle">—</span>}</span>
                 <span style={{ display: 'grid', gap: 4 }}>
                   {pw?.id === r.id ? (
                     <span style={{ display: 'flex', gap: 4 }}>
@@ -320,6 +330,7 @@ function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Tea
                       <Pill tone={r.hasPassword ? 'teal' : 'grey'}>{r.hasPassword ? 'Password set' : 'No password'}</Pill>
                       <button className="btn" style={{ height: 30, padding: '0 8px' }} title="Set or reset the password this rep signs in with" onClick={() => setPw({ id: r.id, value: tempPassword() })}>{r.hasPassword ? 'Reset' : 'Set password'}</button>
                       {r.hasPassword && <button className="btn" style={{ height: 30, padding: '0 8px' }} title="Remove the password — SSO only" onClick={() => run(`${r.name} — password removed`, () => post(`/api/admin/reps/${r.id}/password`, { password: null }))}>✕</button>}
+                      <button className="btn" style={{ height: 30, padding: '0 8px' }} title="Email this rep a 72-hour link to choose their own password" onClick={() => run(`Invite sent to ${r.email}`, () => post(`/api/admin/reps/${r.id}/invite`, {}))}>Invite</button>
                       {r.hasTotp && <button className="btn" style={{ height: 30, padding: '0 8px' }} title="Two-factor is on for this rep. Reset it if they lost their phone — they sign in with the password alone until they enrol again." onClick={() => { if (window.confirm(`Reset two-factor for ${r.name}? They will sign in with just their password until they set it up again.`)) void run(`${r.name} — two-factor reset`, () => post(`/api/admin/reps/${r.id}/totp`, {}, 'DELETE')); }}>2FA on · reset</button>}
                     </span>
                   )}
@@ -327,6 +338,7 @@ function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Tea
                 <span style={{ display: 'flex', gap: 6 }}>
                   <button className="btn primary" disabled={!dirty} style={{ height: 30, padding: '0 10px' }} onClick={() => run(`${v.name} saved`, async () => { await post(`/api/admin/reps/${r.id}`, body(v), 'PATCH'); setDrafts((s) => { const n = { ...s }; delete n[r.id]; return n; }); })}>Save</button>
                   <button className="btn" style={{ height: 30, padding: '0 10px' }} onClick={() => onViewAs(r.id)}>View as</button>
+                  <button className="btn" style={{ height: 30, padding: '0 10px' }} title="W-9 and agreements on file for this rep" onClick={() => setFilesFor(r)}>Files</button>
                 </span>
               </Row>
             );
@@ -335,8 +347,8 @@ function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Tea
             <Row cols={cols}>
               <Editor v={adding} onChange={setAdding} />
               <span /><span />
-              <select value={adding.role} onChange={(e) => setAdding({ ...adding, role: e.target.value })}><option value="rep">Rep</option><option value="manager">Team lead</option><option value="admin">Master</option></select>
-              <Pill tone="teal">new</Pill>
+              <select value={adding.role} onChange={(e) => setAdding({ ...adding, role: e.target.value })}><option value="rep">Rep</option><option value="manager">Team lead</option><option value="admin" disabled={!isSuper}>Master{isSuper ? '' : ' (super admin only)'}</option></select>
+              <Pill tone="teal">new</Pill><span /><span />
               <span className="subtle" style={{ fontSize: 13 }}>set a password after adding</span>
               <span style={{ display: 'flex', gap: 6 }}>
                 <button className="btn primary" style={{ height: 30, padding: '0 10px' }} onClick={() => run(`${adding.name} added`, async () => { await post('/api/admin/reps', body(adding)); setAdding(null); })}>Add</button>
@@ -348,8 +360,13 @@ function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Tea
       </div>
       <div className="toolbar" style={{ marginTop: 12 }}>
         <button className="btn" disabled={!!adding} onClick={() => setAdding({ name: '', email: '', teamId: '', openerRate: '20', closerRate: '20', overrideRate: '', role: 'rep' })}>+ Add rep</button>
-        <span className="count">Access: Rep sees their own portal · Team lead can View as their team · Master runs everything. Sign-in: SSO when configured, or the email + password you set here (reps can change theirs from the sidebar).</span>
+        <span className="count">Access: Rep sees their own portal · Team lead can View as their team · Master runs everything · Super admin alone creates or changes admins and security. Sign-in: SSO when configured, or the email + password you set here (reps can change theirs from the sidebar).</span>
       </div>
+      {filesFor && (
+        <Drawer title={`${filesFor.name} · files`} sub="W-9, agreements. Reps can add their own from Pay history; only you can remove one." onClose={() => setFilesFor(null)}>
+          <FilesPanel base={`/api/admin/reps/${filesFor.id}/files`} title="On file" />
+        </Drawer>
+      )}
     </Card>
   );
 }
@@ -396,9 +413,9 @@ function tempPassword(): string {
 }
 
 /* ---------- Import from sheet ---------- */
-interface ImportRow { line: number; id: string; action: 'deal' | 'draw' | 'skip'; parentId: string | null; business: string; lender: string; product: string; amount: number; date: string; opener: string | null; closer: string | null; override: string | null; commissionStatus: string; repPaid: string | null; clawback: number | null; problems: string[]; warnings: string[] }
+interface ImportRow { line: number; id: string; action: 'deal' | 'draw' | 'skip' | 'update'; changes?: string[]; parentId: string | null; business: string; lender: string; product: string; amount: number; date: string; opener: string | null; closer: string | null; override: string | null; commissionStatus: string; repPaid: string | null; clawback: number | null; problems: string[]; warnings: string[] }
 interface MissingRefs { lenders: string[]; products: string[]; partners: string[]; reps: string[] }
-interface ImportPreview { rows: ImportRow[]; skipped: number; skippedExisting: number; problems: string[]; missing: MissingRefs; summary: { deals: number; draws: number; funded: number; withPayouts: number; warnings: number; clawbacks: number; problems: number } }
+interface ImportPreview { rows: ImportRow[]; skipped: number; skippedExisting: number; updated: number; problems: string[]; missing: MissingRefs; summary: { deals: number; draws: number; funded: number; withPayouts: number; warnings: number; clawbacks: number; problems: number } }
 function ImportTab() {
   const { notify } = useSession();
   const qc = useQueryClient();
@@ -408,8 +425,9 @@ function ImportTab() {
   const [busy, setBusy] = useState(false);
   const [onlyProblems, setOnlyProblems] = useState(false);
   const [skipExisting, setSkipExisting] = useState(false);
-  const [done, setDone] = useState<{ deals: number; draws: number; clawbacks: number; payoutLines: number; runId: string | null } | null>(null);
-  const body = () => (xlsx ? { xlsx: xlsx.data, skipExisting } : { csv, skipExisting });
+  const [updateExisting, setUpdateExisting] = useState(false);
+  const [done, setDone] = useState<{ deals: number; updated?: number; draws: number; clawbacks: number; payoutLines: number; runId: string | null } | null>(null);
+  const body = () => (xlsx ? { xlsx: xlsx.data, skipExisting, updateExisting } : { csv, skipExisting, updateExisting });
   async function file(f: File | undefined) {
     if (!f) return;
     setPreview(null); setDone(null);
@@ -442,14 +460,15 @@ function ImportTab() {
           <input type="file" accept=".xlsx,.xls,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(e) => void file(e.target.files?.[0])} />
           <span className="count">{xlsx ? `${xlsx.name} loaded` : csv ? `${csv.length.toLocaleString()} characters loaded` : 'or paste the CSV below'}</span>
           <label className="subtle" style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }} title="Re-exporting the whole sheet? Deals and draws the portal already holds are left alone; only new rows come in."><input type="checkbox" className="big" checked={skipExisting} onChange={(e) => { setSkipExisting(e.target.checked); setPreview(null); }} /> skip rows already in the portal</label>
+          {skipExisting && <label className="subtle" style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }} title="For rows already in the portal: take the sheet's Deal Status (Refinanced, Default, Slow Pay, Paid In Full) and Lender Paid Date. Money and the ledger are never touched."><input type="checkbox" className="big" checked={updateExisting} onChange={(e) => { setUpdateExisting(e.target.checked); setPreview(null); }} /> refresh status &amp; lender-paid on existing rows</label>}
           <button className="btn primary" disabled={(!csv.trim() && !xlsx) || busy} onClick={() => void run()}>{busy ? 'Working…' : 'Preview'}</button>
         </div>
         <textarea rows={4} value={csv} onChange={(e) => { setCsv(e.target.value); setXlsx(null); setPreview(null); }} placeholder="Deal ID,Parent Deal,Date,Business Name,Lender,Product,…" style={{ border: '1px solid var(--border-strong)', borderRadius: 8, padding: '8px 10px', background: 'var(--input-bg)', color: 'inherit', font: 'inherit', fontFamily: 'var(--mono)', fontSize: 12.5, resize: 'vertical', outline: 'none' }} />
-        {done && <div className="note" style={{ background: 'var(--teal-light)', borderColor: 'var(--teal-light-2)' }}>Imported <b>{done.deals}</b> deals, <b>{done.draws}</b> draws, <b>{done.clawbacks}</b> clawbacks and <b>{done.payoutLines}</b> paid ledger lines{done.runId ? ` (run ${done.runId})` : ''}. The master board, rep portals and payroll now reflect them.</div>}
+        {done && <div className="note" style={{ background: 'var(--teal-light)', borderColor: 'var(--teal-light-2)' }}>Imported <b>{done.deals}</b> deals{done.updated ? <>, refreshed <b>{done.updated}</b></> : null}, <b>{done.draws}</b> draws, <b>{done.clawbacks}</b> clawbacks and <b>{done.payoutLines}</b> paid ledger lines{done.runId ? ` (run ${done.runId})` : ''}. The master board, rep portals and payroll now reflect them.</div>}
         {preview && (
           <>
             <div className="grid-auto">
-              <section className="card"><div className="label">Deals</div><div className="metric">{preview.summary.deals}</div><div className="sub">{preview.summary.draws} draws · {preview.skipped} banner/total rows skipped{preview.skippedExisting ? ` · ${preview.skippedExisting} already in the portal` : ''}</div></section>
+              <section className="card"><div className="label">Deals</div><div className="metric">{preview.summary.deals}</div><div className="sub">{preview.summary.draws} draws · {preview.skipped} banner/total rows skipped{preview.skippedExisting ? ` · ${preview.skippedExisting} already in the portal` : ''}{preview.updated ? ` · ${preview.updated} to refresh` : ''}</div></section>
               <section className="card"><div className="label">Funded</div><div className="metric">{compact(preview.summary.funded)}</div></section>
               <section className="card"><div className="label">Already paid to reps</div><div className="metric">{preview.summary.withPayouts}</div><div className="sub">rows with a Rep Paid Date → ledger</div></section>
               <section className="card"><div className="label">Problems</div><div className={`metric ${preview.summary.problems ? 'neg' : 'pos'}`}>{preview.summary.problems}</div><div className="sub">{preview.summary.warnings} warning{preview.summary.warnings === 1 ? '' : 's'} · {preview.summary.clawbacks} clawbacks</div></section>
@@ -468,7 +487,7 @@ function ImportTab() {
                   <div className={`tr ${r.problems.length ? 'tint' : ''}`} key={r.line}>
                     <div className="td num subtle">{r.line}</div>
                     <div className="td num">{r.id || <span className="subtle">new</span>}</div>
-                    <div className="td">{r.action === 'skip' ? <Pill tone="grey">skip</Pill> : r.action === 'draw' ? <Pill tone="amber">draw of {r.parentId}</Pill> : <Pill tone="teal">deal</Pill>}</div>
+                    <div className="td">{r.action === 'skip' ? <Pill tone="grey">skip</Pill> : r.action === 'update' ? <Pill tone="amber">refresh · {r.changes?.join(', ')}</Pill> : r.action === 'draw' ? <Pill tone="amber">draw of {r.parentId}</Pill> : <Pill tone="teal">deal</Pill>}</div>
                     <div className="td ellipsis">{r.business}</div>
                     <div className="td ellipsis">{r.lender}</div>
                     <div className="td ellipsis">{r.product}</div>
@@ -600,6 +619,89 @@ function MissingRefsNotice({ missing, onAdded }: { missing: MissingRefs; onAdded
         ))}
         {missing.products.map((n) => <div key={n}>Product <b>{n}</b> — products need a commission basis, so add it under <b>Settings › Product rules</b> and preview again.</div>)}
       </div>
+    </div>
+  );
+}
+
+/* ---------- Portal: branding, notifications, security, lists ---------- */
+function PortalTab({ settings, run }: { settings: SettingsData; run: Run }) {
+  const { auth } = useSession();
+  const isSuper = !!auth?.superAdmin;
+  const [perm, setPerm] = useState(settings.permissions);
+  const [b, setB] = useState(settings.portal);
+  const [n, setN] = useState(settings.notifications);
+  const [sec, setSec] = useState(settings.security);
+  const [freq, setFreq] = useState(settings.lists.frequencies.join('\n'));
+  const [statuses, setStatuses] = useState(settings.lists.dealStatuses.join('\n'));
+  useEffect(() => { setB(settings.portal); setN(settings.notifications); setSec(settings.security); setPerm(settings.permissions); setFreq(settings.lists.frequencies.join('\n')); setStatuses(settings.lists.dealStatuses.join('\n')); }, [settings]);
+  const Toggle = ({ on, onChange, label, hint }: { on: boolean; onChange: (v: boolean) => void; label: string; hint: string }) => (
+    <label style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 12, alignItems: 'start', cursor: 'pointer', padding: '8px 0' }}>
+      <button type="button" className={`tog ${on ? 'on' : ''}`} onClick={() => onChange(!on)} aria-pressed={on} />
+      <span><b>{label}</b><div className="subtle" style={{ fontSize: 13.5 }}>{hint}</div></span>
+    </label>
+  );
+  const hours = Array.from({ length: 24 }, (_, h) => h);
+  const localOf = (utc: number) => { const d = new Date(Date.UTC(2026, 0, 1, utc)); return d.toLocaleTimeString([], { hour: 'numeric' }); };
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))', gap: 16, alignItems: 'start' }}>
+      <Card title="Names" extra="sidebar, sign-in screen, emails and authenticator apps">
+        <div className="form" style={{ gridTemplateColumns: '1fr' }}>
+          <label className="field"><span className="label">Company</span><input value={b.company} onChange={(e) => setB({ ...b, company: e.target.value })} /></label>
+          <label className="field"><span className="label">Portal name</span><input value={b.portal} onChange={(e) => setB({ ...b, portal: e.target.value })} /></label>
+          <label className="field"><span className="label">Support email</span><input type="email" value={b.supportEmail} onChange={(e) => setB({ ...b, supportEmail: e.target.value })} placeholder="ops@greystoneus.com" /><span className="subtle" style={{ fontSize: 13 }}>Shown to reps when something needs a human</span></label>
+        </div>
+        <button className="btn primary" style={{ marginTop: 12 }} onClick={() => void run('Names saved', () => post('/api/admin/settings/portal', b, 'PUT'))}>Save names</button>
+      </Card>
+      <Card title="Automatic emails" extra="each one is logged in the Audit log as mail.sent">
+        <Toggle on={n.statements} onChange={(v) => setN({ ...n, statements: v })} label="Statements when a run is approved" hint="Every rep with lines in the run gets their summary and a link to Pay history." />
+        <Toggle on={n.clawbacks} onChange={(v) => setN({ ...n, clawbacks: v })} label="Clawback notices" hint="Each rep with a slice hears the amount and that it nets against their next payout." />
+        <Toggle on={n.repQuestions} onChange={(v) => setN({ ...n, repQuestions: v })} label="Rep questions to admins" hint="When a rep asks about a deal from their drawer, admins get the note by email too." />
+        <Toggle on={n.renewalDigest} onChange={(v) => setN({ ...n, renewalDigest: v })} label="Daily renewal digest" hint="Refi-ready and Prospecting deals, to every admin, once a day." />
+        <label className="field" style={{ marginTop: 6 }}><span className="label">Digest goes out at</span>
+          <select value={n.digestHourUtc} onChange={(e) => setN({ ...n, digestHourUtc: Number(e.target.value) })} disabled={!n.renewalDigest}>{hours.map((h) => <option key={h} value={h}>{localOf(h)} your time · {h}:00 UTC</option>)}</select>
+        </label>
+        <label className="field" style={{ marginTop: 6 }}><span className="label">Playbooks run daily at</span>
+          <select value={n.playbookHourUtc} onChange={(e) => setN({ ...n, playbookHourUtc: Number(e.target.value) })}>{hours.map((h) => <option key={h} value={h}>{localOf(h)} your time · {h}:00 UTC</option>)}</select>
+          <span className="subtle" style={{ fontSize: 13 }}>Rules under Settings › Playbooks fire once a day after this hour; rep emails roll up into one message.</span>
+        </label>
+        <button className="btn primary" style={{ marginTop: 12 }} onClick={() => void run('Email settings saved', () => post('/api/admin/settings/notifications', n, 'PUT'))}>Save emails</button>
+        <div className="subtle" style={{ fontSize: 13, marginTop: 10 }}>The sending address and provider key live in the host's Secrets (MAIL_PROVIDER, MAIL_API_KEY, MAIL_FROM) — those never change from here.</div>
+      </Card>
+      <Card title="Permissions" extra="what reps may do from their portal">
+        <Toggle on={perm.merchantEmail} onChange={(v) => setPerm({ ...perm, merchantEmail: v })} label="Reps can email merchants from a deal" hint="Off hides the button for everyone. On, you can still block individual reps under Reps › Merchant email. Emails go out under the rep's name from the templates under Playbooks." />
+        <Toggle on={perm.contactEdit} onChange={(v) => setPerm({ ...perm, contactEdit: v })} label="Reps can fill in merchant details on their deals" hint="Contact name, email and phone — never the business name or the money. Saved to the merchant record and audited, so Merchants, renewals and playbooks see it too." />
+        <button className="btn primary" style={{ marginTop: 12 }} onClick={() => void run('Permissions saved', () => post('/api/admin/settings/permissions', perm, 'PUT'))}>Save permissions</button>
+      </Card>
+      <Card title="Security" extra={isSuper ? 'passwords and two-factor' : 'super admin only'}>
+        {!isSuper && <div className="note" style={{ marginBottom: 10 }}>Only a super admin can change these. Yours is read-only.</div>}
+        <Toggle on={sec.requireTotpForAdmins} onChange={(v) => isSuper && setSec({ ...sec, requireTotpForAdmins: v })} label="Require two-factor for admins" hint="Admins who have not set up an authenticator are held at a setup screen until they do. Turn on your own first." />
+        <label className="field" style={{ marginTop: 8 }}><span className="label">Sign out after inactivity</span>
+          <select value={sec.idleMinutes} disabled={!isSuper} onChange={(e) => setSec({ ...sec, idleMinutes: Number(e.target.value) })}>
+            {[[30, '30 minutes'], [60, '1 hour'], [120, '2 hours'], [240, '4 hours'], [480, '8 hours'], [0, 'Never']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+          <span className="subtle" style={{ fontSize: 13 }}>Everyone, admins included. A tab left open returns to the sign-in screen; the server refuses the old session too.</span>
+        </label>
+        <label className="field" style={{ marginTop: 8 }}><span className="label">Remember a device after a two-factor code</span>
+          <select value={sec.totpRememberDays} disabled={!isSuper} onChange={(e) => setSec({ ...sec, totpRememberDays: Number(e.target.value) })}>
+            {[[0, 'Ask every sign-in'], [1, '1 day'], [7, '7 days'], [14, '14 days'], [30, '30 days']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+          <span className="subtle" style={{ fontSize: 13 }}>The rep still types their password; the code is skipped on a remembered browser. Reps forget devices from the sidebar; resetting two-factor forgets them all.</span>
+        </label>
+        <button className="btn primary" style={{ marginTop: 12 }} disabled={!isSuper} onClick={() => void run('Security saved', () => post('/api/admin/settings/security', sec, 'PUT'))}>Save security</button>
+        <div className="subtle" style={{ fontSize: 13, marginTop: 10 }}>Passwords: 10+ characters with a letter and a number; five wrong tries lock an email for 15 minutes. Changing a password signs that account out everywhere else. Reps set and reset their own from the sign-in screen; you can also set one or send an invite under Reps.</div>
+        <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border-light)' }}>
+          <b>Backup</b>
+          <div className="subtle" style={{ fontSize: 13, margin: '4px 0 8px' }}>Every deal, payout, run, note, file, rule and audit row as one JSON file. Passwords and authenticator secrets are never included. Keep a copy off the host.</div>
+          {DEMO ? <span className="subtle" style={{ fontSize: 13 }}>Available on the live portal.</span> : <a className="btn" href="/api/admin/backup.json" download>Download everything</a>}
+        </div>
+      </Card>
+      <Card title="Dropdown lists" extra="one per line · commission statuses are fixed because they drive collection">
+        <div className="form" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+          <label className="field"><span className="label">Payment frequencies</span><textarea rows={6} value={freq} onChange={(e) => setFreq(e.target.value)} style={{ border: '1px solid var(--border-strong)', borderRadius: 8, padding: '8px 10px', background: 'var(--input-bg)', color: 'inherit', font: 'inherit' }} /></label>
+          <label className="field"><span className="label">Deal statuses</span><textarea rows={6} value={statuses} onChange={(e) => setStatuses(e.target.value)} style={{ border: '1px solid var(--border-strong)', borderRadius: 8, padding: '8px 10px', background: 'var(--input-bg)', color: 'inherit', font: 'inherit' }} /><span className="subtle" style={{ fontSize: 13 }}>Keep Performing, Prospecting and Refi Ready — the portal sets those itself.</span></label>
+        </div>
+        <button className="btn primary" style={{ marginTop: 12 }} onClick={() => void run('Lists saved', () => post('/api/admin/settings/lists', { frequencies: freq.split('\n').map((x) => x.trim()).filter(Boolean), dealStatuses: statuses.split('\n').map((x) => x.trim()).filter(Boolean) }, 'PUT'))}>Save lists</button>
+      </Card>
     </div>
   );
 }

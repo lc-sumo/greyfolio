@@ -17,6 +17,8 @@ export function toRep(r: RepRow): Rep {
     closerRate: r.closerRate,
     overrideRate: r.overrideRate,
     active: r.active,
+    superAdmin: r.superAdmin,
+    perms: r.perms ?? null,
   };
 }
 
@@ -81,6 +83,8 @@ export function toDeal(d: DealRow, draws: DealDrawRow[] = []): Deal {
     drawInitialPct: d.drawInitialPct,
     lineRate: d.lineRate,
     lineFee: d.lineFee,
+    referralPaidAt: d.referralPaidAt,
+    renewedFromId: d.renewedFromId,
     drawSubsequentPct: d.drawSubsequentPct,
     dealStatus: d.dealStatus,
     repPaid: d.repPaid,

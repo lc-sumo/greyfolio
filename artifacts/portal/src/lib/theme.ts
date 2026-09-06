@@ -37,13 +37,9 @@ export const PALETTES: Array<{ id: Palette; label: string; swatch: [string, stri
 ];
 const PKEY = 'gs-palette';
 export const DEFAULT_PALETTE: Palette = 'graphite';
+/** The palette picker is gone: every visitor gets Graphite. Stored choices from before are ignored. */
 export function readPalette(): Palette {
-  try {
-    const v = localStorage.getItem(PKEY);
-    return PALETTES.some((p) => p.id === v) ? (v as Palette) : DEFAULT_PALETTE;
-  } catch {
-    return DEFAULT_PALETTE;
-  }
+  return DEFAULT_PALETTE;
 }
 export function applyPalette(p: Palette): void {
   const root = document.documentElement;

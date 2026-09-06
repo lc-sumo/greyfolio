@@ -1,7 +1,7 @@
 import { commissionFor, type Clawback, type Deal, type DealDraw, type LedgerContext, type PayoutLine, type PayrollRun, type Rep, type Team } from '@greystone/commission';
 
 export const reps: Rep[] = [
-  { id: 'rep-leor', name: 'Leor', email: 'leor@greystoneus.com', role: 'admin', teamId: null, openerRate: 0.2, closerRate: 0.2, overrideRate: 0.05, active: true },
+  { id: 'rep-leor', name: 'Leor', email: 'leor@greystoneus.com', role: 'admin', teamId: null, openerRate: 0.2, closerRate: 0.2, overrideRate: 0.05, active: true, superAdmin: true },
   { id: 'rep-raymond-amato', name: 'Raymond Amato', email: 'raymond.amato@greystoneus.com', role: 'manager', teamId: 'team-a', openerRate: 0.2, closerRate: 0.2, overrideRate: 0.05, active: true },
   { id: 'rep-julian-ribak', name: 'Julian Ribak', email: 'julian.ribak@greystoneus.com', role: 'rep', teamId: 'team-a', openerRate: 0.35, closerRate: 0.35, overrideRate: 0.025, active: true },
   { id: 'rep-zach-sanders', name: 'Zach Sanders', email: 'zach.sanders@greystoneus.com', role: 'rep', teamId: 'team-b', openerRate: 0.4, closerRate: 0.4, overrideRate: 0.05, active: true },

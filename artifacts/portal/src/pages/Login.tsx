@@ -2,11 +2,15 @@ import { useState, type FormEvent } from 'react';
 import { api, ApiError, DEMO, post } from '../lib/api';
 import { useSession } from '../lib/session';
 
-type Mode = 'signin' | 'totp' | 'forgot' | 'sent';
+type Mode = 'signin' | 'totp' | 'forgot' | 'sent' | 'setup';
 
-export function Login({ oidc, devAuth, password: passwordAuth = true }: { oidc: boolean; devAuth: boolean; password?: boolean }) {
-  const { refresh } = useSession();
-  const [mode, setMode] = useState<Mode>('signin');
+export function Login({ oidc, devAuth, password: passwordAuth = true, setup = false }: { oidc: boolean; devAuth: boolean; password?: boolean; setup?: boolean }) {
+  const { refresh, signedOutWhy, clearSignedOut } = useSession();
+  const [mode, setMode] = useState<Mode>(setup && !DEMO ? 'setup' : 'signin');
+  const [remember, setRemember] = useState(true);
+  const [rememberDays, setRememberDays] = useState(7);
+  const [again, setAgain] = useState('');
+  const brand = window.__GS_BRAND__;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
@@ -31,10 +35,11 @@ export function Login({ oidc, devAuth, password: passwordAuth = true }: { oidc: 
     void guard(async () => {
       // With a password: email + password. Without one in a dev/demo build: the development sign-in.
       if (password || !devAuth) {
-        const r = await post<{ ok: boolean; totp?: boolean }>('/auth/password-login', { email, password });
+        const r = await post<{ ok: boolean; totp?: boolean; rememberDays?: number }>('/auth/password-login', { email, password });
         if (!r.ok && r.totp) {
           setMode('totp');
           setCode('');
+          setRememberDays(r.rememberDays ?? 0);
           return;
         }
       } else await api(`/auth/dev-login?email=${encodeURIComponent(email)}`);
@@ -45,7 +50,7 @@ export function Login({ oidc, devAuth, password: passwordAuth = true }: { oidc: 
   function submitCode(e: FormEvent) {
     e.preventDefault();
     void guard(async () => {
-      await post('/auth/totp', { code });
+      await post('/auth/totp', { code, remember: rememberDays > 0 && remember });
       await refresh();
     }, 'That code was not accepted');
   }
@@ -59,6 +64,15 @@ export function Login({ oidc, devAuth, password: passwordAuth = true }: { oidc: 
     }, 'Could not send a reset link');
   }
 
+  function firstAdmin(e: FormEvent) {
+    e.preventDefault();
+    if (password !== again) return setErr('The two passwords do not match');
+    void guard(async () => {
+      await post('/auth/setup', { email, password });
+      await refresh();
+    }, 'Could not finish setup');
+  }
+
   const linkBtn = (label: string, onClick: () => void) => (
     <button type="button" className="linkish" style={{ color: 'var(--teal)', padding: 0, font: 'inherit', fontWeight: 600 }} onClick={onClick}>{label}</button>
   );
@@ -66,7 +80,7 @@ export function Login({ oidc, devAuth, password: passwordAuth = true }: { oidc: 
   return (
     <div className="login">
       <div className="left">
-        <img src="/greystone-wordmark.png" alt="Greystone Merchant Partners" style={{ filter: 'brightness(0) invert(1)' }} />
+        <img src="/greystone-wordmark.png" alt={window.__GS_BRAND__?.company ?? 'Greystone Merchant Partners'} style={{ filter: 'brightness(0) invert(1)' }} />
         <h1>Every deal.<br />Every <em>dollar</em>.<br />No guessing.</h1>
         <div className="steps">
           <div><b>Reconcile</b><span>One ledger for every rep, every segment, every payout.</span></div>
@@ -75,11 +89,23 @@ export function Login({ oidc, devAuth, password: passwordAuth = true }: { oidc: 
         </div>
       </div>
       <div className="right">
-        {mode === 'totp' ? (
+        {mode === 'setup' ? (
+          <form onSubmit={firstAdmin}>
+            <h2>Set up the first admin</h2>
+            <div className="note">Nobody has a password yet. Enter the admin email from the roster and choose a password — this screen closes itself once any password exists.</div>
+            <input type="email" placeholder="leor@greystoneus.com" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus autoComplete="username" />
+            <input type="password" placeholder="Password (10+ chars, a letter and a number)" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
+            <input type="password" placeholder="Type it again" value={again} onChange={(e) => setAgain(e.target.value)} autoComplete="new-password" />
+            <button className="btn primary big" disabled={busy || !email || password.length < 10 || !again}>{busy ? 'Setting up…' : 'Create password and sign in'}</button>
+            <div className="subtle" style={{ fontSize: 13 }}>{linkBtn('I already have a password', () => { setMode('signin'); setErr(''); })}</div>
+            {err && <div className="err">{err}</div>}
+          </form>
+        ) : mode === 'totp' ? (
           <form onSubmit={submitCode}>
             <h2>Enter your code</h2>
             <div className="note">Open your authenticator app and type the 6-digit code for <b>{email}</b>.</div>
             <input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9 ]*" placeholder="123 456" value={code} onChange={(e) => setCode(e.target.value)} autoFocus />
+            {rememberDays > 0 && <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14, cursor: 'pointer' }}><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Remember this device for {rememberDays} day{rememberDays === 1 ? '' : 's'} — no code needed here until then</label>}
             <button className="btn primary big" disabled={busy || code.replace(/\s/g, '').length !== 6}>{busy ? 'Checking…' : 'Continue'}</button>
             <div className="subtle" style={{ fontSize: 13 }}>{linkBtn('Start over', () => { setMode('signin'); setCode(''); setErr(''); })} · Lost your phone? Ask your admin to reset two-factor in Settings › Reps.</div>
             {err && <div className="err">{err}</div>}
@@ -105,6 +131,7 @@ export function Login({ oidc, devAuth, password: passwordAuth = true }: { oidc: 
         ) : (
           <form onSubmit={signIn}>
             <h2>Sign in</h2>
+            {signedOutWhy && <div className="note" style={{ background: 'var(--amber-light)', borderColor: 'var(--amber-light-3)', color: 'var(--amber-deep)' }}>{signedOutWhy} <button type="button" className="linkish" style={{ color: 'inherit', padding: '0 0 0 6px', font: 'inherit' }} onClick={clearSignedOut}>✕</button></div>}
             {oidc && (
               <a className="btn primary big" style={{ display: 'grid', placeItems: 'center' }} href={`/auth/login?returnTo=${encodeURIComponent(window.location.pathname)}`}>
                 Continue with Greystone SSO
@@ -165,7 +192,7 @@ export function ResetPassword({ token, onDone }: { token: string; onDone: () => 
   return (
     <div className="login">
       <div className="left">
-        <img src="/greystone-wordmark.png" alt="Greystone Merchant Partners" style={{ filter: 'brightness(0) invert(1)' }} />
+        <img src="/greystone-wordmark.png" alt={window.__GS_BRAND__?.company ?? 'Greystone Merchant Partners'} style={{ filter: 'brightness(0) invert(1)' }} />
         <h1>Choose a new<br /><em>password</em>.</h1>
       </div>
       <div className="right">

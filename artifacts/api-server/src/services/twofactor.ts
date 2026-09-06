@@ -2,6 +2,7 @@
 import { generateTotpSecret, otpauthUrl, verifyTotp } from '../auth/totp.js';
 import { HttpError } from '../http-error.js';
 import type { Repo } from '../repo.js';
+import { actorOf, requireSuper } from './superadmin.js';
 
 export interface TotpStatus {
   enabled: boolean;
@@ -22,7 +23,8 @@ export async function beginTotp(repo: Repo, repId: string, appName: string): Pro
   if (current.enabled) throw new HttpError(400, 'Two-factor is already on — turn it off before setting up a new authenticator');
   const secret = generateTotpSecret();
   await repo.setTotp(repId, { secret, enabled: false });
-  return { secret, otpauth: otpauthUrl({ issuer: appName, account: rep.email, secret }) };
+  const portal = (await repo.getSettings()).portal;
+  return { secret, otpauth: otpauthUrl({ issuer: portal.company || appName, account: rep.email, secret }) };
 }
 
 /** The first correct code proves the authenticator holds the secret; only then does sign-in start asking for codes. */
@@ -41,6 +43,7 @@ export async function disableTotp(repo: Repo, repId: string, code: unknown): Pro
   if (!t.secret) return;
   if (t.enabled && !verifyTotp(t.secret, code)) throw new HttpError(400, 'Enter a current code from your authenticator to turn two-factor off');
   await repo.setTotp(repId, { secret: null, enabled: false });
+  await repo.deleteTrustedDevices(repId);
   await repo.writeAudit({ actorRepId: repId, action: 'rep.totp', targetRepId: null, path: '/api/me/totp/disable', detail: { enabled: false } });
 }
 
@@ -48,6 +51,8 @@ export async function disableTotp(repo: Repo, repId: string, code: unknown): Pro
 export async function resetTotp(repo: Repo, repId: string, actorRepId: string): Promise<void> {
   const rep = await repo.findRep(repId);
   if (!rep) throw new HttpError(404, 'Rep not found');
+  if (repId !== actorRepId && (rep.role === 'admin' || rep.superAdmin)) requireSuper(await actorOf(repo, actorRepId), "reset another admin's two-factor");
   await repo.setTotp(repId, { secret: null, enabled: false });
-  await repo.writeAudit({ actorRepId, action: 'rep.totp', targetRepId: repId, path: `/api/admin/reps/${repId}/totp`, detail: { reset: true } });
+  await repo.deleteTrustedDevices(repId);
+  await repo.writeAudit({ actorRepId, action: 'rep.totp', targetRepId: repId, path: `/api/admin/reps/${repId}/totp`, detail: { reset: true, devicesForgotten: true } });
 }

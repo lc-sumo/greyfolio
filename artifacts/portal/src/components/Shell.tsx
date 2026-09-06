@@ -1,8 +1,7 @@
-import { PALETTES, applyPalette, applyTheme, readPalette, readTheme, type Palette, type Theme } from '../lib/theme';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { api, post, type MeInfo, type TotpStatus } from '../lib/api';
+import { api, post, type MeInfo, type TotpStatus, type TrustedDeviceView } from '../lib/api';
 import { initials, type Period } from '../lib/format';
 import { useSession } from '../lib/session';
 
@@ -10,8 +9,6 @@ const PERIODS: Period[] = ['7d', '30d', 'QTD', 'YTD'];
 
 export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: string; title: string; showPeriod?: boolean; children: ReactNode }) {
   const { auth, viewAs, setViewAs: setViewAsRaw, period, setPeriod, logout, toast } = useSession();
-  const [theme, setTheme] = useState<Theme>(() => readTheme());
-  const [palette, setPalette] = useState<Palette>(() => readPalette());
   const navigate = useNavigate();
   // Changing whose portal is rendered always starts from that portal's home.
   const setViewAs = (id: string | null) => { setViewAsRaw(id); navigate('/'); };
@@ -31,8 +28,8 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
         <div className="brand">
           <img src="/greystone-icon-white.png" alt="" />
           <div>
-            <b>Greystone</b>
-            <span>Commission portal</span>
+            <b>{auth?.branding?.company?.split(' ')[0] ?? 'Greystone'}</b>
+            <span>{auth?.branding?.portal ?? 'Commission portal'}</span>
           </div>
         </div>
         <nav className="nav">
@@ -53,6 +50,7 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
               {user.role === 'admin' && <NavLink to="/merchants"><i className="dot" />Merchants</NavLink>}
               {user.role === 'admin' && <NavLink to="/payroll"><i className="dot" />Run payroll</NavLink>}
               {user.role === 'admin' && <NavLink to="/renewals"><i className="dot" />Renewals</NavLink>}
+              {user.role === 'admin' && <NavLink to="/books"><i className="dot" />Books</NavLink>}
               {user.role === 'admin' && <NavLink to="/roster"><i className="dot" />Rep roster</NavLink>}
               {user.role === 'admin' && <NavLink to="/settings"><i className="dot" />Settings</NavLink>}
               {user.role === 'admin' && <NavLink to="/audit"><i className="dot" />Audit log</NavLink>}
@@ -71,20 +69,11 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
               </select>
             </label>
           )}
-          <div className="theme">
-            <span className="label" style={{ color: 'var(--navy-text-3)' }}>Appearance</span>
-            <div className="seg" role="group" aria-label="Theme">
-              {(['light', 'dark', 'auto'] as Theme[]).map((t) => <button key={t} type="button" className={theme === t ? 'on' : ''} onClick={() => { setTheme(t); applyTheme(t); }}>{t === 'auto' ? 'System' : t[0]!.toUpperCase() + t.slice(1)}</button>)}
-            </div>
-            <div className="palettes" role="group" aria-label="Palette">
-              {PALETTES.map((p) => <button key={p.id} type="button" className={palette === p.id ? 'on' : ''} title={p.label} onClick={() => { setPalette(p.id); applyPalette(p.id); }}><span className="sw">{p.swatch.map((c, i) => <i key={i} style={{ background: c }} />)}</span><span>{p.label}</span></button>)}
-            </div>
-          </div>
           <div className="who">
             <div className="avatar">{initials(user.name)}</div>
             <div className="ellipsis">
               <b className="ellipsis">{user.name}</b>
-              <span>{user.role === 'admin' ? 'Master' : user.role === 'manager' ? 'Team lead' : 'Rep'}</span>
+              <span>{auth?.superAdmin ? 'Super admin' : user.role === 'admin' ? 'Master' : user.role === 'manager' ? 'Team lead' : 'Rep'}</span>
             </div>
           </div>
           {(!viewAs || viewAs === user.repId) && <ChangePassword />}
@@ -124,11 +113,11 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
 }
 
 /** Change my own password from the sidebar. Hidden under View as. */
-function TwoFactor() {
+export function TwoFactor({ forced = false }: { forced?: boolean } = {}) {
   const { notify } = useSession();
   const qc = useQueryClient();
   const status = useQuery({ queryKey: ['me-totp'], queryFn: () => api<TotpStatus>('/api/me/totp') });
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(forced);
   const [setup, setSetup] = useState<{ secret: string; otpauth: string } | null>(null);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -143,6 +132,7 @@ function TwoFactor() {
       {enabled ? (
         <>
           <div style={{ fontSize: 13, color: 'var(--navy-text-3)' }}>Two-factor is <b style={{ color: '#fff' }}>on</b>. Enter a current code to turn it off.</div>
+          <Devices />
           <input inputMode="numeric" placeholder="Code from your app" value={code} onChange={(e) => setCode(e.target.value)} />
           <div style={{ display: 'flex', gap: 6 }}>
             <button className="btn" style={{ height: 30, padding: '0 10px' }} disabled={busy || code.replace(/\s/g, '').length !== 6} onClick={() => go(() => post('/api/me/totp/disable', { code }).then(() => undefined), 'Two-factor turned off')}>Turn off</button>
@@ -173,6 +163,30 @@ function TwoFactor() {
   );
 }
 
+/** Browsers remembered after a code: where and when, with a forget button. */
+function Devices() {
+  const { notify } = useSession();
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['me-devices'], queryFn: () => api<{ devices: TrustedDeviceView[] }>('/api/me/devices') });
+  const list = q.data?.devices ?? [];
+  const ago = (iso: string) => { const d = Math.round((Date.now() - Date.parse(iso)) / 86_400_000); return d <= 0 ? 'today' : d === 1 ? 'yesterday' : `${d}d ago`; };
+  const forget = async (id: string | null) => {
+    try { await post(id ? `/api/me/devices/${id}` : '/api/me/devices', {}, 'DELETE'); await qc.invalidateQueries({ queryKey: ['me-devices'] }); notify(id ? 'Device forgotten — it will ask for a code next time' : 'Every device forgotten'); } catch (e) { notify(e instanceof Error ? e.message : 'Could not forget'); }
+  };
+  return (
+    <div style={{ fontSize: 12.5, color: 'var(--navy-text-3)', display: 'grid', gap: 4, margin: '4px 0 6px' }}>
+      <div style={{ color: 'var(--navy-text-2)', fontWeight: 600 }}>Remembered devices{list.length ? ` · ${list.length}` : ''}</div>
+      {list.length === 0 ? <div>None — every sign-in asks for a code.</div> : list.map((d) => (
+        <div key={d.id} style={{ display: 'flex', gap: 6, alignItems: 'baseline', justifyContent: 'space-between' }}>
+          <span><b style={{ color: '#fff', fontWeight: 600 }}>{d.label}</b>{d.current ? ' (this one)' : ''}<div>{d.location ?? d.ip ?? '—'} · used {ago(d.lastUsedAt)} · until {new Date(d.expiresAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div></span>
+          <button type="button" className="linkish" style={{ padding: 0 }} onClick={() => void forget(d.id)}>forget</button>
+        </div>
+      ))}
+      {list.length > 1 && <button type="button" className="linkish" style={{ padding: 0, justifySelf: 'start' }} onClick={() => void forget(null)}>forget every device</button>}
+    </div>
+  );
+}
+
 function ChangePassword() {
   const { notify } = useSession();
   const [open, setOpen] = useState(false);
@@ -189,5 +203,29 @@ function ChangePassword() {
         <button type="button" className="btn" style={{ height: 30, padding: '0 10px' }} onClick={() => setOpen(false)}>Cancel</button>
       </div>
     </form>
+  );
+}
+
+/** Settings › Portal can require two-factor for admins: until enrolled, this is the whole app. */
+export function EnrollGate() {
+  const { auth, logout, refresh } = useSession();
+  return (
+    <div className="login">
+      <div className="left">
+        <img src="/greystone-wordmark.png" alt={auth?.branding?.company ?? 'Greystone'} style={{ filter: 'brightness(0) invert(1)' }} />
+        <h1>One more<br /><em>step</em>.</h1>
+        <div className="steps"><div><b>Two-factor</b><span>This portal requires an authenticator app for admin accounts. Set yours up to continue.</span></div></div>
+      </div>
+      <div className="right">
+        <form onSubmit={(e) => e.preventDefault()} style={{ background: 'var(--navy)', borderRadius: 12, padding: 20 }}>
+          <h2 style={{ color: '#fff' }}>Set up two-factor sign-in</h2>
+          <TwoFactor forced />
+          <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+            <button type="button" className="btn primary" onClick={() => void refresh()}>I have turned it on</button>
+            <button type="button" className="linkish" onClick={() => void logout()}>Sign out</button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }

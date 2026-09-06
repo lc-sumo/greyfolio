@@ -1,7 +1,6 @@
-import { ReplitConnectors } from '@replit/connectors-sdk';
-
 /**
- * Outbound email. One tiny interface, three providers:
+ * Outbound email. One tiny interface, four providers:
+ *  - sendgrid — HTTPS API (MAIL_PROVIDER=sendgrid, MAIL_API_KEY=SG.…)
  *  - resend   — HTTPS API (MAIL_PROVIDER=resend, MAIL_API_KEY=re_…)
  *  - postmark — HTTPS API (MAIL_PROVIDER=postmark, MAIL_API_KEY=server token)
  *  - log      — prints the message as a JSON log line (development default)
@@ -16,6 +15,8 @@ export interface Mail {
   subject: string;
   text: string;
   html?: string;
+  /** Replies go here instead of MAIL_FROM (merchant emails sent on a rep's behalf). */
+  replyTo?: string;
 }
 
 export interface MailResult {
@@ -40,12 +41,20 @@ export interface MailConfig {
 export function mailConfigFromEnv(env: NodeJS.ProcessEnv, production: boolean): MailConfig {
   const raw = (env.MAIL_PROVIDER ?? (production ? 'off' : 'log')).toLowerCase();
   const provider = raw === 'sendgrid' || raw === 'resend' || raw === 'postmark' || raw === 'log' || raw === 'off' ? raw : 'off';
-  const apiKey = env.MAIL_API_KEY || null;
-  if ((provider === 'resend' || provider === 'postmark') && !apiKey) throw new Error(`MAIL_PROVIDER=${provider} needs MAIL_API_KEY`);
-  return { provider, apiKey, from: env.MAIL_FROM || 'Greystone Funded Portal <portal@greystoneus.com>' };
+  // SendGrid's own variable name works too, so a Replit integration needs no renaming.
+  const apiKey = env.MAIL_API_KEY || (provider === 'sendgrid' ? env.SENDGRID_API_KEY : undefined) || null;
+  if ((provider === 'sendgrid' || provider === 'resend' || provider === 'postmark') && !apiKey) throw new Error(`MAIL_PROVIDER=${provider} needs MAIL_API_KEY`);
+  return { provider, apiKey, from: env.MAIL_FROM || 'Greystone Commission Portal <portal@greystoneus.com>' };
 }
 
 const list = (to: string | string[]) => (Array.isArray(to) ? to : [to]);
+
+/** "Name <addr>" or a bare address → SendGrid's {email, name}. */
+export function parseFrom(from: string): { email: string; name?: string } {
+  const m = /^\s*(?:"?([^"<]*)"?\s*)?<([^>]+)>\s*$/.exec(from);
+  if (m) return { email: m[2]!.trim(), ...(m[1]?.trim() ? { name: m[1]!.trim() } : {}) };
+  return { email: from.trim() };
+}
 
 /** Plain-text bodies become minimal HTML so links stay clickable everywhere. */
 export function textToHtml(text: string): string {
@@ -71,14 +80,13 @@ export function mailerFor(cfg: MailConfig): Mailer {
       kind: 'sendgrid',
       live: true,
       async send(m) {
-        const fromEmail = cfg.from.match(/<([^>]+)>/)?.[1] ?? cfg.from;
-        const fromName = cfg.from.split('<')[0]?.trim() || undefined;
-        const res = await new ReplitConnectors().proxy('sendgrid', '/v3/mail/send', {
+        const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: { authorization: `Bearer ${cfg.apiKey}`, 'content-type': 'application/json' },
           body: JSON.stringify({
             personalizations: [{ to: list(m.to).map((email) => ({ email })) }],
-            from: { email: fromEmail, name: fromName },
+            from: parseFrom(cfg.from),
+            ...(m.replyTo ? { reply_to: { email: m.replyTo } } : {}),
             subject: m.subject,
             content: [
               { type: 'text/plain', value: m.text },
@@ -86,9 +94,9 @@ export function mailerFor(cfg: MailConfig): Mailer {
             ],
           }),
         });
-        return res.ok
-          ? { ok: true, id: res.headers.get('x-message-id') ?? undefined }
-          : { ok: false, error: `SendGrid responded ${res.status}` };
+        if (res.ok) return { ok: true, id: res.headers.get('x-message-id') ?? undefined };
+        const body = (await res.json().catch(() => ({}))) as { errors?: Array<{ message?: string }> };
+        return { ok: false, error: body.errors?.map((e) => e.message).filter(Boolean).join('; ') || `SendGrid responded ${res.status}` };
       },
     };
   }
@@ -100,7 +108,7 @@ export function mailerFor(cfg: MailConfig): Mailer {
         const res = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: { authorization: `Bearer ${cfg.apiKey}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ from: cfg.from, to: list(m.to), subject: m.subject, text: m.text, html: m.html ?? textToHtml(m.text) }),
+          body: JSON.stringify({ from: cfg.from, to: list(m.to), subject: m.subject, text: m.text, html: m.html ?? textToHtml(m.text), ...(m.replyTo ? { reply_to: m.replyTo } : {}) }),
         });
         const body = (await res.json().catch(() => ({}))) as { id?: string; message?: string };
         return res.ok ? { ok: true, id: body.id } : { ok: false, error: body.message ?? `Resend responded ${res.status}` };
@@ -114,7 +122,7 @@ export function mailerFor(cfg: MailConfig): Mailer {
       const res = await fetch('https://api.postmarkapp.com/email', {
         method: 'POST',
         headers: { 'x-postmark-server-token': cfg.apiKey!, accept: 'application/json', 'content-type': 'application/json' },
-        body: JSON.stringify({ From: cfg.from, To: list(m.to).join(','), Subject: m.subject, TextBody: m.text, HtmlBody: m.html ?? textToHtml(m.text), MessageStream: 'outbound' }),
+        body: JSON.stringify({ From: cfg.from, To: list(m.to).join(','), Subject: m.subject, TextBody: m.text, HtmlBody: m.html ?? textToHtml(m.text), MessageStream: 'outbound', ...(m.replyTo ? { ReplyTo: m.replyTo } : {}) }),
       });
       const body = (await res.json().catch(() => ({}))) as { MessageID?: string; Message?: string };
       return res.ok ? { ok: true, id: body.MessageID } : { ok: false, error: body.Message ?? `Postmark responded ${res.status}` };

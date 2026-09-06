@@ -1,5 +1,6 @@
 import type { Clawback, Deal, DealDraw, LedgerContext, PayoutLine, PayrollRun, Rep, Team, WeeklySchedule } from '@greystone/commission';
-import type { AuditEntry, DealFile, DealNote, DealPatch, PasswordReset, PayoutCommit, Repo, Settings, TotpState } from './repo.js';
+import { NOTIFICATION_DEFAULTS, PERMISSION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AuditEntry, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Repo, type RepFile, type RepTask, type Settings, type TotpState, type TrustedDevice } from './repo.js';
+import { requestMeta } from './auth/request-context.js';
 
 export interface MemoryData {
   reps: Rep[];
@@ -8,7 +9,7 @@ export interface MemoryData {
   deals: Deal[];
   lines: PayoutLine[];
   clawbacks: Clawback[];
-  settings: Settings;
+  settings: Omit<Settings, 'portal' | 'notifications' | 'security' | 'templates' | 'permissions'> & Partial<Pick<Settings, 'portal' | 'notifications' | 'security' | 'templates' | 'permissions'>>;
 }
 
 /** In-memory Repo over plain arrays. Mutates the arrays it is given. */
@@ -20,7 +21,113 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
   const totp = new Map<string, TotpState>();
   const notes: DealNote[] = [];
   const files: DealFile[] = [];
+  const repFiles: RepFile[] = [];
+  const cutoffs = new Map<string, string>();
+  const calendarTokens = new Map<string, string>();
+  const playbooks: Playbook[] = [];
+  const firings: PlaybookFiring[] = [];
+  const tasks: RepTask[] = [];
+  const devices: TrustedDevice[] = [];
   return {
+    async listTrustedDevices(repId) {
+      return devices.filter((d) => d.repId === repId).map((d) => ({ ...d })).sort((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt));
+    },
+    async findTrustedDevice(tokenHash) {
+      return devices.find((d) => d.tokenHash === tokenHash) ?? null;
+    },
+    async insertTrustedDevice(d) {
+      devices.push({ ...d });
+    },
+    async touchTrustedDevice(id, patch) {
+      const d = devices.find((x) => x.id === id);
+      if (d) Object.assign(d, patch);
+    },
+    async deleteTrustedDevice(id) {
+      const i = devices.findIndex((x) => x.id === id);
+      if (i >= 0) devices.splice(i, 1);
+    },
+    async deleteTrustedDevices(repId) {
+      for (let i = devices.length - 1; i >= 0; i--) if (devices[i]!.repId === repId) devices.splice(i, 1);
+    },
+    async listAllNotes() {
+      return [...notes];
+    },
+    async listAllFiles() {
+      return [...files];
+    },
+    async listAllRepFiles() {
+      return [...repFiles];
+    },
+    async getSessionCutoff(repId) {
+      return cutoffs.get(repId) ?? null;
+    },
+    async setSessionCutoff(repId, at) {
+      cutoffs.set(repId, at);
+    },
+    async getCalendarToken(repId) {
+      return calendarTokens.get(repId) ?? null;
+    },
+    async setCalendarToken(repId, token) {
+      if (token) calendarTokens.set(repId, token);
+      else calendarTokens.delete(repId);
+    },
+    async findRepByCalendarToken(token) {
+      for (const [repId, t] of calendarTokens) if (t === token) return data.reps.find((r) => r.id === repId) ?? null;
+      return null;
+    },
+    async listRepFiles(repId) {
+      return repFiles.filter((f) => f.repId === repId).map(({ data: _d, ...meta }) => meta).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    },
+    async getRepFile(id) {
+      return repFiles.find((f) => f.id === id) ?? null;
+    },
+    async insertRepFile(f) {
+      repFiles.push({ ...f });
+    },
+    async deleteRepFile(id) {
+      const i = repFiles.findIndex((f) => f.id === id);
+      if (i >= 0) repFiles.splice(i, 1);
+    },
+    async listPlaybooks() {
+      return playbooks.map((p) => ({ ...p })).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    },
+    async insertPlaybook(p) {
+      playbooks.push({ ...p });
+    },
+    async updatePlaybook(id, patch) {
+      const p = playbooks.find((x) => x.id === id);
+      if (!p) throw new Error(`No playbook ${id}`);
+      Object.assign(p, patch, { updatedAt: new Date().toISOString() });
+    },
+    async deletePlaybook(id) {
+      const i = playbooks.findIndex((x) => x.id === id);
+      if (i >= 0) playbooks.splice(i, 1);
+      for (let k = firings.length - 1; k >= 0; k--) if (firings[k]!.playbookId === id) firings.splice(k, 1);
+      for (const t of tasks) if (t.playbookId === id) t.playbookId = null;
+    },
+    async listFirings(opts = {}) {
+      return firings
+        .filter((f) => (!opts.playbookId || f.playbookId === opts.playbookId) && (!opts.dealId || f.dealId === opts.dealId))
+        .sort((a, b) => b.firedAt.localeCompare(a.firedAt))
+        .slice(0, opts.limit ?? 500);
+    },
+    async insertFiring(f) {
+      firings.push({ ...f });
+    },
+    async listTasks(filter = {}) {
+      return tasks
+        .filter((t) => (!filter.repId || t.repId === filter.repId) && (!filter.dealId || t.dealId === filter.dealId) && (!filter.status || t.status === filter.status))
+        .map((t) => ({ ...t }))
+        .sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.createdAt.localeCompare(b.createdAt));
+    },
+    async insertTask(t) {
+      tasks.push({ ...t });
+    },
+    async updateTask(id, patch) {
+      const t = tasks.find((x) => x.id === id);
+      if (!t) throw new Error(`No task ${id}`);
+      Object.assign(t, patch);
+    },
     async createPasswordReset(r) {
       resets.push({ ...r });
     },
@@ -98,10 +205,11 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
       return ((data.settings as unknown as Record<string, unknown>)[key] as T) ?? null;
     },
     async getSettings() {
-      return data.settings;
+      const s = data.settings;
+      return { ...s, portal: { ...PORTAL_DEFAULTS, ...(s.portal ?? {}) }, notifications: { ...NOTIFICATION_DEFAULTS, ...(s.notifications ?? {}) }, security: { ...SECURITY_DEFAULTS, ...(s.security ?? {}) }, templates: { ...TEMPLATE_DEFAULTS, ...(s.templates ?? {}) }, permissions: { ...PERMISSION_DEFAULTS, ...(s.permissions ?? {}) } };
     },
     async writeAudit(e) {
-      audit.push({ ...e, at: new Date().toISOString() });
+      audit.push({ ...e, ip: e.ip ?? requestMeta()?.ip ?? null, at: new Date().toISOString() });
     },
     async listAudit(limit = 100, offset = 0) {
       const all = [...audit].reverse();

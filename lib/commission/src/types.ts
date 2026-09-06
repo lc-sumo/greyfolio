@@ -46,6 +46,8 @@ export interface Lender {
    * Subsequent draws pay the draw % only. Fraction; absent = no line fee.
    */
   locLineRate?: number;
+  /** Days after funding by which this lender pays commission; absent = Settings › thresholds › payment overdue. */
+  paymentTermsDays?: number;
   /** false = retired: kept for history, hidden from new-deal pickers. */
   active?: boolean;
 }
@@ -144,6 +146,15 @@ export interface Rep {
   /** `null` = fall back to the team's override rate. */
   overrideRate: number | null;
   active: boolean;
+  /** Owner tier: the only role that can create admins, change admins, or change security settings. */
+  superAdmin?: boolean;
+  /** Per-rep switches; absent = allowed (subject to the portal-wide setting). */
+  perms?: RepPerms | null;
+}
+
+export interface RepPerms {
+  /** May email merchants from a deal drawer. */
+  merchantEmail?: boolean;
 }
 
 export interface Team {
@@ -181,6 +192,10 @@ export interface Deal {
   /** Groups multi-funding facilities; defaults to own id. */
   opportunityId: string;
   parentId: string | null;
+  /** The deal this one renewed or refinanced, if any (renewal chain). */
+  renewedFromId?: string | null;
+  /** Date the referral partner's fee was paid out; null or missing = still owed. */
+  referralPaidAt?: string | null;
   /** Funded date, `YYYY-MM-DD`. Never in the future. */
   date: string;
   business: string;

@@ -8,6 +8,8 @@ import { sessionUserFrom } from './session.js';
 import { verifyTotp } from './totp.js';
 import type { Mailer } from '../services/mail.js';
 import { beginPasswordReset, completePasswordReset, resetThrottled } from '../services/passwords.js';
+import { rememberDevice, trustedDeviceFor } from './devices.js';
+import { requestMeta } from './request-context.js';
 
 /** Lazily discovered OIDC configuration (issuer metadata is fetched once). */
 export function oidcClient(config: AppConfig) {
@@ -104,9 +106,18 @@ export function authRouter(config: AppConfig, repo: Repo, mailer: Mailer): Route
       clearLoginFailures(email);
       const totp = await repo.getTotp(rep.id);
       if (totp.enabled) {
+        // A browser remembered after an earlier code skips the second step until the device expires.
+        const device = await trustedDeviceFor(repo, req, rep.id);
+        if (device) {
+          await repo.touchTrustedDevice(device.id, { lastUsedAt: new Date().toISOString(), ip: requestMeta()?.ip ?? null });
+          await signIn(req, email);
+          await repo.writeAudit({ actorRepId: rep.id, action: 'rep.device', targetRepId: null, path: `${req.baseUrl}${req.path}`, detail: { deviceId: device.id, label: device.label, skippedCode: true } });
+          return res.json({ ok: true, user: req.session?.user, trustedDevice: device.label });
+        }
         // Password is right; the authenticator code is still owed. Nothing is signed in yet.
         req.session = { pending2fa: { repId: rep.id, email, at: Date.now() } };
-        return res.json({ ok: false, totp: true });
+        const days = (await repo.getSettings()).security.totpRememberDays;
+        return res.json({ ok: false, totp: true, rememberDays: days });
       }
       await signIn(req, email);
       res.json({ ok: true, user: req.session?.user });
@@ -127,6 +138,8 @@ export function authRouter(config: AppConfig, repo: Repo, mailer: Mailer): Route
       }
       clearLoginFailures(key);
       await signIn(req, pending.email);
+      const days = (await repo.getSettings()).security.totpRememberDays;
+      if (days > 0 && req.body?.remember !== false) await rememberDevice(repo, req, res, pending.repId, days, config.secureCookies, requestMeta()?.ip ?? null);
       res.json({ ok: true, user: req.session?.user });
     });
 
@@ -170,13 +183,37 @@ export function authRouter(config: AppConfig, repo: Repo, mailer: Mailer): Route
     res.json({ ok: true, redirect: null });
   });
 
-  /** Public: which sign-in methods the login screen should offer. */
-  r.get('/methods', (_req, res) => res.json({ oidc: !!config.oidc, devAuth: config.devAuth, password: config.passwordAuth }));
+  /** Public: which sign-in methods the login screen should offer, the portal's names, and whether first-run setup is still open. */
+  r.get('/methods', async (_req, res) => {
+    const [settings, withPw] = await Promise.all([repo.getSettings(), repo.repsWithPassword()]);
+    res.json({ oidc: !!config.oidc, devAuth: config.devAuth, password: config.passwordAuth, branding: settings.portal, setup: config.passwordAuth && !config.oidc && !config.devAuth && withPw.length === 0 });
+  });
 
-  r.get('/me', (req, res) => {
+  /**
+   * First run: nobody has a password yet and there is no SSO, so the seeded
+   * admin sets their own from the sign-in screen. Closes itself the moment
+   * any password exists, so it can never be used to take over a live portal.
+   */
+  if (config.passwordAuth) {
+    r.post('/setup', async (req, res) => {
+      if (config.oidc || (await repo.repsWithPassword()).length > 0) throw new HttpError(403, 'Setup is already complete — sign in, or use Forgot password');
+      const email = String(req.body?.email ?? '').trim().toLowerCase();
+      const rep = await repo.findRepByEmail(email);
+      if (!rep || !rep.active || rep.role !== 'admin') throw new HttpError(403, 'Enter the email of the admin on the roster');
+      const { setRepPassword } = await import('../services/passwords.js');
+      await setRepPassword(repo, rep.id, req.body?.password, rep.id);
+      await signIn(req, email);
+      res.status(201).json({ ok: true, user: req.session?.user });
+    });
+  }
+
+  r.get('/me', async (req, res) => {
     const u = currentUser(req);
     if (!u) throw new HttpError(401, 'Sign in required');
-    res.json({ user: u, canViewAs: u.role === 'admin' || u.role === 'manager', oidc: !!config.oidc, devAuth: config.devAuth, password: config.passwordAuth });
+    const settings = await repo.getSettings();
+    const mustEnrollTotp = u.role === 'admin' && settings.security.requireTotpForAdmins && !(await repo.getTotp(u.repId)).enabled;
+    const me = await repo.findRep(u.repId);
+    res.json({ user: u, canViewAs: u.role === 'admin' || u.role === 'manager', oidc: !!config.oidc, devAuth: config.devAuth, password: config.passwordAuth, branding: settings.portal, mustEnrollTotp, idleMinutes: settings.security.idleMinutes, superAdmin: !!me?.superAdmin, canEmailMerchants: settings.permissions.merchantEmail && me?.perms?.merchantEmail !== false, canEditContacts: settings.permissions.contactEdit });
   });
 
   return r;

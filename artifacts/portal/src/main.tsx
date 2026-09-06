@@ -9,6 +9,7 @@ import { Clawbacks } from './pages/Clawbacks';
 import { Dashboard } from './pages/Dashboard';
 import { Deals } from './pages/Deals';
 import { Login, ResetPassword } from './pages/Login';
+import { EnrollGate } from './components/Shell';
 import { MasterDeals } from './pages/MasterDeals';
 import { Merchants } from './pages/Merchants';
 import { Overview } from './pages/Overview';
@@ -16,6 +17,7 @@ import { Payroll } from './pages/Payroll';
 import { Roster } from './pages/Roster';
 import { Settings } from './pages/Settings';
 import { Audit } from './pages/Audit';
+import { Books } from './pages/Books';
 import { PayHistory } from './pages/PayHistory';
 import { Renewals } from './pages/Renewals';
 import './styles.css';
@@ -35,6 +37,7 @@ function App() {
       </Routes>
     );
   }
+  if (auth.mustEnrollTotp) return <EnrollGate />;
   const repMode = auth.user.role === 'rep' || !!viewAs;
   return (
     <Routes>
@@ -49,30 +52,35 @@ function App() {
       <Route path="/renewals" element={repMode ? <Renewals admin={false} /> : auth.user.role === 'admin' ? <Renewals admin /> : <Navigate to="/" replace />} />
       <Route path="/settings" element={!repMode && auth.user.role === 'admin' ? <Settings /> : <Navigate to="/" replace />} />
       <Route path="/audit" element={!repMode && auth.user.role === 'admin' ? <Audit /> : <Navigate to="/" replace />} />
+      <Route path="/books" element={!repMode && auth.user.role === 'admin' ? <Books /> : <Navigate to="/" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }
 
 function LoginGate() {
-  const [oidc, devAuth, password] = [Boolean(window.__GS_OIDC__), Boolean(window.__GS_DEV__), window.__GS_PW__ !== false];
+  const [oidc, devAuth, password, setup] = [Boolean(window.__GS_OIDC__), Boolean(window.__GS_DEV__), window.__GS_PW__ !== false, Boolean(window.__GS_SETUP__)];
   // The reset link from the "forgot password" email lands here signed out: /reset?token=…
   const here = DEMO ? window.location.hash.replace(/^#/, '') : window.location.pathname + window.location.search;
   const token = here.startsWith('/reset') ? new URLSearchParams(here.slice(here.indexOf('?'))).get('token') : null;
   const [resetting, setResetting] = useState(!!token);
   if (resetting && token) return <ResetPassword token={token} onDone={() => { setResetting(false); window.history.replaceState(null, '', DEMO ? '#/' : '/'); }} />;
-  return <Login oidc={oidc} devAuth={devAuth} password={password} />;
+  return <Login oidc={oidc} devAuth={devAuth} password={password} setup={setup} />;
 }
 
 declare global {
-  interface Window { __GS_OIDC__?: boolean; __GS_DEV__?: boolean; __GS_PW__?: boolean }
+  interface Window { __GS_OIDC__?: boolean; __GS_DEV__?: boolean; __GS_PW__?: boolean; __GS_SETUP__?: boolean; __GS_BRAND__?: { company: string; portal: string; supportEmail: string } }
 }
 
 // Ask the API which sign-in methods exist before rendering the login screen.
-api<{ oidc: boolean; devAuth: boolean; password?: boolean }>('/auth/methods').catch(() => ({ oidc: false, devAuth: false, password: false })).then((m) => {
+type Methods = { oidc: boolean; devAuth: boolean; password?: boolean; setup?: boolean; branding?: { company: string; portal: string; supportEmail: string } };
+api<Methods>('/auth/methods').catch((): Methods => ({ oidc: false, devAuth: false, password: false })).then((m) => {
   window.__GS_OIDC__ = m.oidc;
   window.__GS_DEV__ = m.devAuth;
   window.__GS_PW__ = m.password !== false;
+  window.__GS_SETUP__ = !!m.setup;
+  window.__GS_BRAND__ = m.branding;
+  if (m.branding) document.title = `${m.branding.company} · ${m.branding.portal}`;
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <QueryClientProvider client={qc}>

@@ -79,6 +79,10 @@ export const commissionReps = pgTable(
     sessionCutoff: timestamp('session_cutoff', { withTimezone: true }),
     /** Secret in the rep's private calendar-feed URL; null = feed off. */
     calendarToken: text('calendar_token'),
+    /** Owner tier: creates and changes admins, changes security settings. */
+    superAdmin: boolean('super_admin').notNull().default(false),
+    /** Per-rep permission switches ({ merchantEmail?: boolean }). */
+    perms: jsonb('perms').$type<{ merchantEmail?: boolean } | null>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

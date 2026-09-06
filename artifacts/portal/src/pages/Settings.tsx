@@ -23,7 +23,7 @@ const TABS: Array<{ key: TabKey; label: string; hint: string }> = [
 ];
 
 export function Settings() {
-  const { notify, setViewAs } = useSession();
+  const { notify, setViewAs, auth } = useSession();
   const qc = useQueryClient();
   const settings = useQuery({ queryKey: ['settings'], queryFn: () => api<SettingsData>('/api/admin/settings') });
   const usage = useQuery({ queryKey: ['usage'], queryFn: () => api<Usage>('/api/admin/settings/usage') });
@@ -59,7 +59,7 @@ export function Settings() {
           {tab === 'partners' && <PartnersTab partners={settings.data!.partners} usage={usage.data!.partners} run={run} />}
           {tab === 'products' && <ProductsTab products={settings.data!.products} usage={usage.data!.products} run={run} />}
           {tab === 'teams' && <TeamsTab teams={teams.data!.teams} reps={roster.data!.reps} usage={usage.data!.teams} run={run} />}
-          {tab === 'reps' && <RepsTab reps={roster.data!.reps} teams={teams.data!.teams} run={run} onViewAs={(id) => setViewAs(id)} />}
+          {tab === 'reps' && <RepsTab reps={roster.data!.reps} teams={teams.data!.teams} run={run} onViewAs={(id) => setViewAs(id)} isSuper={!!auth?.superAdmin} permissions={settings.data!.permissions} />}
           {tab === 'playbooks' && <PlaybooksTab settings={settings.data!} teams={teams.data!.teams} reps={roster.data!.reps} run={run} />}
           {tab === 'crm' && <CrmTab settings={settings.data!} run={run} />}
           {tab === 'import' && <ImportTab />}
@@ -281,12 +281,12 @@ function TeamsTab({ teams, reps, usage, run }: { teams: Team[]; reps: RosterRep[
 }
 
 /* ---------- Reps ---------- */
-function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Team[]; run: Run; onViewAs: (id: string) => void }) {
+function RepsTab({ reps, teams, run, onViewAs, isSuper, permissions }: { reps: RosterRep[]; teams: Team[]; run: Run; onViewAs: (id: string) => void; isSuper: boolean; permissions: SettingsData['permissions'] }) {
   type Draft = { name: string; email: string; teamId: string; openerRate: string; closerRate: string; overrideRate: string; role: string };
   const toDraft = (r: RosterRep): Draft => ({ name: r.name, email: r.email, teamId: r.teamId ?? '', openerRate: pctIn(r.openerRate), closerRate: pctIn(r.closerRate), overrideRate: pctIn(r.overrideRate), role: r.role });
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [adding, setAdding] = useState<Draft | null>(null);
-  const cols = 'minmax(150px,1.1fr) minmax(190px,1.2fr) 150px 70px 70px 70px 100px 100px 120px 90px 290px 220px';
+  const cols = 'minmax(150px,1.1fr) minmax(190px,1.2fr) 150px 70px 70px 70px 100px 100px 130px 90px 110px 100px 290px 220px';
   const [pw, setPw] = useState<{ id: string; value: string } | null>(null);
   const [filesFor, setFilesFor] = useState<RosterRep | null>(null);
   const label = (role: string) => (role === 'admin' ? 'Master' : role === 'manager' ? 'Team lead' : 'Rep');
@@ -304,8 +304,8 @@ function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Tea
   return (
     <Card title="Reps" extra={`${reps.length} · ${reps.filter((r) => r.active).length} active`}>
       <div className="scroller">
-        <div style={{ minWidth: 1700 }}>
-          <Head cols={cols}><span>Name</span><span>Email</span><span>Team</span><span>Opener %</span><span>Closer %</span><span>Override %</span><span>Earned</span><span>Owed</span><span>Access</span><span>Active</span><span>Sign-in</span><span /></Head>
+        <div style={{ minWidth: 1950 }}>
+          <Head cols={cols}><span>Name</span><span>Email</span><span>Team</span><span>Opener %</span><span>Closer %</span><span>Override %</span><span>Earned</span><span>Owed</span><span>Access</span><span>Active</span><span title="Owner tier: creates and changes admins, changes security. Only a super admin can grant it.">Super admin</span><span title="May this rep email merchants from a deal? The portal-wide switch is under Portal › Permissions.">Merchant email</span><span>Sign-in</span><span /></Head>
           {reps.map((r) => {
             const v = drafts[r.id] ?? toDraft(r);
             const dirty = !!drafts[r.id];
@@ -314,8 +314,10 @@ function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Tea
                 <Editor v={v} onChange={(nv) => setDrafts({ ...drafts, [r.id]: nv })} />
                 <span className="num">{compact(r.earned)}</span>
                 <span className={`num ${r.owed ? 'warn' : ''}`}>{compact(r.owed)}</span>
-                <select value={v.role} onChange={(e) => setDrafts({ ...drafts, [r.id]: { ...v, role: e.target.value } })}><option value="rep">Rep</option><option value="manager">Team lead</option><option value="admin">Master</option></select>
-                <button type="button" className={`tog ${r.active ? 'on' : ''}`} aria-pressed={r.active} title={r.active ? 'Deactivate — history stays' : 'Reactivate'} onClick={() => run(`${r.name} ${r.active ? 'deactivated' : 'reactivated'}`, () => post(`/api/admin/reps/${r.id}`, { active: !r.active }, 'PATCH'))}><i /></button>
+                <select value={v.role} disabled={!isSuper && (r.role === 'admin' || !!r.superAdmin)} title={!isSuper && (r.role === 'admin' || r.superAdmin) ? 'Only a super admin can change an admin' : ''} onChange={(e) => setDrafts({ ...drafts, [r.id]: { ...v, role: e.target.value } })}><option value="rep">Rep</option><option value="manager">Team lead</option><option value="admin" disabled={!isSuper}>Master</option></select>
+                <button type="button" className={`tog ${r.active ? 'on' : ''}`} aria-pressed={r.active} disabled={!isSuper && (r.role === 'admin' || !!r.superAdmin)} title={!isSuper && (r.role === 'admin' || r.superAdmin) ? 'Only a super admin can change an admin' : r.active ? 'Deactivate — history stays' : 'Reactivate'} onClick={() => run(`${r.name} ${r.active ? 'deactivated' : 'reactivated'}`, () => post(`/api/admin/reps/${r.id}`, { active: !r.active }, 'PATCH'))}><i /></button>
+                <span>{isSuper ? <button type="button" className={`tog ${r.superAdmin ? 'on' : ''}`} aria-pressed={!!r.superAdmin} disabled={r.role !== 'admin'} title={r.role !== 'admin' ? 'Give Master access first' : r.superAdmin ? 'Remove super admin' : 'Make super admin'} onClick={() => run(`${r.name} — super admin ${r.superAdmin ? 'removed' : 'granted'}`, () => post(`/api/admin/reps/${r.id}`, { superAdmin: !r.superAdmin }, 'PATCH'))}><i /></button> : r.superAdmin ? <Pill tone="teal">yes</Pill> : <span className="subtle">—</span>}</span>
+                <span>{r.role === 'rep' || r.role === 'manager' ? <button type="button" className={`tog ${permissions.merchantEmail && r.perms?.merchantEmail !== false ? 'on' : ''}`} aria-pressed={permissions.merchantEmail && r.perms?.merchantEmail !== false} disabled={!permissions.merchantEmail} title={!permissions.merchantEmail ? 'Turned off for everyone under Portal › Permissions' : r.perms?.merchantEmail === false ? 'Allow this rep to email merchants' : 'Stop this rep emailing merchants'} onClick={() => run(`${r.name} — merchant email ${r.perms?.merchantEmail === false ? 'allowed' : 'blocked'}`, () => post(`/api/admin/reps/${r.id}`, { perms: { merchantEmail: r.perms?.merchantEmail === false ? true : false } }, 'PATCH'))}><i /></button> : <span className="subtle">—</span>}</span>
                 <span style={{ display: 'grid', gap: 4 }}>
                   {pw?.id === r.id ? (
                     <span style={{ display: 'flex', gap: 4 }}>
@@ -345,8 +347,8 @@ function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Tea
             <Row cols={cols}>
               <Editor v={adding} onChange={setAdding} />
               <span /><span />
-              <select value={adding.role} onChange={(e) => setAdding({ ...adding, role: e.target.value })}><option value="rep">Rep</option><option value="manager">Team lead</option><option value="admin">Master</option></select>
-              <Pill tone="teal">new</Pill>
+              <select value={adding.role} onChange={(e) => setAdding({ ...adding, role: e.target.value })}><option value="rep">Rep</option><option value="manager">Team lead</option><option value="admin" disabled={!isSuper}>Master{isSuper ? '' : ' (super admin only)'}</option></select>
+              <Pill tone="teal">new</Pill><span /><span />
               <span className="subtle" style={{ fontSize: 13 }}>set a password after adding</span>
               <span style={{ display: 'flex', gap: 6 }}>
                 <button className="btn primary" style={{ height: 30, padding: '0 10px' }} onClick={() => run(`${adding.name} added`, async () => { await post('/api/admin/reps', body(adding)); setAdding(null); })}>Add</button>
@@ -358,7 +360,7 @@ function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Tea
       </div>
       <div className="toolbar" style={{ marginTop: 12 }}>
         <button className="btn" disabled={!!adding} onClick={() => setAdding({ name: '', email: '', teamId: '', openerRate: '20', closerRate: '20', overrideRate: '', role: 'rep' })}>+ Add rep</button>
-        <span className="count">Access: Rep sees their own portal · Team lead can View as their team · Master runs everything. Sign-in: SSO when configured, or the email + password you set here (reps can change theirs from the sidebar).</span>
+        <span className="count">Access: Rep sees their own portal · Team lead can View as their team · Master runs everything · Super admin alone creates or changes admins and security. Sign-in: SSO when configured, or the email + password you set here (reps can change theirs from the sidebar).</span>
       </div>
       {filesFor && (
         <Drawer title={`${filesFor.name} · files`} sub="W-9, agreements. Reps can add their own from Pay history; only you can remove one." onClose={() => setFilesFor(null)}>
@@ -623,12 +625,15 @@ function MissingRefsNotice({ missing, onAdded }: { missing: MissingRefs; onAdded
 
 /* ---------- Portal: branding, notifications, security, lists ---------- */
 function PortalTab({ settings, run }: { settings: SettingsData; run: Run }) {
+  const { auth } = useSession();
+  const isSuper = !!auth?.superAdmin;
+  const [perm, setPerm] = useState(settings.permissions);
   const [b, setB] = useState(settings.portal);
   const [n, setN] = useState(settings.notifications);
   const [sec, setSec] = useState(settings.security);
   const [freq, setFreq] = useState(settings.lists.frequencies.join('\n'));
   const [statuses, setStatuses] = useState(settings.lists.dealStatuses.join('\n'));
-  useEffect(() => { setB(settings.portal); setN(settings.notifications); setSec(settings.security); setFreq(settings.lists.frequencies.join('\n')); setStatuses(settings.lists.dealStatuses.join('\n')); }, [settings]);
+  useEffect(() => { setB(settings.portal); setN(settings.notifications); setSec(settings.security); setPerm(settings.permissions); setFreq(settings.lists.frequencies.join('\n')); setStatuses(settings.lists.dealStatuses.join('\n')); }, [settings]);
   const Toggle = ({ on, onChange, label, hint }: { on: boolean; onChange: (v: boolean) => void; label: string; hint: string }) => (
     <label style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 12, alignItems: 'start', cursor: 'pointer', padding: '8px 0' }}>
       <button type="button" className={`tog ${on ? 'on' : ''}`} onClick={() => onChange(!on)} aria-pressed={on} />
@@ -662,21 +667,26 @@ function PortalTab({ settings, run }: { settings: SettingsData; run: Run }) {
         <button className="btn primary" style={{ marginTop: 12 }} onClick={() => void run('Email settings saved', () => post('/api/admin/settings/notifications', n, 'PUT'))}>Save emails</button>
         <div className="subtle" style={{ fontSize: 13, marginTop: 10 }}>The sending address and provider key live in the host's Secrets (MAIL_PROVIDER, MAIL_API_KEY, MAIL_FROM) — those never change from here.</div>
       </Card>
-      <Card title="Security" extra="passwords and two-factor">
-        <Toggle on={sec.requireTotpForAdmins} onChange={(v) => setSec({ ...sec, requireTotpForAdmins: v })} label="Require two-factor for admins" hint="Admins who have not set up an authenticator are held at a setup screen until they do. Turn on your own first." />
+      <Card title="Permissions" extra="what reps may do from their portal">
+        <Toggle on={perm.merchantEmail} onChange={(v) => setPerm({ ...perm, merchantEmail: v })} label="Reps can email merchants from a deal" hint="Off hides the button for everyone. On, you can still block individual reps under Reps › Merchant email. Emails go out under the rep's name from the templates under Playbooks." />
+        <button className="btn primary" style={{ marginTop: 12 }} onClick={() => void run('Permissions saved', () => post('/api/admin/settings/permissions', perm, 'PUT'))}>Save permissions</button>
+      </Card>
+      <Card title="Security" extra={isSuper ? 'passwords and two-factor' : 'super admin only'}>
+        {!isSuper && <div className="note" style={{ marginBottom: 10 }}>Only a super admin can change these. Yours is read-only.</div>}
+        <Toggle on={sec.requireTotpForAdmins} onChange={(v) => isSuper && setSec({ ...sec, requireTotpForAdmins: v })} label="Require two-factor for admins" hint="Admins who have not set up an authenticator are held at a setup screen until they do. Turn on your own first." />
         <label className="field" style={{ marginTop: 8 }}><span className="label">Sign out after inactivity</span>
-          <select value={sec.idleMinutes} onChange={(e) => setSec({ ...sec, idleMinutes: Number(e.target.value) })}>
+          <select value={sec.idleMinutes} disabled={!isSuper} onChange={(e) => setSec({ ...sec, idleMinutes: Number(e.target.value) })}>
             {[[30, '30 minutes'], [60, '1 hour'], [120, '2 hours'], [240, '4 hours'], [480, '8 hours'], [0, 'Never']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
           <span className="subtle" style={{ fontSize: 13 }}>Everyone, admins included. A tab left open returns to the sign-in screen; the server refuses the old session too.</span>
         </label>
         <label className="field" style={{ marginTop: 8 }}><span className="label">Remember a device after a two-factor code</span>
-          <select value={sec.totpRememberDays} onChange={(e) => setSec({ ...sec, totpRememberDays: Number(e.target.value) })}>
+          <select value={sec.totpRememberDays} disabled={!isSuper} onChange={(e) => setSec({ ...sec, totpRememberDays: Number(e.target.value) })}>
             {[[0, 'Ask every sign-in'], [1, '1 day'], [7, '7 days'], [14, '14 days'], [30, '30 days']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
           <span className="subtle" style={{ fontSize: 13 }}>The rep still types their password; the code is skipped on a remembered browser. Reps forget devices from the sidebar; resetting two-factor forgets them all.</span>
         </label>
-        <button className="btn primary" style={{ marginTop: 12 }} onClick={() => void run('Security saved', () => post('/api/admin/settings/security', sec, 'PUT'))}>Save security</button>
+        <button className="btn primary" style={{ marginTop: 12 }} disabled={!isSuper} onClick={() => void run('Security saved', () => post('/api/admin/settings/security', sec, 'PUT'))}>Save security</button>
         <div className="subtle" style={{ fontSize: 13, marginTop: 10 }}>Passwords: 10+ characters with a letter and a number; five wrong tries lock an email for 15 minutes. Changing a password signs that account out everywhere else. Reps set and reset their own from the sign-in screen; you can also set one or send an invite under Reps.</div>
         <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border-light)' }}>
           <b>Backup</b>

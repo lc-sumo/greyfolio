@@ -71,6 +71,13 @@
       "when": 1788708650659,
       "tag": "0009_trusted_devices",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788709540966,
+      "tag": "0010_super_admin_perms",
+      "breakpoints": true
     }
   ]
 }

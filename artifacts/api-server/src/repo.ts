@@ -40,7 +40,10 @@ export interface Settings {
   };
   /** Email templates reps send to merchants from a deal. */
   templates: { merchant: Array<{ id: string; name: string; subject: string; body: string }> };
+  /** Portal-wide switches an admin can turn off for every rep at once. */
+  permissions: { merchantEmail: boolean };
 }
+export const PERMISSION_DEFAULTS: Settings['permissions'] = { merchantEmail: true };
 
 export const PORTAL_DEFAULTS: Settings['portal'] = { company: 'Greystone Merchant Partners', portal: 'Commission portal', supportEmail: '' };
 export const NOTIFICATION_DEFAULTS: Settings['notifications'] = { statements: true, clawbacks: true, renewalDigest: true, digestHourUtc: 13, repQuestions: true, playbookHourUtc: 12 };

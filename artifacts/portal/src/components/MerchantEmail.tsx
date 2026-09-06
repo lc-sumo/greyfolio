@@ -6,7 +6,7 @@ import { useSession } from '../lib/session';
 /** The rep picks a template, reads it rendered for this deal, edits if they like, sends under their own name. */
 export function MerchantEmail({ dealId, merchantEmail }: { dealId: string; merchantEmail: string }) {
   const { notify, viewAs } = useSession();
-  const tpl = useQuery({ queryKey: ['merchant-templates'], queryFn: () => api<{ merchant: MerchantTemplate[]; live: boolean }>('/api/me/templates') });
+  const tpl = useQuery({ queryKey: ['merchant-templates'], queryFn: () => api<{ merchant: MerchantTemplate[]; live: boolean; allowed: boolean }>('/api/me/templates') });
   const [open, setOpen] = useState(false);
   const [templateId, setTemplateId] = useState('');
   const [subject, setSubject] = useState('');
@@ -16,7 +16,7 @@ export function MerchantEmail({ dealId, merchantEmail }: { dealId: string; merch
     if (!open || !templateId) return;
     void api<MerchantPreview>(`/api/me/deals/${encodeURIComponent(dealId)}/merchant-email/preview?template=${encodeURIComponent(templateId)}`).then((p) => { setSubject(p.subject); setBody(p.body); }).catch((e) => notify(e instanceof Error ? e.message : 'Could not load the template'));
   }, [open, templateId, dealId, notify]);
-  if (viewAs) return null;
+  if (viewAs || (tpl.data && !tpl.data.allowed)) return null;
   if (!open) return <button className="btn" onClick={() => { setOpen(true); setTemplateId(tpl.data?.merchant[0]?.id ?? ''); }} title={merchantEmail ? `Email ${merchantEmail} from a template, under your name` : 'This deal has no merchant email on file'} disabled={!merchantEmail}>Email the merchant</button>;
   return (
     <section className="card">

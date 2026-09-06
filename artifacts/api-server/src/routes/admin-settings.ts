@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { HttpError, currentUser, requireRole } from '../auth/middleware.js';
 import type { Repo } from '../repo.js';
-import { createRep, createTeam, deleteTeam, saveCrm, saveLenders, saveLists, saveNotifications, savePartners, savePayroll, savePortal, saveProducts, saveSecurity, saveThresholds, updateRep, updateTeam, usage } from '../services/settings.js';
+import { createRep, createTeam, deleteTeam, saveCrm, saveLenders, saveLists, saveNotifications, savePartners, savePayroll, savePermissions, savePortal, saveProducts, saveSecurity, saveThresholds, updateRep, updateTeam, usage } from '../services/settings.js';
 import { beginInvite, setRepPassword } from '../services/passwords.js';
 import type { NotifyDeps } from '../services/notify.js';
 import { commitImport, previewImport } from '../services/import.js';
@@ -25,6 +25,7 @@ export function adminSettingsRouter(repo: Repo, notify: Omit<NotifyDeps, 'repo'>
   r.put('/settings/notifications', async (req, res) => res.json({ notifications: await saveNotifications(repo, req.body ?? {}, actor(req)) }));
   r.put('/settings/security', async (req, res) => res.json({ security: await saveSecurity(repo, req.body ?? {}, actor(req)) }));
   r.put('/settings/lists', async (req, res) => res.json({ lists: await saveLists(repo, req.body ?? {}, actor(req)) }));
+  r.put('/settings/permissions', async (req, res) => res.json({ permissions: await savePermissions(repo, req.body ?? {}, actor(req)) }));
 
   r.post('/teams', async (req, res) => res.status(201).json(await createTeam(repo, req.body ?? {}, actor(req))));
   r.patch('/teams/:id', async (req, res) => res.json(await updateTeam(repo, String(req.params.id), req.body ?? {}, actor(req))));

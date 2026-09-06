@@ -5,6 +5,7 @@ import { dbRepo } from './repo.db.js';
 import { mailerFor } from './services/mail.js';
 import { startDigestScheduler } from './services/notify.js';
 import { ensureStarterPlaybooks, startPlaybookScheduler } from './services/playbooks.js';
+import { ensureSuperAdmin } from './services/superadmin.js';
 
 const config = configFromEnv();
 const db = createDb();
@@ -13,6 +14,7 @@ const mailer = mailerFor(config.mail);
 const app = createApp(config, repo, { mailer });
 const digest = startDigestScheduler({ repo, mailer, origin: config.appOrigin, appName: config.appName }, config.digestHourUtc);
 const playbooks = startPlaybookScheduler({ repo, mailer, origin: config.appOrigin, appName: config.appName });
+void ensureSuperAdmin(repo, config.superAdminEmail).then((r) => console.log(JSON.stringify({ t: new Date().toISOString(), level: 'info', superAdmin: config.superAdminEmail, created: r.created }))).catch((e) => console.error(JSON.stringify({ t: new Date().toISOString(), level: 'error', superAdmin: String(e) })));
 void ensureStarterPlaybooks(repo).catch((e) => console.error(JSON.stringify({ t: new Date().toISOString(), level: 'error', playbooks: String(e) })));
 
 const server = app.listen(config.port, () => {

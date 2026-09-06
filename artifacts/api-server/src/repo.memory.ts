@@ -1,5 +1,5 @@
 import type { Clawback, Deal, DealDraw, LedgerContext, PayoutLine, PayrollRun, Rep, Team, WeeklySchedule } from '@greystone/commission';
-import { NOTIFICATION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AuditEntry, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Repo, type RepFile, type RepTask, type Settings, type TotpState, type TrustedDevice } from './repo.js';
+import { NOTIFICATION_DEFAULTS, PERMISSION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AuditEntry, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Repo, type RepFile, type RepTask, type Settings, type TotpState, type TrustedDevice } from './repo.js';
 import { requestMeta } from './auth/request-context.js';
 
 export interface MemoryData {
@@ -9,7 +9,7 @@ export interface MemoryData {
   deals: Deal[];
   lines: PayoutLine[];
   clawbacks: Clawback[];
-  settings: Omit<Settings, 'portal' | 'notifications' | 'security' | 'templates'> & Partial<Pick<Settings, 'portal' | 'notifications' | 'security' | 'templates'>>;
+  settings: Omit<Settings, 'portal' | 'notifications' | 'security' | 'templates' | 'permissions'> & Partial<Pick<Settings, 'portal' | 'notifications' | 'security' | 'templates' | 'permissions'>>;
 }
 
 /** In-memory Repo over plain arrays. Mutates the arrays it is given. */
@@ -206,7 +206,7 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
     },
     async getSettings() {
       const s = data.settings;
-      return { ...s, portal: { ...PORTAL_DEFAULTS, ...(s.portal ?? {}) }, notifications: { ...NOTIFICATION_DEFAULTS, ...(s.notifications ?? {}) }, security: { ...SECURITY_DEFAULTS, ...(s.security ?? {}) }, templates: { ...TEMPLATE_DEFAULTS, ...(s.templates ?? {}) } };
+      return { ...s, portal: { ...PORTAL_DEFAULTS, ...(s.portal ?? {}) }, notifications: { ...NOTIFICATION_DEFAULTS, ...(s.notifications ?? {}) }, security: { ...SECURITY_DEFAULTS, ...(s.security ?? {}) }, templates: { ...TEMPLATE_DEFAULTS, ...(s.templates ?? {}) }, permissions: { ...PERMISSION_DEFAULTS, ...(s.permissions ?? {}) } };
     },
     async writeAudit(e) {
       audit.push({ ...e, ip: e.ip ?? requestMeta()?.ip ?? null, at: new Date().toISOString() });

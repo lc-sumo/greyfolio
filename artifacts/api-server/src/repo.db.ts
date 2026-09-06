@@ -26,7 +26,7 @@ import {
   toTeam,
   type Database,
 } from '@greystone/db';
-import { NOTIFICATION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AuditEntry, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Repo, type RepFile, type RepTask, type Settings, type TotpState, type TrustedDevice } from './repo.js';
+import { NOTIFICATION_DEFAULTS, PERMISSION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AuditEntry, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Repo, type RepFile, type RepTask, type Settings, type TotpState, type TrustedDevice } from './repo.js';
 import type { PlaybookRule } from './services/playbook-rules.js';
 import { requestMeta } from './auth/request-context.js';
 
@@ -191,6 +191,7 @@ export function dbRepo(db: Database): Repo {
         notifications: { ...NOTIFICATION_DEFAULTS, ...(map.notifications ?? {}) },
         security: { ...SECURITY_DEFAULTS, ...(map.security ?? {}) },
         templates: { ...TEMPLATE_DEFAULTS, ...(map.templates ?? {}) },
+        permissions: { ...PERMISSION_DEFAULTS, ...(map.permissions ?? {}) },
       };
     },
     async insertClawback(c: Clawback) {
@@ -255,7 +256,7 @@ export function dbRepo(db: Database): Repo {
       await db.delete(commissionTeams).where(eq(commissionTeams.id, id));
     },
     async insertRep(rep: Rep) {
-      await db.insert(commissionReps).values({ id: rep.id, name: rep.name, email: rep.email, role: rep.role, teamId: rep.teamId, openerRate: rep.openerRate, closerRate: rep.closerRate, overrideRate: rep.overrideRate, active: rep.active });
+      await db.insert(commissionReps).values({ id: rep.id, name: rep.name, email: rep.email, role: rep.role, teamId: rep.teamId, openerRate: rep.openerRate, closerRate: rep.closerRate, overrideRate: rep.overrideRate, active: rep.active, superAdmin: !!rep.superAdmin, perms: rep.perms ?? null });
     },
     async updateRep(id: string, patch: Partial<Omit<Rep, 'id'>>) {
       await db.update(commissionReps).set({ ...patch, updatedAt: sql`now()` }).where(eq(commissionReps.id, id));

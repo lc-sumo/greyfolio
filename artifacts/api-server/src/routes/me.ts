@@ -216,14 +216,20 @@ export function meRouter(repo: Repo, appName = 'Greystone Commission Portal', no
     if (!deal) throw new HttpError(404, 'Deal not found');
     return { s, deal };
   };
-  r.get('/templates', async (_req, res) => res.json({ merchant: (await repo.getSettings()).templates.merchant, live: !!notify && (notify.mailer.live || notify.mailer.kind === 'log') }));
+  const mayEmail = async (repId: string) => {
+    const [settings, rep] = await Promise.all([repo.getSettings(), repo.findRep(repId)]);
+    return settings.permissions.merchantEmail && rep?.perms?.merchantEmail !== false;
+  };
+  r.get('/templates', async (req, res) => res.json({ merchant: (await repo.getSettings()).templates.merchant, live: !!notify && (notify.mailer.live || notify.mailer.kind === 'log'), allowed: await mayEmail(scopeOf(req).effectiveRepId) }));
   r.get('/deals/:id/merchant-email/preview', async (req, res) => {
     const { s, deal } = await myDeal(req);
+    if (!(await mayEmail(s.actor.repId))) throw new HttpError(403, 'Emailing merchants is turned off for your account — ask an admin');
     res.json(await merchantPreview(repo, deal, s.actor.repId, String(req.query.template ?? ''), today(), appName));
   });
   r.post('/deals/:id/merchant-email', async (req, res) => {
     const { s, deal } = await myDeal(req);
     if (s.viewAs) throw new HttpError(403, 'Merchant emails go out from the rep, not from View as');
+    if (!(await mayEmail(s.actor.repId))) throw new HttpError(403, 'Emailing merchants is turned off for your account — ask an admin');
     res.json(await sendMerchantEmail({ repo, mailer: notify?.mailer ?? { kind: 'off', live: false, send: async () => ({ ok: false }) }, origin: notify?.origin ?? '', appName: notify?.appName ?? appName }, deal, s.actor.repId, req.body ?? {}, today()));
   });
 

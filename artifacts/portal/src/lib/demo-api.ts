@@ -32,7 +32,7 @@ async function demoSheetGrid(body: Record<string, unknown>): Promise<string[][] 
   if (!sheet) throw new ApiError(400, `No FUNDED DEALS tab found (sheets: ${wb.sheets.map((s) => s.name).join(', ')})`);
   return sheet.grid;
 }
-import { createRep, createTeam, deleteTeam, saveCrm, saveLenders, saveLists, saveNotifications, savePartners, savePayroll, savePortal, saveProducts, saveSecurity, saveThresholds, updateRep, updateTeam, usage } from '../../../api-server/src/services/settings';
+import { createRep, createTeam, deleteTeam, saveCrm, saveLenders, saveLists, saveNotifications, savePartners, savePayroll, savePermissions, savePortal, saveProducts, saveSecurity, saveThresholds, updateRep, updateTeam, usage } from '../../../api-server/src/services/settings';
 import { annualReport, payrollRepDetail, payrollReps, preview, runSummary } from '../../../api-server/src/payroll-views';
 import { ApiError, type SessionUser } from './api';
 import { memoryMailer } from '../../../api-server/src/services/mail';
@@ -48,6 +48,9 @@ function board() {
   if (!demo) {
     demo = buildDemo(new Date().toISOString().slice(0, 10));
     repo = memoryRepo({ reps: demo.reps, teams: demo.teams, runs: demo.runs, deals: demo.deals, lines: demo.lines, clawbacks: demo.clawbacks, settings: { lenders: [...LENDERS], partners: [...PARTNERS], products: [...PRODUCTS], thresholds: THRESHOLDS, lists: LISTS, crm: { urlTemplate: '' }, payroll: { cycle: 'Twice monthly' } } });
+    // Demo owner: the seeded admin is the super admin (on a real portal that is lc@greystoneus.com).
+    const leor = demo.reps.find((r) => r.role === 'admin');
+    if (leor) leor.superAdmin = true;
   }
   return { d: demo!, repo: repo! };
 }
@@ -121,7 +124,8 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
   if (p === '/auth/setup' && method === 'POST') throw new ApiError(403, 'Demo: setup is already complete');
   if (p === '/auth/me') {
     if (!u) throw new ApiError(401, 'Sign in required');
-    return json({ user: u, canViewAs: u.role !== 'rep', oidc: false, devAuth: true, password: true, branding: settings.portal, mustEnrollTotp: false, idleMinutes: 0 });
+    const meRep = d.reps.find((r) => r.id === u.repId);
+    return json({ user: u, canViewAs: u.role !== 'rep', oidc: false, devAuth: true, password: true, branding: settings.portal, mustEnrollTotp: false, idleMinutes: 0, superAdmin: !!meRep?.superAdmin, canEmailMerchants: settings.permissions.merchantEmail && meRep?.perms?.merchantEmail !== false });
   }
   if (p === '/auth/dev-login') {
     const email = (q.get('email') ?? '').trim().toLowerCase();
@@ -228,7 +232,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
   if (tkm && method === 'PATCH') return json(await logOutcome(repo, tkm[1]!, body as never, u.repId, today, { asAdmin: false }));
   const dtm = p.match(/^\/api\/me\/deals\/([^/]+)\/tasks$/);
   if (dtm && method === 'POST') return json(await createTask(repo, { dealId: decodeURIComponent(dtm[1]!), repId: u.repId, title: body.title, dueDate: body.dueDate }, u.repId, today));
-  if (p === '/api/me/templates') return json({ merchant: settings.templates.merchant, live: true });
+  if (p === '/api/me/templates') { const meRep = d.reps.find((r) => r.id === effective); return json({ merchant: settings.templates.merchant, live: true, allowed: settings.permissions.merchantEmail && meRep?.perms?.merchantEmail !== false }); }
   const mpm = p.match(/^\/api\/me\/deals\/([^/]+)\/merchant-email(?:\/preview)?$/);
   if (mpm) {
     const deal = repDeals(ctx.deals, u.repId).find((x) => x.id === decodeURIComponent(mpm[1]!));
@@ -277,7 +281,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
   if (p === '/api/admin/settings') return json(settings);
   if (p === '/api/admin/settings/usage') return json(await usage(repo));
   try {
-    const sm = p.match(/^\/api\/admin\/settings\/(lenders|partners|products|thresholds|crm|payroll|portal|notifications|security|lists)$/);
+    const sm = p.match(/^\/api\/admin\/settings\/(lenders|partners|products|thresholds|crm|payroll|portal|notifications|security|lists|permissions)$/);
     if (sm && method === 'PUT') {
       const k = sm[1]!;
       if (k === 'lenders') return json({ lenders: await saveLenders(repo, body.lenders, me.repId) });
@@ -289,6 +293,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
       if (k === 'notifications') return json({ notifications: await saveNotifications(repo, body, me.repId) });
       if (k === 'security') return json({ security: await saveSecurity(repo, body, me.repId) });
       if (k === 'lists') return json({ lists: await saveLists(repo, body, me.repId) });
+      if (k === 'permissions') return json({ permissions: await savePermissions(repo, body, me.repId) });
       return json({ payroll: await savePayroll(repo, body, me.repId) });
     }
     if (p === '/api/admin/teams' && method === 'POST') return json(await createTeam(repo, body as never, me.repId));

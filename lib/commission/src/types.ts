@@ -146,6 +146,15 @@ export interface Rep {
   /** `null` = fall back to the team's override rate. */
   overrideRate: number | null;
   active: boolean;
+  /** Owner tier: the only role that can create admins, change admins, or change security settings. */
+  superAdmin?: boolean;
+  /** Per-rep switches; absent = allowed (subject to the portal-wide setting). */
+  perms?: RepPerms | null;
+}
+
+export interface RepPerms {
+  /** May email merchants from a deal drawer. */
+  merchantEmail?: boolean;
 }
 
 export interface Team {

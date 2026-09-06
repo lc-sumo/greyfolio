@@ -33,6 +33,7 @@ const FINGERPRINTS: Record<string, { table: string; column?: string }> = {
   '0007_audit_ip': { table: 'commission_audit_log', column: 'ip' },
   '0008_session_cutoff_bookkeeping': { table: 'commission_reps', column: 'session_cutoff' },
   '0009_trusted_devices': { table: 'commission_trusted_devices' },
+  '0010_super_admin_perms': { table: 'commission_reps', column: 'super_admin' },
 };
 
 interface JournalEntry { idx: number; when: number; tag: string }

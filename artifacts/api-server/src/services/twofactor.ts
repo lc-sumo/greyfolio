@@ -2,6 +2,7 @@
 import { generateTotpSecret, otpauthUrl, verifyTotp } from '../auth/totp.js';
 import { HttpError } from '../http-error.js';
 import type { Repo } from '../repo.js';
+import { actorOf, requireSuper } from './superadmin.js';
 
 export interface TotpStatus {
   enabled: boolean;
@@ -50,6 +51,7 @@ export async function disableTotp(repo: Repo, repId: string, code: unknown): Pro
 export async function resetTotp(repo: Repo, repId: string, actorRepId: string): Promise<void> {
   const rep = await repo.findRep(repId);
   if (!rep) throw new HttpError(404, 'Rep not found');
+  if (repId !== actorRepId && (rep.role === 'admin' || rep.superAdmin)) requireSuper(await actorOf(repo, actorRepId), "reset another admin's two-factor");
   await repo.setTotp(repId, { secret: null, enabled: false });
   await repo.deleteTrustedDevices(repId);
   await repo.writeAudit({ actorRepId, action: 'rep.totp', targetRepId: repId, path: `/api/admin/reps/${repId}/totp`, detail: { reset: true, devicesForgotten: true } });

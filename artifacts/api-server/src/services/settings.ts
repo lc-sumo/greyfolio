@@ -1,5 +1,6 @@
 import { asRate, type Lender, type ProductRule, type ReferralPartner, type Rep, type Team } from '@greystone/commission';
 import { HttpError } from '../http-error.js';
+import { actorOf, requireSuper } from './superadmin.js';
 import { NOTIFICATION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, type Repo, type Settings, type Thresholds } from '../repo.js';
 
 const audit = (repo: Repo, actorRepId: string, action: 'settings.update' | 'team.update' | 'rep.update' | 'rep.password' | 'settings.rename', path: string, detail: Record<string, unknown>) =>
@@ -258,11 +259,15 @@ export interface RepInput {
   overrideRate?: number | null;
   role?: Rep['role'];
   active?: boolean;
+  superAdmin?: boolean;
+  perms?: { merchantEmail?: boolean } | null;
 }
 
 const ROLES: Rep['role'][] = ['rep', 'manager', 'admin'];
 
 export async function createRep(repo: Repo, input: RepInput, actorRepId: string): Promise<Rep> {
+  const actor = await actorOf(repo, actorRepId);
+  if (input.role === 'admin' || input.superAdmin) requireSuper(actor, 'create an admin');
   const name = cleanName(input.name, 'Rep');
   const email = String(input.email ?? '').trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpError(400, 'A valid email is required — it is how the rep signs in');
@@ -281,16 +286,41 @@ export async function createRep(repo: Repo, input: RepInput, actorRepId: string)
     closerRate: asRate(input.closerRate ?? 0.2),
     overrideRate: input.overrideRate === null || input.overrideRate === undefined || input.overrideRate === ('' as unknown) ? null : asRate(input.overrideRate),
     active: input.active ?? true,
+    superAdmin: !!input.superAdmin && (input.role === 'admin'),
+    perms: input.perms === undefined ? null : cleanPerms(input.perms),
   };
   await repo.insertRep(rep);
   await audit(repo, actorRepId, 'rep.update', `/api/admin/reps/${id}`, { created: name, email });
   return rep;
 }
 
+function cleanPerms(v: unknown): { merchantEmail?: boolean } | null {
+  if (v === null || v === undefined) return null;
+  const o = v as Record<string, unknown>;
+  const out: { merchantEmail?: boolean } = {};
+  if (o.merchantEmail === false) out.merchantEmail = false;
+  return Object.keys(out).length ? out : null;
+}
+
 export async function updateRep(repo: Repo, id: string, input: RepInput, actorRepId: string): Promise<Rep> {
   const rep = await repo.findRep(id);
   if (!rep) throw new HttpError(404, `Rep ${id} not found`);
+  const actor = await actorOf(repo, actorRepId);
+  const touchesAdmin = rep.role === 'admin' || input.role === 'admin' || rep.superAdmin || input.superAdmin !== undefined;
+  // Admins edit reps and team leads; only a super admin edits an admin (or makes one). Anyone may edit their own name, email and team.
+  const selfSafe = id === actorRepId && input.role === undefined && input.active === undefined && input.superAdmin === undefined;
+  if (touchesAdmin && !selfSafe) requireSuper(actor, rep.role === 'admin' || rep.superAdmin ? 'change an admin' : 'make someone an admin');
   const patch: Partial<Omit<Rep, 'id'>> = {};
+  if (input.superAdmin !== undefined) {
+    const want = !!input.superAdmin;
+    if (want && (input.role ?? rep.role) !== 'admin') throw new HttpError(400, 'A super admin must have Master access');
+    if (!want && rep.superAdmin) {
+      const others = (await repo.listReps()).filter((r) => r.superAdmin && r.active && r.id !== id);
+      if (!others.length) throw new HttpError(400, `${rep.name} is the last super admin`);
+    }
+    patch.superAdmin = want;
+  }
+  if (input.perms !== undefined) patch.perms = cleanPerms(input.perms);
   if (input.name !== undefined) patch.name = cleanName(input.name, 'Rep');
   if (input.email !== undefined) {
     const email = String(input.email).trim().toLowerCase();
@@ -315,6 +345,11 @@ export async function updateRep(repo: Repo, id: string, input: RepInput, actorRe
   if ((patch.role && patch.role !== 'admin' && rep.role === 'admin') || (patch.active === false && rep.role === 'admin')) {
     const admins = (await repo.listReps()).filter((r) => r.role === 'admin' && r.active && r.id !== id);
     if (!admins.length) throw new HttpError(400, `${rep.name} is the last active admin`);
+    if (rep.superAdmin && patch.superAdmin !== false) {
+      const supers = (await repo.listReps()).filter((r) => r.superAdmin && r.active && r.id !== id);
+      if (!supers.length) throw new HttpError(400, `${rep.name} is the last super admin — hand the role to someone first`);
+      if (patch.role && patch.role !== 'admin') patch.superAdmin = false;
+    }
   }
   if (id === actorRepId && (patch.active === false || (patch.role && patch.role !== 'admin'))) throw new HttpError(400, 'You cannot deactivate or demote yourself');
   await repo.updateRep(id, patch);
@@ -343,7 +378,15 @@ export async function saveNotifications(repo: Repo, input: Record<string, unknow
   return n;
 }
 
+export async function savePermissions(repo: Repo, input: Record<string, unknown>, actorRepId: string): Promise<Settings['permissions']> {
+  const p: Settings['permissions'] = { merchantEmail: input.merchantEmail !== false };
+  await repo.putSetting('permissions', p);
+  await audit(repo, actorRepId, 'settings.update', '/api/admin/settings/permissions', p);
+  return p;
+}
+
 export async function saveSecurity(repo: Repo, input: Record<string, unknown>, actorRepId: string): Promise<Settings['security']> {
+  requireSuper(await actorOf(repo, actorRepId), 'change security settings');
   const current = (await repo.getSettings()).security;
   const idle = input.idleMinutes === undefined ? current.idleMinutes : Math.round(Number(input.idleMinutes));
   if (!Number.isFinite(idle) || idle < 0 || idle > 24 * 60) throw new HttpError(400, 'Idle sign-out must be 0 (never) to 1440 minutes');

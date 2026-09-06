@@ -3,6 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { clearLoginFailures, hashPassword, passwordProblem, verifyPassword } from '../auth/password.js';
 import { HttpError } from '../http-error.js';
 import type { Repo } from '../repo.js';
+import { actorOf, requireSuper } from './superadmin.js';
 
 const audit = (repo: Repo, actorRepId: string, action: 'rep.password' | 'rep.invite', path: string, detail: Record<string, unknown>, targetRepId: string | null = null) =>
   repo.writeAudit({ actorRepId, action, targetRepId, path, detail });
@@ -18,6 +19,7 @@ const cutOff = async (repo: Repo, repId: string): Promise<string> => {
 export async function setRepPassword(repo: Repo, id: string, password: unknown, actorRepId: string): Promise<{ hasPassword: boolean }> {
   const rep = await repo.findRep(id);
   if (!rep) throw new HttpError(404, 'Rep not found');
+  if (id !== actorRepId && (rep.role === 'admin' || rep.superAdmin)) requireSuper(await actorOf(repo, actorRepId), "set another admin's password");
   if (password === null) {
     await repo.setPasswordHash(id, null);
     if (id !== actorRepId) await cutOff(repo, id);

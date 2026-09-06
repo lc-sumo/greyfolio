@@ -6,7 +6,7 @@ export type PayoutStatus = 'Paid' | 'Partially paid' | 'Owed' | 'Awaiting lender
 
 export interface SessionUser { repId: string; email: string; name: string; role: 'rep' | 'manager' | 'admin' }
 export interface Branding { company: string; portal: string; supportEmail: string }
-export interface AuthMe { user: SessionUser; canViewAs: boolean; oidc: boolean; devAuth: boolean; branding?: Branding; mustEnrollTotp?: boolean; idleMinutes?: number }
+export interface AuthMe { user: SessionUser; canViewAs: boolean; oidc: boolean; devAuth: boolean; branding?: Branding; mustEnrollTotp?: boolean; idleMinutes?: number; superAdmin?: boolean; canEmailMerchants?: boolean }
 export interface TrustedDeviceView { id: string; label: string; ip: string | null; location: string | null; createdAt: string; lastUsedAt: string; expiresAt: string; current: boolean }
 export interface RepRoleLine { role: Role; rate: number; amount: number; segment: string; segmentKey: string; paid: boolean; paidAmount: number; units: { paid: number; total: number; collected: number } | null }
 export interface RepDealView {
@@ -30,7 +30,7 @@ export interface RepDashboard {
 export interface RepClawbackView { id: string; dealId: string; date: string; business: string; dealClawback: number; chargedToMe: number; recovered: number; remaining: number; reason: string; status: 'open' | 'recovered' }
 export interface RepStatement { runId: string; period: string; status: 'draft' | 'approved' | 'paid'; dealCount: number; grossPaid: number; clawbacks: number; netPaid: number }
 export interface MeInfo { rep: { id: string; name: string; email: string; role: string; active: boolean }; viewAs: boolean; actor: { id: string; name: string; role: string } | null }
-export interface RosterRep { id: string; name: string; email: string; role: string; teamId: string | null; team: string | null; openerRate: number; closerRate: number; overrideRate: number | null; active: boolean; hasPassword?: boolean; hasTotp?: boolean; earned: number; paid: number; held: number; owed: number; dealCount: number }
+export interface RosterRep { id: string; name: string; email: string; role: string; teamId: string | null; team: string | null; openerRate: number; closerRate: number; overrideRate: number | null; active: boolean; hasPassword?: boolean; hasTotp?: boolean; superAdmin?: boolean; perms?: { merchantEmail?: boolean } | null; earned: number; paid: number; held: number; owed: number; dealCount: number }
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -83,6 +83,7 @@ export interface Settings {
   notifications: { statements: boolean; clawbacks: boolean; renewalDigest: boolean; digestHourUtc: number; repQuestions: boolean; playbookHourUtc: number };
   security: { requireTotpForAdmins: boolean; idleMinutes: number; totpRememberDays: number };
   templates: { merchant: MerchantTemplate[] };
+  permissions: { merchantEmail: boolean };
 }
 export interface MerchantTemplate { id: string; name: string; subject: string; body: string }
 export interface RoleView { role: Role; repId: string | null; name: string | null; rate: number; amount: number; paid: number }

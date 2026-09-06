@@ -17,6 +17,8 @@ export function toRep(r: RepRow): Rep {
     closerRate: r.closerRate,
     overrideRate: r.overrideRate,
     active: r.active,
+    superAdmin: r.superAdmin,
+    perms: r.perms ?? null,
   };
 }
 

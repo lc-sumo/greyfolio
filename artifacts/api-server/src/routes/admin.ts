@@ -31,6 +31,8 @@ export function adminRouter(repo: Repo, geo?: Geo): Router {
           active: rep.active,
           hasPassword: hasPw.has(rep.id),
           hasTotp: hasTotp.has(rep.id),
+          superAdmin: !!rep.superAdmin,
+          perms: rep.perms ?? null,
           earned: l.earned,
           paid: l.paid,
           held: l.held,

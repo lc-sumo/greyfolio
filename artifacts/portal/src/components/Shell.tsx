@@ -73,7 +73,7 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
             <div className="avatar">{initials(user.name)}</div>
             <div className="ellipsis">
               <b className="ellipsis">{user.name}</b>
-              <span>{user.role === 'admin' ? 'Master' : user.role === 'manager' ? 'Team lead' : 'Rep'}</span>
+              <span>{auth?.superAdmin ? 'Super admin' : user.role === 'admin' ? 'Master' : user.role === 'manager' ? 'Team lead' : 'Rep'}</span>
             </div>
           </div>
           {(!viewAs || viewAs === user.repId) && <ChangePassword />}

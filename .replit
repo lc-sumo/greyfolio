@@ -16,8 +16,8 @@ PORTAL_DIST = "artifacts/portal/dist"
 
 [deployment]
 deploymentTarget = "autoscale"
-build = ["sh", "-c", "corepack enable && corepack prepare pnpm@10.26.1 --activate && pnpm install --frozen-lockfile && pnpm portal:build"]
-run = ["sh", "-c", "corepack enable && corepack prepare pnpm@10.26.1 --activate && pnpm db:migrate && ([ \"${SEED:-none}\" = none ] || pnpm db:seed) && PORTAL_DIST=artifacts/portal/dist pnpm --filter @greystone/api-server start"]
+build = ["sh", "-c", "pnpm install --frozen-lockfile && pnpm portal:build"]
+run = ["sh", "-c", "pnpm db:migrate && ([ \"${SEED:-none}\" = none ] || pnpm db:seed) && PORTAL_DIST=artifacts/portal/dist pnpm --filter @greystone/api-server start"]
 
 [[ports]]
 localPort = 8080

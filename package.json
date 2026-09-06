@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "Greystone Merchant Partners commission portal — monorepo",
-  "packageManager": "pnpm@10.0.0",
+  "packageManager": "pnpm@10.26.1",
   "scripts": {
     "test": "pnpm -r --if-present test",
     "typecheck": "pnpm -r --if-present typecheck",

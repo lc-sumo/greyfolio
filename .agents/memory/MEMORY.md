@@ -1,0 +1,1 @@
+- [pnpm Publish version](pnpm-publish-version.md) — Keep the pnpm pin aligned with Replit’s provided installer to avoid recursive bootstrap failures.

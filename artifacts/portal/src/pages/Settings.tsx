@@ -29,7 +29,7 @@ export function Settings() {
   const usage = useQuery({ queryKey: ['usage'], queryFn: () => api<Usage>('/api/admin/settings/usage') });
   const teams = useQuery({ queryKey: ['teams'], queryFn: () => api<{ teams: Team[] }>('/api/admin/teams') });
   const roster = useQuery({ queryKey: ['roster'], queryFn: () => api<{ reps: RosterRep[] }>('/api/admin/reps') });
-  const [tab, setTab] = useState<TabKey>('lenders');
+  const [tab, setTab] = useState<TabKey>('portal');
   const [err, setErr] = useState('');
 
   async function run(label: string, fn: () => Promise<unknown>) {
@@ -49,23 +49,50 @@ export function Settings() {
 
   return (
     <Shell eyebrow="Admin" title="Settings">
-      <div className="seg pagetabs">{TABS.map((t) => <button key={t.key} className={tab === t.key ? 'on' : ''} onClick={() => { setTab(t.key); setErr(''); }}>{t.label}</button>)}</div>
-      <div className="muted" style={{ marginTop: -6 }}>{current.hint}</div>
-      {err && <div className="note" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>{err}</div>}
-      {!ready ? <Loading error={settings.error ?? usage.error ?? teams.error ?? roster.error} /> : (
-        <>
-          {tab === 'portal' && <PortalTab settings={settings.data!} run={run} />}
-          {tab === 'lenders' && <LendersTab lenders={settings.data!.lenders} products={settings.data!.products} thresholds={settings.data!.thresholds} usage={usage.data!.lenders} run={run} />}
-          {tab === 'partners' && <PartnersTab partners={settings.data!.partners} usage={usage.data!.partners} run={run} />}
-          {tab === 'products' && <ProductsTab products={settings.data!.products} usage={usage.data!.products} run={run} />}
-          {tab === 'teams' && <TeamsTab teams={teams.data!.teams} reps={roster.data!.reps} usage={usage.data!.teams} run={run} />}
-          {tab === 'reps' && <RepsTab reps={roster.data!.reps} teams={teams.data!.teams} run={run} onViewAs={(id) => setViewAs(id)} isSuper={!!auth?.superAdmin} permissions={settings.data!.permissions} />}
-          {tab === 'playbooks' && <PlaybooksTab settings={settings.data!} teams={teams.data!.teams} reps={roster.data!.reps} run={run} />}
-          {tab === 'crm' && <CrmTab settings={settings.data!} run={run} />}
-          {tab === 'import' && <ImportTab />}
-          {tab === 'remittance' && <RemittanceTab />}
-        </>
-      )}
+      <div className="settings-deck">
+        <aside className="settings-index">
+          <div>
+            <div className="settings-kicker">Settings / modules</div>
+            <h2>Control deck</h2>
+            <p>Configure the operating surfaces that keep commissions moving.</p>
+          </div>
+          <nav aria-label="Settings sections">
+            {TABS.map((t) => (
+              <button key={t.key} className={tab === t.key ? 'on' : ''} onClick={() => { setTab(t.key); setErr(''); }}>
+                {t.label}
+              </button>
+            ))}
+          </nav>
+          <div className="settings-index-foot"><b>Workspace view</b>Admin — master controls</div>
+        </aside>
+        <main className="settings-stage">
+          <div className="settings-head">
+            <div>
+              <div className="settings-kicker">Global scope</div>
+              <h2>{current.label}</h2>
+              <p>{current.hint}</p>
+            </div>
+            <span>Configuration</span>
+          </div>
+          {err && <div className="note" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>{err}</div>}
+          <div className="settings-content">
+            {!ready ? <Loading error={settings.error ?? usage.error ?? teams.error ?? roster.error} /> : (
+              <>
+                {tab === 'portal' && <PortalTab settings={settings.data!} run={run} />}
+                {tab === 'lenders' && <LendersTab lenders={settings.data!.lenders} products={settings.data!.products} thresholds={settings.data!.thresholds} usage={usage.data!.lenders} run={run} />}
+                {tab === 'partners' && <PartnersTab partners={settings.data!.partners} usage={usage.data!.partners} run={run} />}
+                {tab === 'products' && <ProductsTab products={settings.data!.products} usage={usage.data!.products} run={run} />}
+                {tab === 'teams' && <TeamsTab teams={teams.data!.teams} reps={roster.data!.reps} usage={usage.data!.teams} run={run} />}
+                {tab === 'reps' && <RepsTab reps={roster.data!.reps} teams={teams.data!.teams} run={run} onViewAs={(id) => setViewAs(id)} isSuper={!!auth?.superAdmin} permissions={settings.data!.permissions} />}
+                {tab === 'playbooks' && <PlaybooksTab settings={settings.data!} teams={teams.data!.teams} reps={roster.data!.reps} run={run} />}
+                {tab === 'crm' && <CrmTab settings={settings.data!} run={run} />}
+                {tab === 'import' && <ImportTab />}
+                {tab === 'remittance' && <RemittanceTab />}
+              </>
+            )}
+          </div>
+        </main>
+      </div>
     </Shell>
   );
 }
@@ -658,7 +685,7 @@ function PortalTab({ settings, run }: { settings: SettingsData; run: Run }) {
   const hours = Array.from({ length: 24 }, (_, h) => h);
   const localOf = (utc: number) => { const d = new Date(Date.UTC(2026, 0, 1, utc)); return d.toLocaleTimeString([], { hour: 'numeric' }); };
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))', gap: 16, alignItems: 'start' }}>
+    <div className="settings-portal-grid">
       <Card title="Names" extra="sidebar, sign-in screen, emails and authenticator apps">
         <div className="form" style={{ gridTemplateColumns: '1fr' }}>
           <label className="field"><span className="label">Company</span><input value={b.company} onChange={(e) => setB({ ...b, company: e.target.value })} /></label>

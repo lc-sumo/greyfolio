@@ -17,8 +17,12 @@ PORTAL_DIST = "artifacts/portal/dist"
 [deployment]
 deploymentTarget = "autoscale"
 build = ["sh", "-c", "pnpm install --frozen-lockfile && pnpm portal:build"]
-run = ["sh", "-c", "pnpm db:migrate && ([ \"${SEED:-none}\" = none ] || pnpm db:seed) && PORTAL_DIST=artifacts/portal/dist pnpm --filter @greystone/api-server start"]
+run = ["sh", "-c", "pnpm db:migrate && ([ \"${SEED:-none}\" = none ] || pnpm db:seed) && PORTAL_DIST=\"$PWD/artifacts/portal/dist\" pnpm --filter @greystone/api-server start"]
 
 [[ports]]
 localPort = 8080
 externalPort = 80
+
+[[ports]]
+localPort = 8099
+externalPort = 8099

@@ -20,7 +20,7 @@ PORTAL_DIST = "artifacts/portal/dist"
 [deployment]
 deploymentTarget = "autoscale"
 build = ["sh", "-c", "pnpm install --frozen-lockfile && pnpm portal:build"]
-run = ["sh", "-c", "pnpm db:up && ([ \"${SEED:-none}\" = none ] || pnpm db:seed) && PORTAL_DIST=\"$PWD/artifacts/portal/dist\" pnpm --filter @greystone/api-server start"]
+run = ["sh", "-c", "./lib/db/node_modules/.bin/tsx lib/db/src/up.ts && ([ \"${SEED:-none}\" = none ] || ./lib/db/node_modules/.bin/tsx lib/db/src/seed/run.ts) && PORTAL_DIST=\"$PWD/artifacts/portal/dist\" ./artifacts/api-server/node_modules/.bin/tsx artifacts/api-server/src/index.ts"]
 
 [[ports]]
 localPort = 8080

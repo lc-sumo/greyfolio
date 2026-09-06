@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { currentUser, requireRole } from '../auth/middleware.js';
 import type { Repo } from '../repo.js';
-import { createRep, createTeam, deleteTeam, saveCrm, saveLenders, savePartners, savePayroll, saveProducts, saveThresholds, updateRep, updateTeam, usage } from '../services/settings.js';
+import { createRep, createTeam, deleteTeam, saveCrm, saveLenders, saveLists, saveNotifications, savePartners, savePayroll, savePortal, saveProducts, saveSecurity, saveThresholds, updateRep, updateTeam, usage } from '../services/settings.js';
 import { setRepPassword } from '../services/passwords.js';
 import { commitImport, previewImport } from '../services/import.js';
 import { sheetSource } from '../services/sheet-source.js';
@@ -20,6 +20,10 @@ export function adminSettingsRouter(repo: Repo): Router {
   r.put('/settings/thresholds', async (req, res) => res.json({ thresholds: await saveThresholds(repo, req.body ?? {}, actor(req)) }));
   r.put('/settings/crm', async (req, res) => res.json({ crm: await saveCrm(repo, req.body ?? {}, actor(req)) }));
   r.put('/settings/payroll', async (req, res) => res.json({ payroll: await savePayroll(repo, req.body ?? {}, actor(req)) }));
+  r.put('/settings/portal', async (req, res) => res.json({ portal: await savePortal(repo, req.body ?? {}, actor(req)) }));
+  r.put('/settings/notifications', async (req, res) => res.json({ notifications: await saveNotifications(repo, req.body ?? {}, actor(req)) }));
+  r.put('/settings/security', async (req, res) => res.json({ security: await saveSecurity(repo, req.body ?? {}, actor(req)) }));
+  r.put('/settings/lists', async (req, res) => res.json({ lists: await saveLists(repo, req.body ?? {}, actor(req)) }));
 
   r.post('/teams', async (req, res) => res.status(201).json(await createTeam(repo, req.body ?? {}, actor(req))));
   r.patch('/teams/:id', async (req, res) => res.json(await updateTeam(repo, String(req.params.id), req.body ?? {}, actor(req))));

@@ -21,7 +21,7 @@ import {
   toTeam,
   type Database,
 } from '@greystone/db';
-import type { AuditEntry, DealFile, DealNote, DealPatch, PasswordReset, PayoutCommit, Repo, Settings, TotpState } from './repo.js';
+import { NOTIFICATION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, type AuditEntry, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Repo, type Settings, type TotpState } from './repo.js';
 import { requestMeta } from './auth/request-context.js';
 
 export function dbRepo(db: Database): Repo {
@@ -72,6 +72,9 @@ export function dbRepo(db: Database): Repo {
         lists: map.lists ?? { frequencies: [], commissionStatuses: [], dealStatuses: [] },
         crm: map.crm ?? { urlTemplate: '' },
         payroll: map.payroll ?? { cycle: 'Twice monthly' },
+        portal: { ...PORTAL_DEFAULTS, ...(map.portal ?? {}) },
+        notifications: { ...NOTIFICATION_DEFAULTS, ...(map.notifications ?? {}) },
+        security: { ...SECURITY_DEFAULTS, ...(map.security ?? {}) },
       };
     },
     async insertClawback(c: Clawback) {

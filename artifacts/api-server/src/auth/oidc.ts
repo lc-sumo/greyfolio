@@ -170,13 +170,36 @@ export function authRouter(config: AppConfig, repo: Repo, mailer: Mailer): Route
     res.json({ ok: true, redirect: null });
   });
 
-  /** Public: which sign-in methods the login screen should offer. */
-  r.get('/methods', (_req, res) => res.json({ oidc: !!config.oidc, devAuth: config.devAuth, password: config.passwordAuth }));
+  /** Public: which sign-in methods the login screen should offer, the portal's names, and whether first-run setup is still open. */
+  r.get('/methods', async (_req, res) => {
+    const [settings, withPw] = await Promise.all([repo.getSettings(), repo.repsWithPassword()]);
+    res.json({ oidc: !!config.oidc, devAuth: config.devAuth, password: config.passwordAuth, branding: settings.portal, setup: config.passwordAuth && !config.oidc && !config.devAuth && withPw.length === 0 });
+  });
 
-  r.get('/me', (req, res) => {
+  /**
+   * First run: nobody has a password yet and there is no SSO, so the seeded
+   * admin sets their own from the sign-in screen. Closes itself the moment
+   * any password exists, so it can never be used to take over a live portal.
+   */
+  if (config.passwordAuth) {
+    r.post('/setup', async (req, res) => {
+      if (config.oidc || (await repo.repsWithPassword()).length > 0) throw new HttpError(403, 'Setup is already complete — sign in, or use Forgot password');
+      const email = String(req.body?.email ?? '').trim().toLowerCase();
+      const rep = await repo.findRepByEmail(email);
+      if (!rep || !rep.active || rep.role !== 'admin') throw new HttpError(403, 'Enter the email of the admin on the roster');
+      const { setRepPassword } = await import('../services/passwords.js');
+      await setRepPassword(repo, rep.id, req.body?.password, rep.id);
+      await signIn(req, email);
+      res.status(201).json({ ok: true, user: req.session?.user });
+    });
+  }
+
+  r.get('/me', async (req, res) => {
     const u = currentUser(req);
     if (!u) throw new HttpError(401, 'Sign in required');
-    res.json({ user: u, canViewAs: u.role === 'admin' || u.role === 'manager', oidc: !!config.oidc, devAuth: config.devAuth, password: config.passwordAuth });
+    const settings = await repo.getSettings();
+    const mustEnrollTotp = u.role === 'admin' && settings.security.requireTotpForAdmins && !(await repo.getTotp(u.repId)).enabled;
+    res.json({ user: u, canViewAs: u.role === 'admin' || u.role === 'manager', oidc: !!config.oidc, devAuth: config.devAuth, password: config.passwordAuth, branding: settings.portal, mustEnrollTotp });
   });
 
   return r;

@@ -6,8 +6,9 @@ import { api, post, type ClawbackBasis, type Lender, type ProductRule, type Refe
 import { compact, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 
-type TabKey = 'lenders' | 'partners' | 'products' | 'teams' | 'reps' | 'crm' | 'import' | 'remittance';
+type TabKey = 'portal' | 'lenders' | 'partners' | 'products' | 'teams' | 'reps' | 'crm' | 'import' | 'remittance';
 const TABS: Array<{ key: TabKey; label: string; hint: string }> = [
+  { key: 'portal', label: 'Portal', hint: 'Names, automatic emails, security and the dropdown lists — everything about how the portal itself behaves.' },
   { key: 'lenders', label: 'Lenders', hint: 'Each lender funds certain products and has its own clawback policy. Lenders that fund consolidations pay commission in increments; everyone else pays straight commission.' },
   { key: 'partners', label: 'Referral partners', hint: 'Fee % of gross commission and an optional monthly cap. Blank cap = uncapped.' },
   { key: 'products', label: 'Product rules', hint: 'The product decides which fields the new-deal form shows and how commission is based.' },
@@ -50,6 +51,7 @@ export function Settings() {
       {err && <div className="note" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>{err}</div>}
       {!ready ? <Loading error={settings.error ?? usage.error ?? teams.error ?? roster.error} /> : (
         <>
+          {tab === 'portal' && <PortalTab settings={settings.data!} run={run} />}
           {tab === 'lenders' && <LendersTab lenders={settings.data!.lenders} products={settings.data!.products} thresholds={settings.data!.thresholds} usage={usage.data!.lenders} run={run} />}
           {tab === 'partners' && <PartnersTab partners={settings.data!.partners} usage={usage.data!.partners} run={run} />}
           {tab === 'products' && <ProductsTab products={settings.data!.products} usage={usage.data!.products} run={run} />}
@@ -600,6 +602,59 @@ function MissingRefsNotice({ missing, onAdded }: { missing: MissingRefs; onAdded
         ))}
         {missing.products.map((n) => <div key={n}>Product <b>{n}</b> — products need a commission basis, so add it under <b>Settings › Product rules</b> and preview again.</div>)}
       </div>
+    </div>
+  );
+}
+
+/* ---------- Portal: branding, notifications, security, lists ---------- */
+function PortalTab({ settings, run }: { settings: SettingsData; run: Run }) {
+  const [b, setB] = useState(settings.portal);
+  const [n, setN] = useState(settings.notifications);
+  const [sec, setSec] = useState(settings.security);
+  const [freq, setFreq] = useState(settings.lists.frequencies.join('\n'));
+  const [statuses, setStatuses] = useState(settings.lists.dealStatuses.join('\n'));
+  useEffect(() => { setB(settings.portal); setN(settings.notifications); setSec(settings.security); setFreq(settings.lists.frequencies.join('\n')); setStatuses(settings.lists.dealStatuses.join('\n')); }, [settings]);
+  const Toggle = ({ on, onChange, label, hint }: { on: boolean; onChange: (v: boolean) => void; label: string; hint: string }) => (
+    <label style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 12, alignItems: 'start', cursor: 'pointer', padding: '8px 0' }}>
+      <button type="button" className={`tog ${on ? 'on' : ''}`} onClick={() => onChange(!on)} aria-pressed={on} />
+      <span><b>{label}</b><div className="subtle" style={{ fontSize: 13.5 }}>{hint}</div></span>
+    </label>
+  );
+  const hours = Array.from({ length: 24 }, (_, h) => h);
+  const localOf = (utc: number) => { const d = new Date(Date.UTC(2026, 0, 1, utc)); return d.toLocaleTimeString([], { hour: 'numeric' }); };
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))', gap: 16, alignItems: 'start' }}>
+      <Card title="Names" extra="sidebar, sign-in screen, emails and authenticator apps">
+        <div className="form" style={{ gridTemplateColumns: '1fr' }}>
+          <label className="field"><span className="label">Company</span><input value={b.company} onChange={(e) => setB({ ...b, company: e.target.value })} /></label>
+          <label className="field"><span className="label">Portal name</span><input value={b.portal} onChange={(e) => setB({ ...b, portal: e.target.value })} /></label>
+          <label className="field"><span className="label">Support email</span><input type="email" value={b.supportEmail} onChange={(e) => setB({ ...b, supportEmail: e.target.value })} placeholder="ops@greystoneus.com" /><span className="subtle" style={{ fontSize: 13 }}>Shown to reps when something needs a human</span></label>
+        </div>
+        <button className="btn primary" style={{ marginTop: 12 }} onClick={() => void run('Names saved', () => post('/api/admin/settings/portal', b, 'PUT'))}>Save names</button>
+      </Card>
+      <Card title="Automatic emails" extra="each one is logged in the Audit log as mail.sent">
+        <Toggle on={n.statements} onChange={(v) => setN({ ...n, statements: v })} label="Statements when a run is approved" hint="Every rep with lines in the run gets their summary and a link to Pay history." />
+        <Toggle on={n.clawbacks} onChange={(v) => setN({ ...n, clawbacks: v })} label="Clawback notices" hint="Each rep with a slice hears the amount and that it nets against their next payout." />
+        <Toggle on={n.repQuestions} onChange={(v) => setN({ ...n, repQuestions: v })} label="Rep questions to admins" hint="When a rep asks about a deal from their drawer, admins get the note by email too." />
+        <Toggle on={n.renewalDigest} onChange={(v) => setN({ ...n, renewalDigest: v })} label="Daily renewal digest" hint="Refi-ready and Prospecting deals, to every admin, once a day." />
+        <label className="field" style={{ marginTop: 6 }}><span className="label">Digest goes out at</span>
+          <select value={n.digestHourUtc} onChange={(e) => setN({ ...n, digestHourUtc: Number(e.target.value) })} disabled={!n.renewalDigest}>{hours.map((h) => <option key={h} value={h}>{localOf(h)} your time · {h}:00 UTC</option>)}</select>
+        </label>
+        <button className="btn primary" style={{ marginTop: 12 }} onClick={() => void run('Email settings saved', () => post('/api/admin/settings/notifications', n, 'PUT'))}>Save emails</button>
+        <div className="subtle" style={{ fontSize: 13, marginTop: 10 }}>The sending address and provider key live in the host's Secrets (MAIL_PROVIDER, MAIL_API_KEY, MAIL_FROM) — those never change from here.</div>
+      </Card>
+      <Card title="Security" extra="passwords and two-factor">
+        <Toggle on={sec.requireTotpForAdmins} onChange={(v) => setSec({ ...sec, requireTotpForAdmins: v })} label="Require two-factor for admins" hint="Admins who have not set up an authenticator are held at a setup screen until they do. Turn on your own first." />
+        <button className="btn primary" style={{ marginTop: 12 }} onClick={() => void run('Security saved', () => post('/api/admin/settings/security', sec, 'PUT'))}>Save security</button>
+        <div className="subtle" style={{ fontSize: 13, marginTop: 10 }}>Passwords: 10+ characters with a letter and a number; five wrong tries lock an email for 15 minutes. Reps set and reset their own from the sign-in screen; you can also set one under Reps.</div>
+      </Card>
+      <Card title="Dropdown lists" extra="one per line · commission statuses are fixed because they drive collection">
+        <div className="form" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+          <label className="field"><span className="label">Payment frequencies</span><textarea rows={6} value={freq} onChange={(e) => setFreq(e.target.value)} style={{ border: '1px solid var(--border-strong)', borderRadius: 8, padding: '8px 10px', background: 'var(--input-bg)', color: 'inherit', font: 'inherit' }} /></label>
+          <label className="field"><span className="label">Deal statuses</span><textarea rows={6} value={statuses} onChange={(e) => setStatuses(e.target.value)} style={{ border: '1px solid var(--border-strong)', borderRadius: 8, padding: '8px 10px', background: 'var(--input-bg)', color: 'inherit', font: 'inherit' }} /><span className="subtle" style={{ fontSize: 13 }}>Keep Performing, Prospecting and Refi Ready — the portal sets those itself.</span></label>
+        </div>
+        <button className="btn primary" style={{ marginTop: 12 }} onClick={() => void run('Lists saved', () => post('/api/admin/settings/lists', { frequencies: freq.split('\n').map((x) => x.trim()).filter(Boolean), dealStatuses: statuses.split('\n').map((x) => x.trim()).filter(Boolean) }, 'PUT'))}>Save lists</button>
+      </Card>
     </div>
   );
 }

@@ -26,7 +26,16 @@ export interface Settings {
   lists: { frequencies: string[]; commissionStatuses: string[]; dealStatuses: string[] };
   crm: { urlTemplate: string };
   payroll: { cycle: string };
+  /** Names shown in the sidebar, sign-in screen and emails. */
+  portal: { company: string; portal: string; supportEmail: string };
+  /** Which automatic emails go out, and when the renewal digest lands (UTC hour). */
+  notifications: { statements: boolean; clawbacks: boolean; renewalDigest: boolean; digestHourUtc: number; repQuestions: boolean };
+  security: { requireTotpForAdmins: boolean };
 }
+
+export const PORTAL_DEFAULTS: Settings['portal'] = { company: 'Greystone Merchant Partners', portal: 'Commission portal', supportEmail: '' };
+export const NOTIFICATION_DEFAULTS: Settings['notifications'] = { statements: true, clawbacks: true, renewalDigest: true, digestHourUtc: 13, repQuestions: true };
+export const SECURITY_DEFAULTS: Settings['security'] = { requireTotpForAdmins: false };
 
 /** A "forgot password" token on file (only its hash). */
 export interface PasswordReset { id: string; repId: string; tokenHash: string; expiresAt: string; usedAt: string | null }

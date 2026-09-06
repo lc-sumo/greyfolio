@@ -1,5 +1,5 @@
 import type { Clawback, Deal, DealDraw, LedgerContext, PayoutLine, PayrollRun, Rep, Team, WeeklySchedule } from '@greystone/commission';
-import type { AuditEntry, DealFile, DealNote, DealPatch, PasswordReset, PayoutCommit, Repo, Settings, TotpState } from './repo.js';
+import { NOTIFICATION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, type AuditEntry, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Repo, type Settings, type TotpState } from './repo.js';
 import { requestMeta } from './auth/request-context.js';
 
 export interface MemoryData {
@@ -9,7 +9,7 @@ export interface MemoryData {
   deals: Deal[];
   lines: PayoutLine[];
   clawbacks: Clawback[];
-  settings: Settings;
+  settings: Omit<Settings, 'portal' | 'notifications' | 'security'> & Partial<Pick<Settings, 'portal' | 'notifications' | 'security'>>;
 }
 
 /** In-memory Repo over plain arrays. Mutates the arrays it is given. */
@@ -99,7 +99,8 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
       return ((data.settings as unknown as Record<string, unknown>)[key] as T) ?? null;
     },
     async getSettings() {
-      return data.settings;
+      const s = data.settings;
+      return { ...s, portal: { ...PORTAL_DEFAULTS, ...(s.portal ?? {}) }, notifications: { ...NOTIFICATION_DEFAULTS, ...(s.notifications ?? {}) }, security: { ...SECURITY_DEFAULTS, ...(s.security ?? {}) } };
     },
     async writeAudit(e) {
       audit.push({ ...e, ip: e.ip ?? requestMeta()?.ip ?? null, at: new Date().toISOString() });

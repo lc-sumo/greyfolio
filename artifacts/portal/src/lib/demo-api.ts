@@ -29,7 +29,7 @@ async function demoSheetGrid(body: Record<string, unknown>): Promise<string[][] 
   if (!sheet) throw new ApiError(400, `No FUNDED DEALS tab found (sheets: ${wb.sheets.map((s) => s.name).join(', ')})`);
   return sheet.grid;
 }
-import { createRep, createTeam, deleteTeam, saveCrm, saveLenders, savePartners, savePayroll, saveProducts, saveThresholds, updateRep, updateTeam, usage } from '../../../api-server/src/services/settings';
+import { createRep, createTeam, deleteTeam, saveCrm, saveLenders, saveLists, saveNotifications, savePartners, savePayroll, savePortal, saveProducts, saveSecurity, saveThresholds, updateRep, updateTeam, usage } from '../../../api-server/src/services/settings';
 import { annualReport, payrollRepDetail, payrollReps, preview, runSummary } from '../../../api-server/src/payroll-views';
 import { ApiError, type SessionUser } from './api';
 
@@ -108,10 +108,11 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
   const today = d.today;
   const settings = await repo.getSettings();
 
-  if (p === '/auth/methods') return json({ oidc: false, devAuth: true, password: true });
+  if (p === '/auth/methods') return json({ oidc: false, devAuth: true, password: true, setup: false, branding: settings.portal });
+  if (p === '/auth/setup' && method === 'POST') throw new ApiError(403, 'Demo: setup is already complete');
   if (p === '/auth/me') {
     if (!u) throw new ApiError(401, 'Sign in required');
-    return json({ user: u, canViewAs: u.role !== 'rep', oidc: false, devAuth: true, password: true });
+    return json({ user: u, canViewAs: u.role !== 'rep', oidc: false, devAuth: true, password: true, branding: settings.portal, mustEnrollTotp: false });
   }
   if (p === '/auth/dev-login') {
     const email = (q.get('email') ?? '').trim().toLowerCase();
@@ -240,7 +241,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
   if (p === '/api/admin/settings') return json(settings);
   if (p === '/api/admin/settings/usage') return json(await usage(repo));
   try {
-    const sm = p.match(/^\/api\/admin\/settings\/(lenders|partners|products|thresholds|crm|payroll)$/);
+    const sm = p.match(/^\/api\/admin\/settings\/(lenders|partners|products|thresholds|crm|payroll|portal|notifications|security|lists)$/);
     if (sm && method === 'PUT') {
       const k = sm[1]!;
       if (k === 'lenders') return json({ lenders: await saveLenders(repo, body.lenders, me.repId) });
@@ -248,6 +249,10 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
       if (k === 'products') return json({ products: await saveProducts(repo, body.products, me.repId) });
       if (k === 'thresholds') return json({ thresholds: await saveThresholds(repo, body, me.repId) });
       if (k === 'crm') return json({ crm: await saveCrm(repo, body, me.repId) });
+      if (k === 'portal') return json({ portal: await savePortal(repo, body, me.repId) });
+      if (k === 'notifications') return json({ notifications: await saveNotifications(repo, body, me.repId) });
+      if (k === 'security') return json({ security: await saveSecurity(repo, body, me.repId) });
+      if (k === 'lists') return json({ lists: await saveLists(repo, body, me.repId) });
       return json({ payroll: await savePayroll(repo, body, me.repId) });
     }
     if (p === '/api/admin/teams' && method === 'POST') return json(await createTeam(repo, body as never, me.repId));

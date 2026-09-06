@@ -4,7 +4,8 @@ export type CommissionStatus = 'Waiting for payment' | 'Invoice Sent' | 'Partial
 export type PayoutStatus = 'Paid' | 'Partially paid' | 'Owed' | 'Awaiting lender';
 
 export interface SessionUser { repId: string; email: string; name: string; role: 'rep' | 'manager' | 'admin' }
-export interface AuthMe { user: SessionUser; canViewAs: boolean; oidc: boolean; devAuth: boolean }
+export interface Branding { company: string; portal: string; supportEmail: string }
+export interface AuthMe { user: SessionUser; canViewAs: boolean; oidc: boolean; devAuth: boolean; branding?: Branding; mustEnrollTotp?: boolean }
 export interface RepRoleLine { role: Role; rate: number; amount: number; segment: string; segmentKey: string; paid: boolean; paidAmount: number; units: { paid: number; total: number; collected: number } | null }
 export interface RepDealView {
   id: string; crmId: string | null; date: string; business: string; lender: string; product: string; funded: number; drawCount: number;
@@ -72,6 +73,9 @@ export interface Settings {
   thresholds: { clawbackWindowDays: number; paymentOverdueDays: number; renewalMark: number; additionalCapitalAfterDays: number };
   lists: { frequencies: string[]; commissionStatuses: string[]; dealStatuses: string[] };
   crm: { urlTemplate: string }; payroll: { cycle: string };
+  portal: Branding;
+  notifications: { statements: boolean; clawbacks: boolean; renewalDigest: boolean; digestHourUtc: number; repQuestions: boolean };
+  security: { requireTotpForAdmins: boolean };
 }
 export interface RoleView { role: Role; repId: string | null; name: string | null; rate: number; amount: number; paid: number }
 export interface AdminDealRow {

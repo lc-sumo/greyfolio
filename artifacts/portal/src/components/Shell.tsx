@@ -28,8 +28,8 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
         <div className="brand">
           <img src="/greystone-icon-white.png" alt="" />
           <div>
-            <b>Greystone</b>
-            <span>Commission portal</span>
+            <b>{auth?.branding?.company?.split(' ')[0] ?? 'Greystone'}</b>
+            <span>{auth?.branding?.portal ?? 'Commission portal'}</span>
           </div>
         </div>
         <nav className="nav">
@@ -112,11 +112,11 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
 }
 
 /** Change my own password from the sidebar. Hidden under View as. */
-function TwoFactor() {
+export function TwoFactor({ forced = false }: { forced?: boolean } = {}) {
   const { notify } = useSession();
   const qc = useQueryClient();
   const status = useQuery({ queryKey: ['me-totp'], queryFn: () => api<TotpStatus>('/api/me/totp') });
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(forced);
   const [setup, setSetup] = useState<{ secret: string; otpauth: string } | null>(null);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -177,5 +177,29 @@ function ChangePassword() {
         <button type="button" className="btn" style={{ height: 30, padding: '0 10px' }} onClick={() => setOpen(false)}>Cancel</button>
       </div>
     </form>
+  );
+}
+
+/** Settings › Portal can require two-factor for admins: until enrolled, this is the whole app. */
+export function EnrollGate() {
+  const { auth, logout, refresh } = useSession();
+  return (
+    <div className="login">
+      <div className="left">
+        <img src="/greystone-wordmark.png" alt={auth?.branding?.company ?? 'Greystone'} style={{ filter: 'brightness(0) invert(1)' }} />
+        <h1>One more<br /><em>step</em>.</h1>
+        <div className="steps"><div><b>Two-factor</b><span>This portal requires an authenticator app for admin accounts. Set yours up to continue.</span></div></div>
+      </div>
+      <div className="right">
+        <form onSubmit={(e) => e.preventDefault()} style={{ background: 'var(--navy)', borderRadius: 12, padding: 20 }}>
+          <h2 style={{ color: '#fff' }}>Set up two-factor sign-in</h2>
+          <TwoFactor forced />
+          <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+            <button type="button" className="btn primary" onClick={() => void refresh()}>I have turned it on</button>
+            <button type="button" className="linkish" onClick={() => void logout()}>Sign out</button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }

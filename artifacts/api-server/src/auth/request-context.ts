@@ -9,10 +9,11 @@ export interface RequestMeta {
   ip: string | null;
 }
 
-const als = new AsyncLocalStorage<RequestMeta>();
+// The demo bundle runs the memory repo in a browser, where node:async_hooks is an empty shim: no context, no IP.
+const als: AsyncLocalStorage<RequestMeta> | null = typeof AsyncLocalStorage === 'function' ? new AsyncLocalStorage<RequestMeta>() : null;
 
 export function requestMeta(): RequestMeta | undefined {
-  return als.getStore();
+  return als?.getStore();
 }
 
 /** Express: run the rest of the request inside a context carrying the client IP. */
@@ -20,6 +21,7 @@ export function requestContext(): RequestHandler {
   return (req, _res, next) => {
     // `trust proxy` is on, so req.ip is the client behind Replit/Render/Caddy, not the proxy.
     const ip = (req.ip || req.socket.remoteAddress || '').replace(/^::ffff:/, '') || null;
-    als.run({ ip }, () => next());
+    if (als) als.run({ ip }, () => next());
+    else next();
   };
 }

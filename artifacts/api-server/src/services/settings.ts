@@ -1,6 +1,6 @@
 import { asRate, type Lender, type ProductRule, type ReferralPartner, type Rep, type Team } from '@greystone/commission';
 import { HttpError } from '../http-error.js';
-import type { Repo, Settings, Thresholds } from '../repo.js';
+import { NOTIFICATION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, type Repo, type Settings, type Thresholds } from '../repo.js';
 
 const audit = (repo: Repo, actorRepId: string, action: 'settings.update' | 'team.update' | 'rep.update' | 'rep.password' | 'settings.rename', path: string, detail: Record<string, unknown>) =>
   repo.writeAudit({ actorRepId, action, targetRepId: null, path, detail });
@@ -317,3 +317,51 @@ export async function updateRep(repo: Repo, id: string, input: RepInput, actorRe
   return { ...rep, ...patch };
 }
 
+
+export async function savePortal(repo: Repo, input: Record<string, unknown>, actorRepId: string): Promise<Settings['portal']> {
+  const str = (v: unknown, max: number) => String(v ?? '').trim().slice(0, max);
+  const portal: Settings['portal'] = { company: str(input.company, 80) || PORTAL_DEFAULTS.company, portal: str(input.portal, 60) || PORTAL_DEFAULTS.portal, supportEmail: str(input.supportEmail, 120).toLowerCase() };
+  if (portal.supportEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(portal.supportEmail)) throw new HttpError(400, 'Support email does not look right');
+  await repo.putSetting('portal', portal);
+  await audit(repo, actorRepId, 'settings.update', '/api/admin/settings/portal', portal);
+  return portal;
+}
+
+export async function saveNotifications(repo: Repo, input: Record<string, unknown>, actorRepId: string): Promise<Settings['notifications']> {
+  const hour = Number(input.digestHourUtc ?? NOTIFICATION_DEFAULTS.digestHourUtc);
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) throw new HttpError(400, 'Digest hour must be 0–23 (UTC)');
+  const n: Settings['notifications'] = { statements: input.statements !== false, clawbacks: input.clawbacks !== false, renewalDigest: input.renewalDigest !== false, repQuestions: input.repQuestions !== false, digestHourUtc: hour };
+  await repo.putSetting('notifications', n);
+  await audit(repo, actorRepId, 'settings.update', '/api/admin/settings/notifications', n);
+  return n;
+}
+
+export async function saveSecurity(repo: Repo, input: Record<string, unknown>, actorRepId: string): Promise<Settings['security']> {
+  const sec: Settings['security'] = { requireTotpForAdmins: input.requireTotpForAdmins === true };
+  if (sec.requireTotpForAdmins) {
+    // Never lock out the person flipping the switch: the actor must already be enrolled.
+    const mine = await repo.getTotp(actorRepId);
+    if (!mine.enabled) throw new HttpError(400, 'Turn on two-factor for your own account first (sidebar › Two-factor sign-in), then require it for every admin');
+  }
+  await repo.putSetting('security', sec);
+  await audit(repo, actorRepId, 'settings.update', '/api/admin/settings/security', sec);
+  return sec;
+}
+
+/** Dropdown lists. Commission statuses drive collection logic, so they stay fixed; frequencies and deal statuses are yours. */
+export async function saveLists(repo: Repo, input: Record<string, unknown>, actorRepId: string): Promise<Settings['lists']> {
+  const clean = (v: unknown, what: string) => {
+    if (!Array.isArray(v)) throw new HttpError(400, `${what} must be a list`);
+    const out = [...new Set(v.map((x) => String(x).trim()).filter(Boolean))];
+    if (out.length === 0) throw new HttpError(400, `${what} needs at least one entry`);
+    return out;
+  };
+  const current = await repo.getSettings();
+  const frequencies = clean(input.frequencies ?? current.lists.frequencies, 'Frequencies');
+  const dealStatuses = clean(input.dealStatuses ?? current.lists.dealStatuses, 'Deal statuses');
+  for (const must of ['Performing', 'Prospecting', 'Refi Ready']) if (!dealStatuses.includes(must)) throw new HttpError(400, `Deal statuses must keep "${must}" — the portal sets it automatically`);
+  const lists = { ...current.lists, frequencies, dealStatuses };
+  await repo.putSetting('lists', lists);
+  await audit(repo, actorRepId, 'settings.update', '/api/admin/settings/lists', { frequencies: frequencies.length, dealStatuses: dealStatuses.length });
+  return lists;
+}

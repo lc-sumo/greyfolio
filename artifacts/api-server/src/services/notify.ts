@@ -21,6 +21,13 @@ export interface NotifyDeps {
 
 const money = (n: number) => `$${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+/** Settings override the boot-time defaults: the portal's name in emails, and which emails are on at all. */
+async function tuned(deps: NotifyDeps): Promise<{ deps: NotifyDeps; on: NotifyDeps extends never ? never : { statements: boolean; clawbacks: boolean; renewalDigest: boolean; repQuestions: boolean; digestHourUtc: number } }> {
+  const s = await deps.repo.getSettings();
+  const name = s.portal.company && s.portal.portal ? `${s.portal.company} ${s.portal.portal}` : deps.appName;
+  return { deps: { ...deps, appName: name }, on: s.notifications };
+}
+
 async function deliver(deps: NotifyDeps, actorRepId: string, targetRepId: string | null, mail: Mail, why: string): Promise<boolean> {
   if (!deps.mailer.live && deps.mailer.kind !== 'log') return false;
   const r = await deps.mailer.send(mail);
@@ -48,7 +55,9 @@ export function statementMail(deps: Pick<NotifyDeps, 'origin' | 'appName'>, rep:
 }
 
 /** Called once a run moves to "approved": every rep with lines in it gets their statement. */
-export async function notifyRunApproved(deps: NotifyDeps, runId: string, actorRepId: string): Promise<{ sent: number; reps: number }> {
+export async function notifyRunApproved(deps0: NotifyDeps, runId: string, actorRepId: string): Promise<{ sent: number; reps: number }> {
+  const { deps, on } = await tuned(deps0);
+  if (!on.statements) return { sent: 0, reps: 0 };
   const [ctx, runs, reps] = await Promise.all([deps.repo.loadContext(), deps.repo.listRuns(), deps.repo.listReps()]);
   const run = runs.find((r) => r.id === runId);
   if (!run) return { sent: 0, reps: 0 };
@@ -65,7 +74,9 @@ export async function notifyRunApproved(deps: NotifyDeps, runId: string, actorRe
 }
 
 /** A clawback was recorded: each rep who earned on the deal hears what their slice is and how it will be netted. */
-export async function notifyClawback(deps: NotifyDeps, clawback: Clawback, actorRepId: string): Promise<{ sent: number }> {
+export async function notifyClawback(deps0: NotifyDeps, clawback: Clawback, actorRepId: string): Promise<{ sent: number }> {
+  const { deps, on } = await tuned(deps0);
+  if (!on.clawbacks) return { sent: 0 };
   const [ctx, reps] = await Promise.all([deps.repo.loadContext(), deps.repo.listReps()]);
   const deal = ctx.deals.find((d) => d.id === clawback.dealId);
   if (!deal) return { sent: 0 };
@@ -94,7 +105,9 @@ export async function notifyClawback(deps: NotifyDeps, clawback: Clawback, actor
  * Daily digest to admins: deals that are renewal-ready or in Prospecting
  * and who is meant to call. Sends nothing on a quiet day.
  */
-export async function renewalDigest(deps: NotifyDeps, today: string): Promise<{ sent: number; deals: number }> {
+export async function renewalDigest(deps0: NotifyDeps, today: string): Promise<{ sent: number; deals: number }> {
+  const { deps, on } = await tuned(deps0);
+  if (!on.renewalDigest) return { sent: 0, deals: 0 };
   const [ctx, reps, settings] = await Promise.all([deps.repo.loadContext(), deps.repo.listReps(), deps.repo.getSettings()]);
   const rows = adminRenewals(ctx, reps, settings, today).filter((r) => r.bucket === 'due' || r.bucket === 'prospecting');
   const admins = reps.filter((r) => r.active && r.role === 'admin');
@@ -125,7 +138,10 @@ export function startDigestScheduler(deps: NotifyDeps, hourUtc: number, now = ()
   const tick = async (): Promise<boolean> => {
     if (hourUtc < 0 || !deps.mailer.live) return false;
     const at = now();
-    if (at.getUTCHours() < hourUtc) return false;
+    // Settings › Portal decides the hour (and whether the digest is on at all); the env value is the fallback.
+    const s = await deps.repo.getSettings();
+    if (!s.notifications.renewalDigest) return false;
+    if (at.getUTCHours() < (s.notifications.digestHourUtc ?? hourUtc)) return false;
     const today = at.toISOString().slice(0, 10);
     const last = await deps.repo.getSetting<string>(DIGEST_KEY);
     if (last === today) return false;
@@ -139,7 +155,8 @@ export function startDigestScheduler(deps: NotifyDeps, hourUtc: number, now = ()
 }
 
 /** A rep's question about one of their deals: a note on the deal (for the history) plus an email to every admin. */
-export async function repQuestion(deps: NotifyDeps, repId: string, dealId: string, text: string): Promise<{ noteId: string; sent: number }> {
+export async function repQuestion(deps0: NotifyDeps, repId: string, dealId: string, text: string): Promise<{ noteId: string; sent: number }> {
+  const { deps, on } = await tuned(deps0);
   const [ctx, reps] = await Promise.all([deps.repo.loadContext(), deps.repo.listReps()]);
   const rep = reps.find((r) => r.id === repId);
   const deal = ctx.deals.find((d) => d.id === dealId);
@@ -150,7 +167,7 @@ export async function repQuestion(deps: NotifyDeps, repId: string, dealId: strin
   await deps.repo.writeAudit({ actorRepId: repId, action: 'deal.note', targetRepId: null, path: `/api/me/deals/${dealId}/question`, detail: { noteId: note.id, question: true } });
   const admins = reps.filter((r) => r.active && r.role === 'admin');
   let sent = 0;
-  if (admins.length) {
+  if (admins.length && on.repQuestions) {
     const mail: Mail = { to: admins.map((a) => a.email), subject: `${rep.name} asked about ${deal.business} (${deal.id})`, text: [`${rep.name} sent a question from the portal about ${deal.business} (${deal.id}, ${deal.lender}, funded ${deal.date}):`, '', body, '', `Open the deal: ${deps.origin}/deals`, '', `— ${deps.appName}`].join('\n') };
     if (await deliver(deps, repId, null, mail, `question ${dealId}`)) sent = admins.length;
   }

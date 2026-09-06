@@ -28,6 +28,13 @@ export function refreshSession(repo: Repo): RequestHandler {
         return next(new HttpError(401, rep ? `${rep.name} is inactive — ask an admin to reactivate the account` : 'Sign in required'));
       }
       if (rep.role !== u.role || rep.name !== u.name || rep.email !== u.email) req.session = { ...req.session, user: { repId: rep.id, email: rep.email, name: rep.name, role: rep.role } };
+      // Settings › Portal can require two-factor for admins: until enrolled, an admin may only reach the enrolment routes.
+      // req.path is relative to the /api mount, so match on the original URL.
+      const url = req.originalUrl.split('?')[0] ?? '';
+      if (rep.role === 'admin' && !/^\/api\/me\/totp/.test(url) && url !== '/api/me' && !url.startsWith('/api/me/password')) {
+        const sec = (await repo.getSettings()).security;
+        if (sec.requireTotpForAdmins && !(await repo.getTotp(rep.id)).enabled) return next(new HttpError(403, 'Two-factor sign-in is required for admins — set it up from the sidebar first'));
+      }
       next();
     } catch (e) {
       next(e);

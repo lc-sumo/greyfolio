@@ -22,7 +22,8 @@ export async function beginTotp(repo: Repo, repId: string, appName: string): Pro
   if (current.enabled) throw new HttpError(400, 'Two-factor is already on — turn it off before setting up a new authenticator');
   const secret = generateTotpSecret();
   await repo.setTotp(repId, { secret, enabled: false });
-  return { secret, otpauth: otpauthUrl({ issuer: appName, account: rep.email, secret }) };
+  const portal = (await repo.getSettings()).portal;
+  return { secret, otpauth: otpauthUrl({ issuer: portal.company || appName, account: rep.email, secret }) };
 }
 
 /** The first correct code proves the authenticator holds the secret; only then does sign-in start asking for codes. */

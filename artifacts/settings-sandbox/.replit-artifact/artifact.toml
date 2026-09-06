@@ -1,0 +1,19 @@
+kind = "design"
+previewPath = "/__settings-mockup/"
+title = "Settings Design Sandbox"
+description = "Current and redesigned Greystone portal Settings interface comparisons."
+version = "1.0.0"
+id = "artifacts/settings-sandbox"
+router = "path"
+
+[[services]]
+name = "Component Preview Server"
+paths = [ "/__settings-mockup/" ]
+localPort = 22289
+
+[services.development]
+run = "npm run dev"
+
+[services.env]
+PORT = "22289"
+BASE_PATH = "/__settings-mockup/"

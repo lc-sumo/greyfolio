@@ -1,0 +1,30 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Fraunces:ital,wght@0,500;0,600;1,500&display=swap');
+
+.gs-settings {
+  --canvas: #f3efe8; --surface: #fffdf9; --input-bg: #fffdf9; --sunken: #f5f1ea; --ink: #1d2a24; --ink-muted: #5f6b64; --ink-subtle: #8a948d;
+  --border: #e2ddd3; --border-strong: #cfc9bd; --border-light: #efebe3; --border-light-2: #e8e3da;
+  --navy: #17362b; --navy-raised: #1f4437; --navy-raised-2: #244c3e; --navy-raised-3: #2b5647; --navy-border: #24483a; --navy-border-2: #2d5546;
+  --navy-text: #e9ede6; --navy-text-2: #b9c8bd; --navy-text-3: #8aa394; --teal: #1f5040; --teal-hover: #173d31; --teal-bright: #8fc3a8;
+  min-height: 100vh; background: var(--canvas); color: var(--ink); font-family: 'DM Sans',system-ui,sans-serif; font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased;
+}
+.gs-settings * { box-sizing: border-box; } .gs-settings button,.gs-settings input,.gs-settings select,.gs-settings textarea { font: inherit; color: inherit; }
+.gs-settings .shell { display:grid; grid-template-columns:248px minmax(0,1fr); min-height:100vh; }
+.gs-settings .sidebar { position:sticky; top:0; height:100vh; background:var(--navy); color:var(--navy-text); display:flex; flex-direction:column; padding:18px 14px; gap:6px; }
+.gs-settings .brand { display:flex; align-items:center; gap:10px; padding:4px 8px 16px; border-bottom:1px solid var(--navy-border); margin-bottom:8px; }
+.gs-settings .mark { width:28px; height:28px; display:grid; place-items:center; color:#fff; font-family:Georgia,serif; font-size:17px; font-weight:bold; }
+.gs-settings .brand b { display:block; font-size:16px; letter-spacing:-.02em; color:#fff; }.gs-settings .brand span {display:block;font-size:12.5px;color:var(--navy-text-3)}
+.gs-settings .nav-group {padding:10px 8px 4px}.gs-settings .label{font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-subtle)}
+.gs-settings .nav a { display:flex; align-items:center; gap:10px; width:100%; color:var(--navy-text-2); padding:9px 10px; border-radius:8px; font-size:15px; font-weight:500; text-decoration:none; }
+.gs-settings .nav a.active {background:var(--navy-raised-2);color:#fff}.gs-settings .dot{width:6px;height:6px;border-radius:50%;background:var(--navy-text-3)}.gs-settings .active .dot{background:var(--teal-bright)}
+.gs-settings .sidebar-foot {margin-top:auto;border-top:1px solid var(--navy-border);padding-top:12px;display:grid;gap:8px}.gs-settings .viewas{display:grid;gap:5px}.gs-settings .viewas .label{color:var(--navy-text-3)}
+.gs-settings .viewas select{width:100%;height:34px;background:var(--navy-raised);color:#fff;border:1px solid var(--navy-border-2);border-radius:8px;padding:0 8px;font-size:14.5px}
+.gs-settings .who{display:flex;align-items:center;gap:10px;padding:6px 8px}.gs-settings .avatar{width:30px;height:30px;border-radius:50%;background:var(--navy-raised-3);color:#fff;display:grid;place-items:center;font-size:13px;font-weight:700}.gs-settings .who b{display:block;font-size:14.5px;color:#fff}.gs-settings .who span{font-size:13px;color:var(--navy-text-3)}
+.gs-settings .linkish{background:none;border:0;color:var(--navy-text-3);font-size:13.5px;padding:0 8px 4px;text-align:left}
+.gs-settings .header{position:sticky;top:0;z-index:5;background:var(--surface);border-bottom:1px solid var(--border);padding:16px 28px;display:flex;align-items:center;justify-content:space-between}.gs-settings .header h1{margin:2px 0 0;font-family:Fraunces,Georgia,serif;font-size:30px;font-weight:600;letter-spacing:-.02em;line-height:1.1}
+.gs-settings .body{padding:24px 28px;display:grid;gap:16px}.gs-settings .seg{display:inline-flex;background:var(--input-bg);border:1px solid var(--border-strong);border-radius:10px;padding:4px;gap:4px;flex-wrap:wrap;align-self:start}.gs-settings .seg button{border:0;background:none;padding:5px 11px;border-radius:7px;font-size:14px;font-weight:600;color:var(--ink-muted)}.gs-settings .seg button.on{background:var(--navy);color:#fff}
+.gs-settings .muted{color:var(--ink-muted)}.gs-settings .subtle{color:var(--ink-subtle)}.gs-settings .portal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:16px;align-items:start}
+.gs-settings .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 20px;min-width:0}.gs-settings .card h3{margin:0 0 12px;font-size:16px;font-weight:700;letter-spacing:-.02em}.gs-settings .card h3 small{font-weight:500;color:var(--ink-subtle);margin-left:8px;font-size:13.5px}
+.gs-settings .form{display:grid;gap:12px 14px}.gs-settings .field{display:grid;gap:5px;min-width:0}.gs-settings .field input,.gs-settings .field select{height:36px;border:1px solid var(--border-strong);border-radius:8px;padding:0 10px;background:var(--input-bg);outline:none;width:100%;font-size:15px}.gs-settings textarea{border:1px solid var(--border-strong);border-radius:8px;padding:8px 10px;background:var(--input-bg);resize:vertical}
+.gs-settings .btn{height:36px;border-radius:9px;padding:0 14px;font-weight:600;font-size:14.5px;border:1px solid var(--border-strong);background:#fff;color:var(--ink-muted)}.gs-settings .btn.primary{background:var(--teal);border-color:var(--teal);color:#fff}
+.gs-settings .toggle-row{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:start;padding:8px 0}.gs-settings .toggle-row b{display:block}.gs-settings .toggle-row .subtle,.gs-settings .field .subtle{font-size:13px}.gs-settings .tog{width:34px;height:20px;border-radius:10px;border:0;background:var(--border-strong);position:relative;padding:0;margin-top:2px}.gs-settings .tog:after{content:'';position:absolute;top:2px;left:16px;width:16px;height:16px;border-radius:50%;background:#fff}.gs-settings .tog.on{background:var(--teal)}
+@media(max-width:900px){.gs-settings .shell{grid-template-columns:1fr}.gs-settings .sidebar{position:relative;height:auto}.gs-settings .nav{display:flex;overflow:auto}.gs-settings .sidebar-foot{display:none}.gs-settings .body{padding:16px}.gs-settings .header{padding:14px 16px}}

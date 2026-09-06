@@ -273,7 +273,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     return json({
       reps: d.reps.map((rep) => {
         const l = repLedger(ctx, rep.id);
-        return { id: rep.id, name: rep.name, email: rep.email, role: rep.role, teamId: rep.teamId, team: rep.teamId ? teamName.get(rep.teamId) ?? null : null, openerRate: rep.openerRate, closerRate: rep.closerRate, overrideRate: rep.overrideRate, active: rep.active, hasPassword: demoPasswords.has(rep.id), hasTotp: demoTotp.has(rep.id), earned: l.earned, paid: l.paid, held: l.held, owed: l.owed, dealCount: l.deals.length };
+        return { id: rep.id, name: rep.name, email: rep.email, role: rep.role, teamId: rep.teamId, team: rep.teamId ? teamName.get(rep.teamId) ?? null : null, openerRate: rep.openerRate, closerRate: rep.closerRate, overrideRate: rep.overrideRate, active: rep.active, hasPassword: demoPasswords.has(rep.id), hasTotp: demoTotp.has(rep.id), superAdmin: !!rep.superAdmin, perms: rep.perms ?? null, earned: l.earned, paid: l.paid, held: l.held, owed: l.owed, dealCount: l.deals.length };
       }),
     });
   }

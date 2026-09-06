@@ -286,7 +286,7 @@ function RepsTab({ reps, teams, run, onViewAs, isSuper, permissions }: { reps: R
   const toDraft = (r: RosterRep): Draft => ({ name: r.name, email: r.email, teamId: r.teamId ?? '', openerRate: pctIn(r.openerRate), closerRate: pctIn(r.closerRate), overrideRate: pctIn(r.overrideRate), role: r.role });
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [adding, setAdding] = useState<Draft | null>(null);
-  const cols = 'minmax(150px,1.1fr) minmax(190px,1.2fr) 150px 70px 70px 70px 100px 100px 130px 90px 110px 100px 290px 220px';
+  const cols = 'minmax(150px,1.1fr) minmax(190px,1.2fr) 150px 70px 70px 70px 100px 100px 130px 90px 110px 100px 380px 230px';
   const [pw, setPw] = useState<{ id: string; value: string } | null>(null);
   const [filesFor, setFilesFor] = useState<RosterRep | null>(null);
   const label = (role: string) => (role === 'admin' ? 'Master' : role === 'manager' ? 'Team lead' : 'Rep');
@@ -304,7 +304,7 @@ function RepsTab({ reps, teams, run, onViewAs, isSuper, permissions }: { reps: R
   return (
     <Card title="Reps" extra={`${reps.length} · ${reps.filter((r) => r.active).length} active`}>
       <div className="scroller">
-        <div style={{ minWidth: 1950 }}>
+        <div style={{ minWidth: 2050 }}>
           <Head cols={cols}><span>Name</span><span>Email</span><span>Team</span><span>Opener %</span><span>Closer %</span><span>Override %</span><span>Earned</span><span>Owed</span><span>Access</span><span>Active</span><span title="Owner tier: creates and changes admins, changes security. Only a super admin can grant it.">Super admin</span><span title="May this rep email merchants from a deal? The portal-wide switch is under Portal › Permissions.">Merchant email</span><span>Sign-in</span><span /></Head>
           {reps.map((r) => {
             const v = drafts[r.id] ?? toDraft(r);

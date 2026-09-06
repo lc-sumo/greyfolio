@@ -25,7 +25,7 @@ import {
   toTeam,
   type Database,
 } from '@greystone/db';
-import { NOTIFICATION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, type AuditEntry, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Repo, type RepFile, type RepTask, type Settings, type TotpState } from './repo.js';
+import { NOTIFICATION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AuditEntry, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Repo, type RepFile, type RepTask, type Settings, type TotpState } from './repo.js';
 import type { PlaybookRule } from './services/playbook-rules.js';
 import { requestMeta } from './auth/request-context.js';
 
@@ -168,6 +168,7 @@ export function dbRepo(db: Database): Repo {
         portal: { ...PORTAL_DEFAULTS, ...(map.portal ?? {}) },
         notifications: { ...NOTIFICATION_DEFAULTS, ...(map.notifications ?? {}) },
         security: { ...SECURITY_DEFAULTS, ...(map.security ?? {}) },
+        templates: { ...TEMPLATE_DEFAULTS, ...(map.templates ?? {}) },
       };
     },
     async insertClawback(c: Clawback) {

@@ -13,6 +13,7 @@ import { adminSettingsRouter } from './routes/admin-settings.js';
 import { rateLimit, requestLog, securityHeaders } from './hardening.js';
 import { healthRouter } from './routes/health.js';
 import { adminBooksRouter } from './routes/admin-books.js';
+import { adminPlaybooksRouter } from './routes/admin-playbooks.js';
 import { meRouter } from './routes/me.js';
 import { mailerFor, type Mailer } from './services/mail.js';
 
@@ -52,6 +53,7 @@ export function createApp(config: AppConfig, repo: Repo, deps: AppDeps = {}): ex
   app.use('/api/admin', adminPayrollRouter(repo, notify));
   app.use('/api/admin', adminSettingsRouter(repo, notify));
   app.use('/api/admin', adminBooksRouter(repo));
+  app.use('/api/admin', adminPlaybooksRouter(repo, notify));
 
   if (config.portalDist) {
     const dist = path.resolve(config.portalDist);

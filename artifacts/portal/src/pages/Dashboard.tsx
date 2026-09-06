@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { DealDrawer } from '../components/DealDrawer';
 import { Shell } from '../components/Shell';
+import { TasksCard } from '../components/TasksCard';
 import { Card, Loading, Metric, Pill, toneFor } from '../components/ui';
 import { api, qs, type RepDashboard } from '../lib/api';
 import { compact, day, fullDay, money, monthLabel, periodRange } from '../lib/format';
@@ -40,6 +41,8 @@ export function Dashboard() {
               <div><span className="label">Clawback held</span><b className={d.wallet.held ? 'red' : ''}>{money(d.wallet.held)}</b></div>
             </div>
           </section>
+
+          <TasksCard onOpenDeal={setOpen} />
 
           <div className="grid-auto">
             <Metric label="Earned this period" value={money(d.period.earned)} sub={`${d.period.dealCount} deal${d.period.dealCount === 1 ? '' : 's'} funded ${day(d.period.from)} – ${day(d.period.to)}`} />

@@ -33,6 +33,12 @@ async function demoSheetGrid(body: Record<string, unknown>): Promise<string[][] 
 import { createRep, createTeam, deleteTeam, saveCrm, saveLenders, saveLists, saveNotifications, savePartners, savePayroll, savePortal, saveProducts, saveSecurity, saveThresholds, updateRep, updateTeam, usage } from '../../../api-server/src/services/settings';
 import { annualReport, payrollRepDetail, payrollReps, preview, runSummary } from '../../../api-server/src/payroll-views';
 import { ApiError, type SessionUser } from './api';
+import { memoryMailer } from '../../../api-server/src/services/mail';
+import { MERGE_FIELD_HELP, TASK_OUTCOMES, TRIGGER_KINDS } from '../../../api-server/src/services/playbook-rules';
+import { createPlaybook, createTask, deletePlaybook, dryRun, ensureStarterPlaybooks, logOutcome, merchantPreview, runPlaybooks, saveTemplates, sendMerchantEmail, taskViews, updatePlaybook } from '../../../api-server/src/services/playbooks';
+
+const demoMailer = memoryMailer();
+const demoNotify = { mailer: demoMailer, origin: 'https://portal.greystoneus.com', appName: 'Greystone Commission Portal' };
 
 let repo: ReturnType<typeof memoryRepo> | null = null;
 let demo: DemoData | null = null;
@@ -211,6 +217,19 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     const row = annualReport(ctx, d.reps, y).rows.find((r) => r.repId === effective) ?? { repId: effective, name: me?.name ?? effective, email: me?.email ?? '', active: true, grossPaid: 0, recovered: 0, cash: 0, payouts: 0, deals: 0 };
     return json({ year: y, years: [...new Set(ctx.lines.filter((l) => l.repId === effective).map((l) => l.paidAt.slice(0, 4)))].sort().reverse(), ...row });
   }
+  if (p === '/api/me/tasks') return json({ tasks: await taskViews(repo, { repId: effective, status: q.get('status') === 'open' || q.get('status') === 'done' ? (q.get('status') as 'open' | 'done') : undefined }, today), outcomes: TASK_OUTCOMES, today });
+  const tkm = p.match(/^\/api\/me\/tasks\/([^/]+)$/);
+  if (tkm && method === 'PATCH') return json(await logOutcome(repo, tkm[1]!, body as never, u.repId, today, { asAdmin: false }));
+  const dtm = p.match(/^\/api\/me\/deals\/([^/]+)\/tasks$/);
+  if (dtm && method === 'POST') return json(await createTask(repo, { dealId: decodeURIComponent(dtm[1]!), repId: u.repId, title: body.title, dueDate: body.dueDate }, u.repId, today));
+  if (p === '/api/me/templates') return json({ merchant: settings.templates.merchant, live: true });
+  const mpm = p.match(/^\/api\/me\/deals\/([^/]+)\/merchant-email(?:\/preview)?$/);
+  if (mpm) {
+    const deal = repDeals(ctx.deals, u.repId).find((x) => x.id === decodeURIComponent(mpm[1]!));
+    if (!deal) throw new ApiError(404, 'Deal not found');
+    if (method === 'POST') return json(await sendMerchantEmail({ repo, ...demoNotify }, deal, u.repId, body as never, today));
+    return json(await merchantPreview(repo, deal, u.repId, q.get('template') ?? '', today, demoNotify.appName));
+  }
   if (p === '/api/me/files') {
     if (method === 'POST') { await addRepFile(repo, u.repId, body as never, u.repId); return json({ files: await repo.listRepFiles(u.repId) }); }
     return json({ files: await repo.listRepFiles(effective) });
@@ -275,6 +294,29 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     if (p === '/api/admin/remittance/preview' && method === 'POST') return json(await previewRemittance(repo, String(body.csv ?? '')));
     if (p === '/api/admin/remittance' && method === 'POST') return json(await commitRemittance(repo, String(body.csv ?? ''), me.repId));
     if (p === '/api/admin/reports/annual') return json(annualReport(ctx, d.reps, Number(q.get('year') ?? today.slice(0, 4))));
+    if (p === '/api/admin/playbooks') {
+      await ensureStarterPlaybooks(repo);
+      const [playbooks, firings, tasks] = await Promise.all([repo.listPlaybooks(), repo.listFirings({ limit: 100000 }), repo.listTasks()]);
+      if (method === 'POST') return json(await createPlaybook(repo, body as never, me.repId));
+      return json({ playbooks: playbooks.map((pb) => { const mine = firings.filter((f) => f.playbookId === pb.id); const ts = tasks.filter((t) => t.playbookId === pb.id); return { ...pb, firings: mine.length, lastFired: mine.map((f) => f.firedAt).sort().at(-1) ?? null, openTasks: ts.filter((t) => t.status === 'open').length, doneTasks: ts.filter((t) => t.status === 'done').length }; }), triggers: TRIGGER_KINDS, outcomes: TASK_OUTCOMES, mergeFields: MERGE_FIELD_HELP, lastRun: (await repo.getSetting<string>('playbooks.lastRun')) ?? null });
+    }
+    if (p === '/api/admin/playbooks/dry-run' && method === 'POST') return json(await dryRun(repo, body.rule, today, typeof body.playbookId === 'string' ? body.playbookId : undefined));
+    if (p === '/api/admin/playbooks/run' && method === 'POST') { await ensureStarterPlaybooks(repo); return json(await runPlaybooks({ repo, ...demoNotify }, today, me.repId)); }
+    if (p === '/api/admin/playbooks/log') {
+      const [firings, playbooks] = await Promise.all([repo.listFirings({ limit: Number(q.get('limit') ?? 200) }), repo.listPlaybooks()]);
+      const pbn = new Map(playbooks.map((x) => [x.id, x.name]));
+      const rn = new Map(d.reps.map((r) => [r.id, r.name]));
+      return json({ firings: firings.map((f) => ({ ...f, playbookName: pbn.get(f.playbookId) ?? f.playbookId, repName: f.repId ? rn.get(f.repId) ?? f.repId : null })) });
+    }
+    const pbm = p.match(/^\/api\/admin\/playbooks\/([^/]+)$/);
+    if (pbm && method === 'PATCH') return json(await updatePlaybook(repo, pbm[1]!, body as never, me.repId));
+    if (pbm && method === 'DELETE') { await deletePlaybook(repo, pbm[1]!, me.repId); return json({ ok: true }); }
+    if (p === '/api/admin/tasks') return json({ tasks: await taskViews(repo, { status: q.get('status') === 'open' || q.get('status') === 'done' ? (q.get('status') as 'open' | 'done') : undefined, repId: q.get('rep') ?? undefined, dealId: q.get('deal') ?? undefined }, today) });
+    const atm = p.match(/^\/api\/admin\/tasks\/([^/]+)$/);
+    if (atm && method === 'PATCH') return json(await logOutcome(repo, atm[1]!, body as never, me.repId, today, { asAdmin: true }));
+    const adtm = p.match(/^\/api\/admin\/deals\/([^/]+)\/tasks$/);
+    if (adtm && method === 'POST') return json(await createTask(repo, { dealId: decodeURIComponent(adtm[1]!), ...(body as object) }, me.repId, today));
+    if (p === '/api/admin/settings/templates' && method === 'PUT') return json({ templates: await saveTemplates(repo, body as never, me.repId) });
     if (p === '/api/admin/books/receivables') return json(receivables(ctx, settings, today));
     if (p === '/api/admin/books/partners') return json(partnerPayables(ctx, settings));
     if (p === '/api/admin/books/partners/pay' && method === 'POST') return json(await markPartnerPaid(repo, body as never, me.repId));

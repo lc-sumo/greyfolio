@@ -30,13 +30,16 @@ export interface Settings {
   /** Names shown in the sidebar, sign-in screen and emails. */
   portal: { company: string; portal: string; supportEmail: string };
   /** Which automatic emails go out, and when the renewal digest lands (UTC hour). */
-  notifications: { statements: boolean; clawbacks: boolean; renewalDigest: boolean; digestHourUtc: number; repQuestions: boolean };
+  notifications: { statements: boolean; clawbacks: boolean; renewalDigest: boolean; digestHourUtc: number; repQuestions: boolean; playbookHourUtc: number };
   security: { requireTotpForAdmins: boolean };
+  /** Email templates reps send to merchants from a deal. */
+  templates: { merchant: Array<{ id: string; name: string; subject: string; body: string }> };
 }
 
 export const PORTAL_DEFAULTS: Settings['portal'] = { company: 'Greystone Merchant Partners', portal: 'Commission portal', supportEmail: '' };
-export const NOTIFICATION_DEFAULTS: Settings['notifications'] = { statements: true, clawbacks: true, renewalDigest: true, digestHourUtc: 13, repQuestions: true };
+export const NOTIFICATION_DEFAULTS: Settings['notifications'] = { statements: true, clawbacks: true, renewalDigest: true, digestHourUtc: 13, repQuestions: true, playbookHourUtc: 12 };
 export const SECURITY_DEFAULTS: Settings['security'] = { requireTotpForAdmins: false };
+export { TEMPLATE_DEFAULTS } from './services/playbooks.js';
 
 /** A "forgot password" token on file (only its hash). */
 export interface PasswordReset { id: string; repId: string; tokenHash: string; expiresAt: string; usedAt: string | null }

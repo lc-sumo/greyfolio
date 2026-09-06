@@ -4,6 +4,8 @@ import { api, post, type RepDealDetail } from '../lib/api';
 import { day, fullDay, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 import { ClawbackBar, Drawer, Loading, Pill, toneFor } from './ui';
+import { MerchantEmail } from './MerchantEmail';
+import { AddTask } from './TasksCard';
 
 export function DealDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const { viewAs } = useSession();
@@ -69,7 +71,11 @@ export function DealDrawer({ id, onClose }: { id: string; onClose: () => void })
             )}
           </section>
 
-          <AskAboutDeal dealId={d.id} />
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <AskAboutDeal dealId={d.id} />
+            <MerchantEmail dealId={d.id} merchantEmail={d.merchantEmail ?? ''} />
+            {!viewAs && <AddTask dealId={d.id} />}
+          </div>
           {d.clawback && (
             <div className="note" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>
               Clawback on this deal: <b>{money(d.clawback.amount)}</b> charged to you

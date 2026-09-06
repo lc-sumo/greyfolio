@@ -3,11 +3,12 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Shell } from '../components/Shell';
 import { Card, Drawer, Loading, Pill } from '../components/ui';
 import { FilesPanel } from '../components/FilesPanel';
+import { PlaybooksTab } from '../components/PlaybooksTab';
 import { DEMO, api, post, type ClawbackBasis, type Lender, type ProductRule, type ReferralPartner, type RemittancePreview, type RosterRep, type Settings as SettingsData, type Team, type Usage } from '../lib/api';
 import { compact, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 
-type TabKey = 'portal' | 'lenders' | 'partners' | 'products' | 'teams' | 'reps' | 'crm' | 'import' | 'remittance';
+type TabKey = 'portal' | 'lenders' | 'partners' | 'products' | 'teams' | 'reps' | 'crm' | 'playbooks' | 'import' | 'remittance';
 const TABS: Array<{ key: TabKey; label: string; hint: string }> = [
   { key: 'portal', label: 'Portal', hint: 'Names, automatic emails, security and the dropdown lists — everything about how the portal itself behaves.' },
   { key: 'lenders', label: 'Lenders', hint: 'Each lender funds certain products and has its own clawback policy. Lenders that fund consolidations pay commission in increments; everyone else pays straight commission.' },
@@ -16,6 +17,7 @@ const TABS: Array<{ key: TabKey; label: string; hint: string }> = [
   { key: 'teams', label: 'Teams', hint: 'A team has a leader who earns the override on the team’s deals. Set the leader here.' },
   { key: 'reps', label: 'Reps', hint: 'Rates default onto new deals and can be overridden per deal. Deactivating never changes history.' },
   { key: 'crm', label: 'CRM & thresholds', hint: 'CRM deep link template and the day counts that drive at-risk, Prospecting and renewals.' },
+  { key: 'playbooks', label: 'Playbooks', hint: 'If/then rules on the renewal engine: when a deal reaches a paid-in mark, a stage, an unused line or a maturity date, open a task for the rep, email them, email you, or set a status. Dry-run any rule to see exactly which deals it would touch today.' },
   { key: 'import', label: 'Import from sheet', hint: 'Bring the FUNDED DEALS tab in from a CSV export. Preview first; nothing is written until the file is clean.' },
   { key: 'remittance', label: 'Lender remittance', hint: 'Paste the lender’s weekly payment report. Each line is matched to a deal and marks the increments or dollars that arrived — no ticking receipts one by one.' },
 ];
@@ -58,6 +60,7 @@ export function Settings() {
           {tab === 'products' && <ProductsTab products={settings.data!.products} usage={usage.data!.products} run={run} />}
           {tab === 'teams' && <TeamsTab teams={teams.data!.teams} reps={roster.data!.reps} usage={usage.data!.teams} run={run} />}
           {tab === 'reps' && <RepsTab reps={roster.data!.reps} teams={teams.data!.teams} run={run} onViewAs={(id) => setViewAs(id)} />}
+          {tab === 'playbooks' && <PlaybooksTab settings={settings.data!} teams={teams.data!.teams} reps={roster.data!.reps} run={run} />}
           {tab === 'crm' && <CrmTab settings={settings.data!} run={run} />}
           {tab === 'import' && <ImportTab />}
           {tab === 'remittance' && <RemittanceTab />}
@@ -649,6 +652,10 @@ function PortalTab({ settings, run }: { settings: SettingsData; run: Run }) {
         <Toggle on={n.renewalDigest} onChange={(v) => setN({ ...n, renewalDigest: v })} label="Daily renewal digest" hint="Refi-ready and Prospecting deals, to every admin, once a day." />
         <label className="field" style={{ marginTop: 6 }}><span className="label">Digest goes out at</span>
           <select value={n.digestHourUtc} onChange={(e) => setN({ ...n, digestHourUtc: Number(e.target.value) })} disabled={!n.renewalDigest}>{hours.map((h) => <option key={h} value={h}>{localOf(h)} your time · {h}:00 UTC</option>)}</select>
+        </label>
+        <label className="field" style={{ marginTop: 6 }}><span className="label">Playbooks run daily at</span>
+          <select value={n.playbookHourUtc} onChange={(e) => setN({ ...n, playbookHourUtc: Number(e.target.value) })}>{hours.map((h) => <option key={h} value={h}>{localOf(h)} your time · {h}:00 UTC</option>)}</select>
+          <span className="subtle" style={{ fontSize: 13 }}>Rules under Settings › Playbooks fire once a day after this hour; rep emails roll up into one message.</span>
         </label>
         <button className="btn primary" style={{ marginTop: 12 }} onClick={() => void run('Email settings saved', () => post('/api/admin/settings/notifications', n, 'PUT'))}>Save emails</button>
         <div className="subtle" style={{ fontSize: 13, marginTop: 10 }}>The sending address and provider key live in the host's Secrets (MAIL_PROVIDER, MAIL_API_KEY, MAIL_FROM) — those never change from here.</div>

@@ -15,6 +15,8 @@ export interface Mail {
   subject: string;
   text: string;
   html?: string;
+  /** Replies go here instead of MAIL_FROM (merchant emails sent on a rep's behalf). */
+  replyTo?: string;
 }
 
 export interface MailResult {
@@ -84,6 +86,7 @@ export function mailerFor(cfg: MailConfig): Mailer {
           body: JSON.stringify({
             personalizations: [{ to: list(m.to).map((email) => ({ email })) }],
             from: parseFrom(cfg.from),
+            ...(m.replyTo ? { reply_to: { email: m.replyTo } } : {}),
             subject: m.subject,
             content: [
               { type: 'text/plain', value: m.text },
@@ -105,7 +108,7 @@ export function mailerFor(cfg: MailConfig): Mailer {
         const res = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: { authorization: `Bearer ${cfg.apiKey}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ from: cfg.from, to: list(m.to), subject: m.subject, text: m.text, html: m.html ?? textToHtml(m.text) }),
+          body: JSON.stringify({ from: cfg.from, to: list(m.to), subject: m.subject, text: m.text, html: m.html ?? textToHtml(m.text), ...(m.replyTo ? { reply_to: m.replyTo } : {}) }),
         });
         const body = (await res.json().catch(() => ({}))) as { id?: string; message?: string };
         return res.ok ? { ok: true, id: body.id } : { ok: false, error: body.message ?? `Resend responded ${res.status}` };
@@ -119,7 +122,7 @@ export function mailerFor(cfg: MailConfig): Mailer {
       const res = await fetch('https://api.postmarkapp.com/email', {
         method: 'POST',
         headers: { 'x-postmark-server-token': cfg.apiKey!, accept: 'application/json', 'content-type': 'application/json' },
-        body: JSON.stringify({ From: cfg.from, To: list(m.to).join(','), Subject: m.subject, TextBody: m.text, HtmlBody: m.html ?? textToHtml(m.text), MessageStream: 'outbound' }),
+        body: JSON.stringify({ From: cfg.from, To: list(m.to).join(','), Subject: m.subject, TextBody: m.text, HtmlBody: m.html ?? textToHtml(m.text), MessageStream: 'outbound', ...(m.replyTo ? { ReplyTo: m.replyTo } : {}) }),
       });
       const body = (await res.json().catch(() => ({}))) as { MessageID?: string; Message?: string };
       return res.ok ? { ok: true, id: body.MessageID } : { ok: false, error: body.Message ?? `Postmark responded ${res.status}` };

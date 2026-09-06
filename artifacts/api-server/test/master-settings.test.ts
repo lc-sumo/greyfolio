@@ -69,7 +69,7 @@ describe('Settings › Portal', () => {
     const { admin, repo, mailer } = await harness();
     expect((await admin.put('/api/admin/settings/notifications').send({ digestHourUtc: 25 })).status).toBe(400);
     const r = await admin.put('/api/admin/settings/notifications').send({ statements: true, clawbacks: false, renewalDigest: false, repQuestions: true, digestHourUtc: 9 });
-    expect(r.body.notifications).toEqual({ statements: true, clawbacks: false, renewalDigest: false, repQuestions: true, digestHourUtc: 9 });
+    expect(r.body.notifications).toEqual({ statements: true, clawbacks: false, renewalDigest: false, repQuestions: true, digestHourUtc: 9, playbookHourUtc: 12 });
     const cb = await admin.post('/api/admin/deals/F2/clawbacks').send({ amount: 500, date: '2026-08-01', reason: 'Merchant defaulted' });
     expect(cb.status).toBe(201);
     expect(cb.body.notified).toBe(0);

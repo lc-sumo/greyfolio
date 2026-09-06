@@ -1,3 +1,4 @@
+import type { PlaybookRule as PlaybookRuleT } from '../../../api-server/src/services/playbook-rules';
 /* Types mirror artifacts/api-server/src/scope.ts. */
 export type Role = 'Opener' | 'Closer' | 'Override';
 export type CommissionStatus = 'Waiting for payment' | 'Invoice Sent' | 'Partially Paid' | 'YES - Paid In Full';
@@ -8,7 +9,7 @@ export interface Branding { company: string; portal: string; supportEmail: strin
 export interface AuthMe { user: SessionUser; canViewAs: boolean; oidc: boolean; devAuth: boolean; branding?: Branding; mustEnrollTotp?: boolean }
 export interface RepRoleLine { role: Role; rate: number; amount: number; segment: string; segmentKey: string; paid: boolean; paidAmount: number; units: { paid: number; total: number; collected: number } | null }
 export interface RepDealView {
-  id: string; crmId: string | null; date: string; business: string; lender: string; product: string; funded: number; drawCount: number;
+  id: string; crmId: string | null; date: string; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string; lender: string; product: string; funded: number; drawCount: number;
   disbursement: Disbursement | null;
   roles: Role[]; lines: RepRoleLine[]; share: number; accrued: number; paid: number; owed: number; payoutStatus: PayoutStatus;
   commissionStatus: CommissionStatus; lenderPaidLabel: string; dealStatus: string; repPaid: string | null; clawbackWindow: ClawbackWindow;
@@ -74,9 +75,11 @@ export interface Settings {
   lists: { frequencies: string[]; commissionStatuses: string[]; dealStatuses: string[] };
   crm: { urlTemplate: string }; payroll: { cycle: string };
   portal: Branding;
-  notifications: { statements: boolean; clawbacks: boolean; renewalDigest: boolean; digestHourUtc: number; repQuestions: boolean };
+  notifications: { statements: boolean; clawbacks: boolean; renewalDigest: boolean; digestHourUtc: number; repQuestions: boolean; playbookHourUtc: number };
   security: { requireTotpForAdmins: boolean };
+  templates: { merchant: MerchantTemplate[] };
 }
+export interface MerchantTemplate { id: string; name: string; subject: string; body: string }
 export interface RoleView { role: Role; repId: string | null; name: string | null; rate: number; amount: number; paid: number }
 export interface AdminDealRow {
   id: string; opportunityId: string; parentId: string | null; date: string; business: string; drawCount: number;
@@ -182,3 +185,17 @@ export const EXCEPTION_LABEL: Record<ExceptionKind, string> = {
 export const EXCEPTION_SHORT: Record<ExceptionKind, string> = { 'funded-no-commission': 'Nothing received', 'paid-before-collected': 'Paid ahead of lender', 'past-maturity': 'Past maturity', 'clawback-closing': 'Clawback closing', 'overdue-receipt': 'Receipt overdue', 'partner-owed-collected': 'Partner fee due' };
 export interface RepFileView { id: string; repId: string; name: string; mime: string; size: number; uploadedBy: string; uploadedByName?: string; createdAt: string }
 export interface AnnualMe { year: number; years: string[]; grossPaid: number; recovered: number; cash: number; payouts: number; deals: number }
+
+/* ---- Playbooks and tasks ---- */
+export type { PlaybookAction, PlaybookFilters, PlaybookRule, PlaybookTrigger } from '../../../api-server/src/services/playbook-rules';
+export { MERGE_FIELD_HELP, TASK_OUTCOMES, TRIGGER_KINDS } from '../../../api-server/src/services/playbook-rules';
+export interface PlaybookView { id: string; name: string; enabled: boolean; rule: PlaybookRuleT; createdAt: string; updatedAt: string; firings: number; lastFired: string | null; openTasks: number; doneTasks: number }
+export interface PlaybookList { playbooks: PlaybookView[]; triggers: Array<{ kind: PlaybookRuleT['trigger']['kind']; label: string; param?: 'atLeast' | 'atMost' | 'withinDays' | 'in'; unit?: string }>; outcomes: Array<{ value: TaskOutcome; label: string; closes: boolean }>; mergeFields: string[]; lastRun: string | null }
+export interface DryRunRow { dealId: string; business: string; lender: string; funded: number; rep: string; stage: string; paidIn: string; daysSinceFunding: number; held: string | null }
+export interface DryRun { rows: DryRunRow[]; wouldFire: number; matched: number; preview: { subject: string; body: string } | null }
+export interface RunResult { date: string; fired: number; emails: number; tasks: number; statuses: number; byPlaybook: Array<{ id: string; name: string; deals: number }> }
+export interface FiringView { id: string; playbookId: string; dealId: string; repId: string | null; firedAt: string; detail?: Record<string, unknown> | null; playbookName: string; repName: string | null }
+export type TaskOutcome = 'called' | 'no_answer' | 'app_submitted' | 'funded' | 'declined' | 'not_interested';
+export interface TaskView { id: string; dealId: string; repId: string; playbookId: string | null; title: string; dueDate: string; status: 'open' | 'done'; outcome: TaskOutcome | null; note: string | null; createdBy: string | null; createdAt: string; doneAt: string | null; business: string; lender: string; funded: number; repName: string; playbookName: string | null; overdue: boolean; merchantContact: string; merchantPhone: string; merchantEmail: string }
+export interface MyTasks { tasks: TaskView[]; outcomes: Array<{ value: TaskOutcome; label: string; closes: boolean }>; today: string }
+export interface MerchantPreview { to: string; subject: string; body: string; template: MerchantTemplate }

@@ -8,6 +8,8 @@ import { repQuestion, type NotifyDeps } from '../services/notify.js';
 import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repPayHistory, repPayHistoryCsv, repRenewals, repStatements, repWallet } from '../scope.js';
 import { annualReport } from '../payroll-views.js';
 import { addRepFile, fetchRepFile } from '../services/notes.js';
+import { createTask, logOutcome, merchantPreview, sendMerchantEmail, taskViews } from '../services/playbooks.js';
+import { TASK_OUTCOMES } from '../services/playbook-rules.js';
 
 /**
  * The rep portal. Every handler reads `scopeOf(req).effectiveRepId` — the
@@ -137,6 +139,44 @@ export function meRouter(repo: Repo, appName = 'Greystone Commission Portal', no
     const years = [...new Set(ctx.lines.filter((l) => l.repId === id).map((l) => l.paidAt.slice(0, 4)))].sort().reverse();
     res.json({ year: y, years, ...row });
   });
+  /* ---- Tasks: what the playbooks (or an admin, or I) put on my list ---- */
+  const today = () => new Date().toISOString().slice(0, 10);
+  r.get('/tasks', async (req, res) => {
+    const status = req.query.status === 'open' || req.query.status === 'done' ? req.query.status : undefined;
+    res.json({ tasks: await taskViews(repo, { repId: scopeOf(req).effectiveRepId, status }, today()), outcomes: TASK_OUTCOMES, today: today() });
+  });
+  r.post('/deals/:id/tasks', async (req, res) => {
+    const s = scopeOf(req);
+    if (s.viewAs) throw new HttpError(403, 'Tasks are added by the rep, not from View as');
+    const ctx = await repo.loadContext();
+    if (!repDeals(ctx.deals, s.actor.repId).some((d) => d.id === req.params.id)) throw new HttpError(404, 'Deal not found');
+    res.status(201).json(await createTask(repo, { dealId: String(req.params.id), repId: s.actor.repId, title: req.body?.title, dueDate: req.body?.dueDate }, s.actor.repId, today()));
+  });
+  r.patch('/tasks/:id', async (req, res) => {
+    const s = scopeOf(req);
+    if (s.viewAs) throw new HttpError(403, 'Outcomes are logged by the rep, not from View as');
+    res.json(await logOutcome(repo, String(req.params.id), req.body ?? {}, s.actor.repId, today(), { asAdmin: false }));
+  });
+
+  /* ---- Email the merchant from a template, under my name ---- */
+  const myDeal = async (req: Parameters<Router>[0]) => {
+    const s = scopeOf(req);
+    const ctx = await repo.loadContext();
+    const deal = repDeals(ctx.deals, s.actor.repId).find((d) => d.id === req.params.id);
+    if (!deal) throw new HttpError(404, 'Deal not found');
+    return { s, deal };
+  };
+  r.get('/templates', async (_req, res) => res.json({ merchant: (await repo.getSettings()).templates.merchant, live: !!notify && (notify.mailer.live || notify.mailer.kind === 'log') }));
+  r.get('/deals/:id/merchant-email/preview', async (req, res) => {
+    const { s, deal } = await myDeal(req);
+    res.json(await merchantPreview(repo, deal, s.actor.repId, String(req.query.template ?? ''), today(), appName));
+  });
+  r.post('/deals/:id/merchant-email', async (req, res) => {
+    const { s, deal } = await myDeal(req);
+    if (s.viewAs) throw new HttpError(403, 'Merchant emails go out from the rep, not from View as');
+    res.json(await sendMerchantEmail({ repo, mailer: notify?.mailer ?? { kind: 'off', live: false, send: async () => ({ ok: false }) }, origin: notify?.origin ?? '', appName: notify?.appName ?? appName }, deal, s.actor.repId, req.body ?? {}, today()));
+  });
+
   /** My own files (W-9): a rep can add and read theirs; only an admin removes. */
   r.get('/files', async (req, res) => {
     const scope = scopeOf(req);

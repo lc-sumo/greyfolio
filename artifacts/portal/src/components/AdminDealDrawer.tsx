@@ -8,6 +8,7 @@ import { useSession } from '../lib/session';
 import { ClawbackBar, Contact, Drawer, Loading, Pill, toneFor } from './ui';
 import { NewDealDrawer } from './NewDealDrawer';
 import { ClawbackNote, ContactEditor, DealFiles, DealNotes, DrawEditor, RecordClawback } from './DealExtras';
+import { DealTasks } from './TasksCard';
 
 export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: string; settings: Settings; editOptions: RepOption[]; onClose: () => void }) {
   const { notify } = useSession();
@@ -255,6 +256,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
             )}
           </section>
 
+          <DealTasks dealId={d.id} />
           <DealNotes dealId={d.id} />
           <DealFiles dealId={d.id} />
 

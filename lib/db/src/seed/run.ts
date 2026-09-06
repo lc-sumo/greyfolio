@@ -1,10 +1,10 @@
 /**
- * Seed the database from the workbook constants. Idempotent: reps upsert on
- * id (team assignment is preserved), settings upsert on key.
+ * Seed the database from the workbook constants. Idempotent and never
+ * destructive: a rep or settings row that already exists is left exactly as
+ * it is, so leaving SEED=workbook on cannot undo edits made in Settings.
  *
  *   DATABASE_URL=postgres://… pnpm --filter @greystone/db seed
  */
-import { sql } from 'drizzle-orm';
 import { createDb } from '../index.js';
 import { commissionReps, commissionSettings, commissionSheetsSync } from '../schema/commission.js';
 import { seedReps, seedSettings } from './workbook.js';
@@ -25,23 +25,13 @@ export async function seed(db: ReturnType<typeof createDb>): Promise<{ reps: num
           overrideRate: r.overrideRate,
           active: r.active,
         })
-        .onConflictDoUpdate({
-          target: commissionReps.id,
-          set: {
-            name: r.name,
-            openerRate: r.openerRate,
-            closerRate: r.closerRate,
-            overrideRate: r.overrideRate,
-            active: r.active,
-            updatedAt: sql`now()`,
-          },
-        });
+        .onConflictDoNothing();
     }
     for (const s of seedSettings()) {
       await tx
         .insert(commissionSettings)
         .values({ key: s.key, value: s.value as never })
-        .onConflictDoUpdate({ target: commissionSettings.key, set: { value: s.value as never, updatedAt: sql`now()` } });
+        .onConflictDoNothing();
     }
     await tx.insert(commissionSheetsSync).values({ id: 'default' }).onConflictDoNothing();
   });

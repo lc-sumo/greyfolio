@@ -1,5 +1,5 @@
 import type { Clawback, Deal, DealDraw, LedgerContext, PayoutLine, PayrollRun, Rep, Team, WeeklySchedule } from '@greystone/commission';
-import { NOTIFICATION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, type AuditEntry, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Repo, type Settings, type TotpState } from './repo.js';
+import { NOTIFICATION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, type AuditEntry, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Repo, type RepFile, type RepTask, type Settings, type TotpState } from './repo.js';
 import { requestMeta } from './auth/request-context.js';
 
 export interface MemoryData {
@@ -21,7 +21,92 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
   const totp = new Map<string, TotpState>();
   const notes: DealNote[] = [];
   const files: DealFile[] = [];
+  const repFiles: RepFile[] = [];
+  const cutoffs = new Map<string, string>();
+  const calendarTokens = new Map<string, string>();
+  const playbooks: Playbook[] = [];
+  const firings: PlaybookFiring[] = [];
+  const tasks: RepTask[] = [];
   return {
+    async listAllNotes() {
+      return [...notes];
+    },
+    async listAllFiles() {
+      return [...files];
+    },
+    async listAllRepFiles() {
+      return [...repFiles];
+    },
+    async getSessionCutoff(repId) {
+      return cutoffs.get(repId) ?? null;
+    },
+    async setSessionCutoff(repId, at) {
+      cutoffs.set(repId, at);
+    },
+    async getCalendarToken(repId) {
+      return calendarTokens.get(repId) ?? null;
+    },
+    async setCalendarToken(repId, token) {
+      if (token) calendarTokens.set(repId, token);
+      else calendarTokens.delete(repId);
+    },
+    async findRepByCalendarToken(token) {
+      for (const [repId, t] of calendarTokens) if (t === token) return data.reps.find((r) => r.id === repId) ?? null;
+      return null;
+    },
+    async listRepFiles(repId) {
+      return repFiles.filter((f) => f.repId === repId).map(({ data: _d, ...meta }) => meta).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    },
+    async getRepFile(id) {
+      return repFiles.find((f) => f.id === id) ?? null;
+    },
+    async insertRepFile(f) {
+      repFiles.push({ ...f });
+    },
+    async deleteRepFile(id) {
+      const i = repFiles.findIndex((f) => f.id === id);
+      if (i >= 0) repFiles.splice(i, 1);
+    },
+    async listPlaybooks() {
+      return playbooks.map((p) => ({ ...p })).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    },
+    async insertPlaybook(p) {
+      playbooks.push({ ...p });
+    },
+    async updatePlaybook(id, patch) {
+      const p = playbooks.find((x) => x.id === id);
+      if (!p) throw new Error(`No playbook ${id}`);
+      Object.assign(p, patch, { updatedAt: new Date().toISOString() });
+    },
+    async deletePlaybook(id) {
+      const i = playbooks.findIndex((x) => x.id === id);
+      if (i >= 0) playbooks.splice(i, 1);
+      for (let k = firings.length - 1; k >= 0; k--) if (firings[k]!.playbookId === id) firings.splice(k, 1);
+      for (const t of tasks) if (t.playbookId === id) t.playbookId = null;
+    },
+    async listFirings(opts = {}) {
+      return firings
+        .filter((f) => (!opts.playbookId || f.playbookId === opts.playbookId) && (!opts.dealId || f.dealId === opts.dealId))
+        .sort((a, b) => b.firedAt.localeCompare(a.firedAt))
+        .slice(0, opts.limit ?? 500);
+    },
+    async insertFiring(f) {
+      firings.push({ ...f });
+    },
+    async listTasks(filter = {}) {
+      return tasks
+        .filter((t) => (!filter.repId || t.repId === filter.repId) && (!filter.dealId || t.dealId === filter.dealId) && (!filter.status || t.status === filter.status))
+        .map((t) => ({ ...t }))
+        .sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.createdAt.localeCompare(b.createdAt));
+    },
+    async insertTask(t) {
+      tasks.push({ ...t });
+    },
+    async updateTask(id, patch) {
+      const t = tasks.find((x) => x.id === id);
+      if (!t) throw new Error(`No task ${id}`);
+      Object.assign(t, patch);
+    },
     async createPasswordReset(r) {
       resets.push({ ...r });
     },

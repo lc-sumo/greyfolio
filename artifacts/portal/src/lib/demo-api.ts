@@ -269,6 +269,8 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     if (rm && method === 'PATCH') return json(await updateRep(repo, decodeURIComponent(rm[1]!), body as never, me.repId));
     const tm2 = p.match(/^\/api\/admin\/reps\/([^/]+)\/totp$/);
     if (tm2 && method === 'DELETE') { demoTotp.delete(decodeURIComponent(tm2[1]!)); return json({ ok: true, hasTotp: false }); }
+    const im = p.match(/^\/api\/admin\/reps\/([^/]+)\/invite$/);
+    if (im && method === 'POST') { const rep = d.reps.find((r) => r.id === im[1]); if (!rep) throw new ApiError(404, 'Rep not found'); await repo.writeAudit({ actorRepId: u.repId, action: 'rep.invite', targetRepId: rep.id, path: p, detail: { email: rep.email, demo: true } }); return json({ ok: true, email: rep.email }); }
     const pm = p.match(/^\/api\/admin\/reps\/([^/]+)\/password$/);
     if (pm && method === 'POST') {
       const id = decodeURIComponent(pm[1]!);

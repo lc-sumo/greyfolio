@@ -10,6 +10,7 @@
     "db:generate": "pnpm --filter @greystone/db generate",
     "db:migrate": "pnpm --filter @greystone/db migrate",
     "db:push": "pnpm --filter @greystone/db push",
+    "db:up": "pnpm --filter @greystone/db up",
     "db:seed": "pnpm --filter @greystone/db seed",
     "db:seed:demo": "pnpm --filter @greystone/db seed:demo",
     "api:dev": "pnpm --filter @greystone/api-server dev",

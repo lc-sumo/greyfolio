@@ -57,6 +57,13 @@
       "when": 1788699193226,
       "tag": "0007_audit_ip",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788705813514,
+      "tag": "0008_session_cutoff_bookkeeping",
+      "breakpoints": true
     }
   ]
 }

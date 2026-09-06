@@ -30,7 +30,9 @@ export function meRouter(repo: Repo, appName = 'Greystone Commission Portal', no
   r.post('/password', async (req, res) => {
     const scope = scopeOf(req);
     if (scope.viewAs) throw new HttpError(403, 'Passwords can only be changed by the account holder');
-    await changeOwnPassword(repo, scope.actor.repId, req.body?.current, req.body?.next);
+    const { since } = await changeOwnPassword(repo, scope.actor.repId, req.body?.current, req.body?.next);
+    // This device stays signed in; every other one is cut off.
+    req.session = { ...req.session, user: { ...scope.actor, since } };
     res.json({ ok: true });
   });
 

@@ -181,6 +181,10 @@ export interface Deal {
   /** Groups multi-funding facilities; defaults to own id. */
   opportunityId: string;
   parentId: string | null;
+  /** The deal this one renewed or refinanced, if any (renewal chain). */
+  renewedFromId?: string | null;
+  /** Date the referral partner's fee was paid out; null or missing = still owed. */
+  referralPaidAt?: string | null;
   /** Funded date, `YYYY-MM-DD`. Never in the future. */
   date: string;
   business: string;

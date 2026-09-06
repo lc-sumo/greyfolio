@@ -42,14 +42,14 @@ export function createApp(config: AppConfig, repo: Repo, deps: AppDeps = {}): ex
     }),
   );
 
-  app.use('/', healthRouter());
+  app.use('/', healthRouter(() => repo.getSetting('portal')));
   app.use('/auth', rateLimit({ windowMs: 60_000, max: 30, keyPrefix: 'auth:' }), authRouter(config, repo, mailer));
   app.use('/api', rateLimit({ windowMs: 60_000, max: 600 }), refreshSession(repo));
   app.use('/api/me', meRouter(repo, config.appName, notify));
   app.use('/api/admin', adminRouter(repo));
   app.use('/api/admin', adminDealsRouter(repo, notify));
   app.use('/api/admin', adminPayrollRouter(repo, notify));
-  app.use('/api/admin', adminSettingsRouter(repo));
+  app.use('/api/admin', adminSettingsRouter(repo, notify));
 
   if (config.portalDist) {
     const dist = path.resolve(config.portalDist);

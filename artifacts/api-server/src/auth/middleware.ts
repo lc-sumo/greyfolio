@@ -27,7 +27,13 @@ export function refreshSession(repo: Repo): RequestHandler {
         req.session = null;
         return next(new HttpError(401, rep ? `${rep.name} is inactive — ask an admin to reactivate the account` : 'Sign in required'));
       }
-      if (rep.role !== u.role || rep.name !== u.name || rep.email !== u.email) req.session = { ...req.session, user: { repId: rep.id, email: rep.email, name: rep.name, role: rep.role } };
+      // A password change (by the rep, an admin, or a reset link) signs every other device out.
+      const cutoff = await repo.getSessionCutoff(rep.id);
+      if (cutoff && (!u.since || u.since < cutoff)) {
+        req.session = null;
+        return next(new HttpError(401, 'Signed out because the password on this account changed — sign in again'));
+      }
+      if (rep.role !== u.role || rep.name !== u.name || rep.email !== u.email) req.session = { ...req.session, user: { ...u, repId: rep.id, email: rep.email, name: rep.name, role: rep.role } };
       // Settings › Portal can require two-factor for admins: until enrolled, an admin may only reach the enrolment routes.
       // req.path is relative to the /api mount, so match on the original URL.
       const url = req.originalUrl.split('?')[0] ?? '';

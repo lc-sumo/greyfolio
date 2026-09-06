@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Shell } from '../components/Shell';
 import { Card, Loading, Pill } from '../components/ui';
-import { api, post, type ClawbackBasis, type Lender, type ProductRule, type ReferralPartner, type RemittancePreview, type RosterRep, type Settings as SettingsData, type Team, type Usage } from '../lib/api';
+import { DEMO, api, post, type ClawbackBasis, type Lender, type ProductRule, type ReferralPartner, type RemittancePreview, type RosterRep, type Settings as SettingsData, type Team, type Usage } from '../lib/api';
 import { compact, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 
@@ -322,6 +322,7 @@ function RepsTab({ reps, teams, run, onViewAs }: { reps: RosterRep[]; teams: Tea
                       <Pill tone={r.hasPassword ? 'teal' : 'grey'}>{r.hasPassword ? 'Password set' : 'No password'}</Pill>
                       <button className="btn" style={{ height: 30, padding: '0 8px' }} title="Set or reset the password this rep signs in with" onClick={() => setPw({ id: r.id, value: tempPassword() })}>{r.hasPassword ? 'Reset' : 'Set password'}</button>
                       {r.hasPassword && <button className="btn" style={{ height: 30, padding: '0 8px' }} title="Remove the password — SSO only" onClick={() => run(`${r.name} — password removed`, () => post(`/api/admin/reps/${r.id}/password`, { password: null }))}>✕</button>}
+                      <button className="btn" style={{ height: 30, padding: '0 8px' }} title="Email this rep a 72-hour link to choose their own password" onClick={() => run(`Invite sent to ${r.email}`, () => post(`/api/admin/reps/${r.id}/invite`, {}))}>Invite</button>
                       {r.hasTotp && <button className="btn" style={{ height: 30, padding: '0 8px' }} title="Two-factor is on for this rep. Reset it if they lost their phone — they sign in with the password alone until they enrol again." onClick={() => { if (window.confirm(`Reset two-factor for ${r.name}? They will sign in with just their password until they set it up again.`)) void run(`${r.name} — two-factor reset`, () => post(`/api/admin/reps/${r.id}/totp`, {}, 'DELETE')); }}>2FA on · reset</button>}
                     </span>
                   )}
@@ -646,7 +647,12 @@ function PortalTab({ settings, run }: { settings: SettingsData; run: Run }) {
       <Card title="Security" extra="passwords and two-factor">
         <Toggle on={sec.requireTotpForAdmins} onChange={(v) => setSec({ ...sec, requireTotpForAdmins: v })} label="Require two-factor for admins" hint="Admins who have not set up an authenticator are held at a setup screen until they do. Turn on your own first." />
         <button className="btn primary" style={{ marginTop: 12 }} onClick={() => void run('Security saved', () => post('/api/admin/settings/security', sec, 'PUT'))}>Save security</button>
-        <div className="subtle" style={{ fontSize: 13, marginTop: 10 }}>Passwords: 10+ characters with a letter and a number; five wrong tries lock an email for 15 minutes. Reps set and reset their own from the sign-in screen; you can also set one under Reps.</div>
+        <div className="subtle" style={{ fontSize: 13, marginTop: 10 }}>Passwords: 10+ characters with a letter and a number; five wrong tries lock an email for 15 minutes. Changing a password signs that account out everywhere else. Reps set and reset their own from the sign-in screen; you can also set one or send an invite under Reps.</div>
+        <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border-light)' }}>
+          <b>Backup</b>
+          <div className="subtle" style={{ fontSize: 13, margin: '4px 0 8px' }}>Every deal, payout, run, note, file, rule and audit row as one JSON file. Passwords and authenticator secrets are never included. Keep a copy off the host.</div>
+          {DEMO ? <span className="subtle" style={{ fontSize: 13 }}>Available on the live portal.</span> : <a className="btn" href="/api/admin/backup.json" download>Download everything</a>}
+        </div>
       </Card>
       <Card title="Dropdown lists" extra="one per line · commission statuses are fixed because they drive collection">
         <div className="form" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>

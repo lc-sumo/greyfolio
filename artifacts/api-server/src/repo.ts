@@ -1,8 +1,9 @@
 import type { Clawback, Deal, DealDraw, Lender, LedgerContext, PayoutLine, PayrollRun, ProductRule, ReferralPartner, Rep, Team, WeeklySchedule } from '@greystone/commission';
+import type { PlaybookRule } from './services/playbook-rules.js';
 
 export interface AuditEntry {
   actorRepId: string;
-  action: 'login' | 'logout' | 'view-as' | 'deal.create' | 'deal.update' | 'deal.draw' | 'deal.collection' | 'payroll.run' | 'payroll.pay' | 'settings.update' | 'team.update' | 'rep.update' | 'rep.password' | 'login.failed' | 'deal.delete' | 'payroll.void' | 'deal.import' | 'password.reset' | 'rep.totp' | 'deal.note' | 'deal.file' | 'deal.clawback' | 'deal.remittance' | 'mail.sent' | 'deal.draw.delete' | 'payroll.run.delete' | 'deal.contact' | 'deal.draw.update' | 'deal.clawback.update' | 'deal.clawback.delete' | 'payroll.run.reopen' | 'settings.rename';
+  action: 'login' | 'logout' | 'view-as' | 'deal.create' | 'deal.update' | 'deal.draw' | 'deal.collection' | 'payroll.run' | 'payroll.pay' | 'settings.update' | 'team.update' | 'rep.update' | 'rep.password' | 'login.failed' | 'deal.delete' | 'payroll.void' | 'deal.import' | 'password.reset' | 'rep.totp' | 'deal.note' | 'deal.file' | 'deal.clawback' | 'deal.remittance' | 'mail.sent' | 'deal.draw.delete' | 'payroll.run.delete' | 'deal.contact' | 'deal.draw.update' | 'deal.clawback.update' | 'deal.clawback.delete' | 'payroll.run.reopen' | 'settings.rename' | 'rep.invite' | 'rep.file' | 'rep.calendar' | 'deal.referral.paid' | 'settings.playbook' | 'playbook.fired' | 'task' | 'mail.merchant' | 'backup';
   targetRepId: string | null;
   path: string | null;
   detail?: Record<string, unknown>;
@@ -44,6 +45,30 @@ export interface TotpState { secret: string | null; enabled: boolean }
 export interface DealNote { id: string; dealId: string; authorRepId: string; body: string; createdAt: string }
 export interface DealFileMeta { id: string; dealId: string; name: string; mime: string; size: number; uploadedBy: string; createdAt: string }
 export interface DealFile extends DealFileMeta { data: string }
+/** A file on a rep's roster entry (W-9, agreement). */
+export interface RepFileMeta { id: string; repId: string; name: string; mime: string; size: number; uploadedBy: string; createdAt: string }
+export interface RepFile extends RepFileMeta { data: string }
+
+/** An if/then rule (Settings › Playbooks). */
+export interface Playbook { id: string; name: string; enabled: boolean; rule: PlaybookRule; createdAt: string; updatedAt: string }
+/** One rule firing on one deal. */
+export interface PlaybookFiring { id: string; playbookId: string; dealId: string; repId: string | null; firedAt: string; detail?: Record<string, unknown> | null }
+export type TaskOutcome = 'called' | 'no_answer' | 'app_submitted' | 'funded' | 'declined' | 'not_interested';
+/** A rep's to-do on a deal, from a playbook or by hand. */
+export interface RepTask {
+  id: string;
+  dealId: string;
+  repId: string;
+  playbookId: string | null;
+  title: string;
+  dueDate: string;
+  status: 'open' | 'done';
+  outcome: TaskOutcome | null;
+  note: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  doneAt: string | null;
+}
 
 /** Stored deal columns that a service may patch (never draws — those have their own methods). */
 export type DealPatch = Partial<Omit<Deal, 'id' | 'draws'>>;
@@ -112,6 +137,32 @@ export interface Repo {
   getFile(id: string): Promise<DealFile | null>;
   insertFile(f: DealFile): Promise<void>;
   deleteFile(id: string): Promise<void>;
+  /* Whole-table reads for the backup download */
+  listAllNotes(): Promise<DealNote[]>;
+  listAllFiles(): Promise<DealFile[]>;
+  listAllRepFiles(): Promise<RepFile[]>;
+  /* Session cut-off: a password change signs every other device out */
+  getSessionCutoff(repId: string): Promise<string | null>;
+  setSessionCutoff(repId: string, at: string): Promise<void>;
+  /* Private calendar feed */
+  getCalendarToken(repId: string): Promise<string | null>;
+  setCalendarToken(repId: string, token: string | null): Promise<void>;
+  findRepByCalendarToken(token: string): Promise<Rep | null>;
+  /* Rep files (W-9 etc.) */
+  listRepFiles(repId: string): Promise<RepFileMeta[]>;
+  getRepFile(id: string): Promise<RepFile | null>;
+  insertRepFile(f: RepFile): Promise<void>;
+  deleteRepFile(id: string): Promise<void>;
+  /* Playbooks, their firings, and the tasks they open */
+  listPlaybooks(): Promise<Playbook[]>;
+  insertPlaybook(p: Playbook): Promise<void>;
+  updatePlaybook(id: string, patch: Partial<Pick<Playbook, 'name' | 'enabled' | 'rule'>>): Promise<void>;
+  deletePlaybook(id: string): Promise<void>;
+  listFirings(opts?: { playbookId?: string; dealId?: string; limit?: number }): Promise<PlaybookFiring[]>;
+  insertFiring(f: PlaybookFiring): Promise<void>;
+  listTasks(filter?: { repId?: string; dealId?: string; status?: RepTask['status'] }): Promise<RepTask[]>;
+  insertTask(t: RepTask): Promise<void>;
+  updateTask(id: string, patch: Partial<Pick<RepTask, 'status' | 'outcome' | 'note' | 'doneAt' | 'dueDate' | 'title'>>): Promise<void>;
 }
 
 export interface PayoutCommit {

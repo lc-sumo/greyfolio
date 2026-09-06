@@ -3,6 +3,7 @@ import { repLedger, repOptions } from '@greystone/commission';
 import { HttpError, canViewAs, currentUser, requireRole } from '../auth/middleware.js';
 import type { Repo } from '../repo.js';
 import { resetTotp } from '../services/twofactor.js';
+import { buildBackup } from '../services/backup.js';
 
 /** Admin surface for Phase 2: roster, rep option lists, View-as targets, audit trail. Phase 4+ adds deals. */
 export function adminRouter(repo: Repo): Router {
@@ -88,6 +89,11 @@ export function adminRouter(repo: Repo): Router {
     };
   };
   r.get('/audit', requireRole('admin'), async (req, res) => res.json(await auditQuery(req)));
+  /** Everything, as one JSON file. Keep a copy somewhere the host cannot lose. */
+  r.get('/backup.json', requireRole('admin'), async (req, res) => {
+    const doc = await buildBackup(repo, currentUser(req)!.repId);
+    res.attachment(`greystone-backup-${new Date().toISOString().slice(0, 10)}.json`).json(doc);
+  });
   r.get('/audit.csv', requireRole('admin'), async (req, res) => {
     const [reps, all] = await Promise.all([repo.listReps(), repo.listAudit(5000, 0)]);
     const name = new Map(reps.map((x) => [x.id, x.name]));

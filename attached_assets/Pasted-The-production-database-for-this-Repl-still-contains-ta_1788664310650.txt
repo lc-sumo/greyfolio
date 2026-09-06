@@ -1,0 +1,23 @@
+The production database for this Repl still contains tables from an earlier prototype of this app (commission_deals, commission_reps, commission_settings, commission_clawbacks, commission_payroll_runs, commission_payments, commission_activity, commission_payroll_entries, commission_sync_state). They have a different structure from the current schema in lib/db/src/schema/commission.ts, which is why Publish fails with "multiple primary keys for table commission_settings are not allowed".
+
+The data in those tables is prototype data (3 deals, 4 reps, 1 settings row). I want to keep a copy but get them out of the way so the current schema can be created fresh.
+
+Please do the following against the PRODUCTION database only, and nothing else:
+
+1. First run read-only queries to list every table in the public schema and the row count of each, and show me the result before changing anything.
+
+2. Rename each legacy table with a legacy_ prefix so the data is preserved:
+   ALTER TABLE commission_deals RENAME TO legacy_commission_deals;
+   ALTER TABLE commission_reps RENAME TO legacy_commission_reps;
+   ALTER TABLE commission_settings RENAME TO legacy_commission_settings;
+   ALTER TABLE commission_clawbacks RENAME TO legacy_commission_clawbacks;
+   ALTER TABLE commission_payroll_runs RENAME TO legacy_commission_payroll_runs;
+   ALTER TABLE commission_payments RENAME TO legacy_commission_payments;
+   ALTER TABLE commission_activity RENAME TO legacy_commission_activity;
+   ALTER TABLE commission_payroll_entries RENAME TO legacy_commission_payroll_entries;
+   ALTER TABLE commission_sync_state RENAME TO legacy_commission_sync_state;
+   Also rename any constraints or indexes on those tables that still start with commission_ so they cannot collide with the new schema's names (for example commission_reps_email_unique). If a __drizzle_migrations table exists from the old prototype, rename it to legacy___drizzle_migrations too.
+
+3. Do not drop any table, do not delete any rows, do not edit the schema files or migrations in the repo, and do not add any deployment-time DDL or build scripts.
+
+4. Show me the table list again when done so I can confirm only legacy_ tables and no commission_ tables remain, then tell me to retry Publish.

@@ -6,11 +6,11 @@ export type PayoutStatus = 'Paid' | 'Partially paid' | 'Owed' | 'Awaiting lender
 
 export interface SessionUser { repId: string; email: string; name: string; role: 'rep' | 'manager' | 'admin' }
 export interface Branding { company: string; portal: string; supportEmail: string }
-export interface AuthMe { user: SessionUser; canViewAs: boolean; oidc: boolean; devAuth: boolean; branding?: Branding; mustEnrollTotp?: boolean; idleMinutes?: number; superAdmin?: boolean; canEmailMerchants?: boolean }
+export interface AuthMe { user: SessionUser; canViewAs: boolean; oidc: boolean; devAuth: boolean; branding?: Branding; mustEnrollTotp?: boolean; idleMinutes?: number; superAdmin?: boolean; canEmailMerchants?: boolean; canEditContacts?: boolean }
 export interface TrustedDeviceView { id: string; label: string; ip: string | null; location: string | null; createdAt: string; lastUsedAt: string; expiresAt: string; current: boolean }
 export interface RepRoleLine { role: Role; rate: number; amount: number; segment: string; segmentKey: string; paid: boolean; paidAmount: number; units: { paid: number; total: number; collected: number } | null }
 export interface RepDealView {
-  id: string; crmId: string | null; date: string; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string; lender: string; product: string; funded: number; drawCount: number;
+  id: string; crmId: string | null; date: string; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string; missingContact: Array<'contact' | 'email' | 'phone'>; lender: string; product: string; funded: number; drawCount: number;
   disbursement: Disbursement | null;
   roles: Role[]; lines: RepRoleLine[]; share: number; accrued: number; paid: number; owed: number; payoutStatus: PayoutStatus;
   commissionStatus: CommissionStatus; lenderPaidLabel: string; dealStatus: string; repPaid: string | null; clawbackWindow: ClawbackWindow;
@@ -83,7 +83,7 @@ export interface Settings {
   notifications: { statements: boolean; clawbacks: boolean; renewalDigest: boolean; digestHourUtc: number; repQuestions: boolean; playbookHourUtc: number };
   security: { requireTotpForAdmins: boolean; idleMinutes: number; totpRememberDays: number };
   templates: { merchant: MerchantTemplate[] };
-  permissions: { merchantEmail: boolean };
+  permissions: { merchantEmail: boolean; contactEdit: boolean };
 }
 export interface MerchantTemplate { id: string; name: string; subject: string; body: string }
 export interface RoleView { role: Role; repId: string | null; name: string | null; rate: number; amount: number; paid: number }

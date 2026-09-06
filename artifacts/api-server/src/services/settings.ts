@@ -379,7 +379,7 @@ export async function saveNotifications(repo: Repo, input: Record<string, unknow
 }
 
 export async function savePermissions(repo: Repo, input: Record<string, unknown>, actorRepId: string): Promise<Settings['permissions']> {
-  const p: Settings['permissions'] = { merchantEmail: input.merchantEmail !== false };
+  const p: Settings['permissions'] = { merchantEmail: input.merchantEmail !== false, contactEdit: input.contactEdit !== false };
   await repo.putSetting('permissions', p);
   await audit(repo, actorRepId, 'settings.update', '/api/admin/settings/permissions', p);
   return p;

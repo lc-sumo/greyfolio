@@ -71,6 +71,8 @@ export interface RepDealView {
   merchantContact: string;
   merchantEmail: string;
   merchantPhone: string;
+  /** Which of contact / email / phone are blank — the rep is asked to fill them in. */
+  missingContact: Array<'contact' | 'email' | 'phone'>;
   lender: string;
   product: string;
   /** Total funded across every segment (initial + draws). */
@@ -127,6 +129,7 @@ export function repDealView(deal: Deal, repId: string, lines: PayoutLine[], claw
     merchantContact: deal.merchantContact,
     merchantEmail: deal.merchantEmail,
     merchantPhone: deal.merchantPhone,
+    missingContact: [...(deal.merchantContact.trim() ? [] : ['contact' as const]), ...(deal.merchantEmail.trim() ? [] : ['email' as const]), ...(deal.merchantPhone.trim() ? [] : ['phone' as const])],
     lender: deal.lender,
     product: deal.product,
     funded: totalFunded(deal),

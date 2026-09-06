@@ -130,7 +130,7 @@ export function DealFiles({ dealId }: { dealId: string }) {
 }
 
 /** Merchant identity can be corrected on any deal, paid or not — optionally across every deal on the same email. */
-export function ContactEditor({ deal, onDone, onCancel }: { deal: { id: string; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string }; onDone: (label: string) => void; onCancel: () => void }) {
+export function ContactEditor({ deal, onDone, onCancel, base = '/api/admin', businessEditable = true }: { deal: { id: string; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string }; onDone: (label: string) => void; onCancel: () => void; base?: string; businessEditable?: boolean }) {
   const [f, setF] = useState({ business: deal.business, merchantContact: deal.merchantContact, merchantEmail: deal.merchantEmail, merchantPhone: deal.merchantPhone });
   const [all, setAll] = useState(!!deal.merchantEmail);
   const [busy, setBusy] = useState(false);
@@ -138,18 +138,16 @@ export function ContactEditor({ deal, onDone, onCancel }: { deal: { id: string; 
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF((s) => ({ ...s, [k]: e.target.value }));
   return (
     <section className="card">
-      <h3>Merchant contact <small>who they are never changes the money, so this works on paid deals too</small></h3>
-      <div className="form">
-        <div className="split-row">
-          <label className="field"><span className="label">Business</span><input value={f.business} onChange={set('business')} autoFocus /></label>
-          <label className="field"><span className="label">Contact name</span><input value={f.merchantContact} onChange={set('merchantContact')} /></label>
-          <label className="field"><span className="label">Email</span><input type="email" value={f.merchantEmail} onChange={set('merchantEmail')} /></label>
-          <label className="field"><span className="label">Phone</span><input value={f.merchantPhone} onChange={set('merchantPhone')} /></label>
-        </div>
+      <h3>Merchant contact <small>{businessEditable ? 'who they are never changes the money, so this works on paid deals too' : 'fill in what is missing — it saves to the merchant record for everyone'}</small></h3>
+      <div className="form" style={{ gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
+          {businessEditable ? <label className="field"><span className="label">Business</span><input value={f.business} onChange={set('business')} autoFocus /></label> : <label className="field"><span className="label">Business</span><input value={f.business} readOnly className="ro" /></label>}
+          <label className="field"><span className="label">Contact name</span><input value={f.merchantContact} onChange={set('merchantContact')} autoFocus={!businessEditable} placeholder="Owner or main contact" /></label>
+          <label className="field"><span className="label">Email</span><input type="email" value={f.merchantEmail} onChange={set('merchantEmail')} placeholder="owner@business.com" /></label>
+          <label className="field"><span className="label">Phone</span><input value={f.merchantPhone} onChange={set('merchantPhone')} placeholder="(212) 555-0100" /></label>
       </div>
       {deal.merchantEmail && <label className="subtle" style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, cursor: 'pointer' }}><input type="checkbox" className="big" checked={all} onChange={(e) => setAll(e.target.checked)} /> Apply to every deal for {deal.merchantEmail}, so the merchant stays one record</label>}
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-        <button className="btn primary" disabled={busy || !f.business.trim()} onClick={async () => { setBusy(true); setErr(''); try { const r = await post<{ updatedDeals: number }>(`/api/admin/deals/${deal.id}/contact`, { ...f, applyToMerchant: all }, 'PATCH'); onDone(`Contact saved on ${r.updatedDeals} deal${r.updatedDeals === 1 ? '' : 's'}`); } catch (e) { setErr(e instanceof Error ? e.message : 'Could not save'); } finally { setBusy(false); } }}>Save contact</button>
+        <button className="btn primary" disabled={busy || !f.business.trim()} onClick={async () => { setBusy(true); setErr(''); try { const r = await post<{ updatedDeals: number }>(`${base}/deals/${deal.id}/contact`, businessEditable ? { ...f, applyToMerchant: all } : { merchantContact: f.merchantContact, merchantEmail: f.merchantEmail, merchantPhone: f.merchantPhone, applyToMerchant: all }, 'PATCH'); onDone(`Contact saved on ${r.updatedDeals} deal${r.updatedDeals === 1 ? '' : 's'}`); } catch (e) { setErr(e instanceof Error ? e.message : 'Could not save'); } finally { setBusy(false); } }}>Save contact</button>
         <button className="btn" onClick={onCancel}>Cancel</button>
       </div>
       {err && <div className="note" style={{ marginTop: 8, background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>{err}</div>}

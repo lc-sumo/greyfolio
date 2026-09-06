@@ -9,6 +9,7 @@ import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, r
 import { annualReport } from '../payroll-views.js';
 import { addRepFile, fetchRepFile } from '../services/notes.js';
 import { createTask, logOutcome, merchantPreview, sendMerchantEmail, taskViews } from '../services/playbooks.js';
+import { updateContact } from '../services/deals.js';
 import { TASK_OUTCOMES } from '../services/playbook-rules.js';
 import { issueCalendarToken, revokeCalendarToken } from '../services/calendar.js';
 import { forgetDeviceCookie, readCookie, DEVICE_COOKIE } from '../auth/devices.js';
@@ -206,6 +207,16 @@ export function meRouter(repo: Repo, appName = 'Greystone Commission Portal', no
     if (s.viewAs) throw new HttpError(403, 'The feed belongs to the account holder');
     await revokeCalendarToken(repo, s.actor.repId);
     res.json({ url: null, enabled: false });
+  });
+
+  /* ---- Fill in the merchant's profile on my own deal: contact name, email, phone (never the money) ---- */
+  r.patch('/deals/:id/contact', async (req, res) => {
+    if (scopeOf(req).viewAs) throw new HttpError(403, 'Contact details are edited by the rep, not from View as');
+    const { s, deal } = await myDeal(req);
+    if (!(await repo.getSettings()).permissions.contactEdit) throw new HttpError(403, 'Editing merchant details is turned off for reps — ask an admin');
+    const r2 = await updateContact(repo, deal.id, { merchantContact: req.body?.merchantContact, merchantEmail: req.body?.merchantEmail, merchantPhone: req.body?.merchantPhone, applyToMerchant: req.body?.applyToMerchant }, s.actor.repId);
+    const [ctx, settings] = await Promise.all([repo.loadContext(), repo.getSettings()]);
+    res.json({ ...repDealView(r2.deal, s.actor.repId, ctx.lines, ctx.clawbacks, settings), updatedDeals: r2.updated });
   });
 
   /* ---- Email the merchant from a template, under my name ---- */

@@ -1,16 +1,21 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, post, type RepDealDetail } from '../lib/api';
 import { day, fullDay, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 import { ClawbackBar, Drawer, Loading, Pill, toneFor } from './ui';
 import { MerchantEmail } from './MerchantEmail';
+import { ContactEditor } from './DealExtras';
 import { AddTask } from './TasksCard';
 
 export function DealDrawer({ id, onClose }: { id: string; onClose: () => void }) {
-  const { viewAs } = useSession();
+  const { viewAs, auth, notify } = useSession();
+  const qc = useQueryClient();
   const q = useQuery({ queryKey: ['deal', id, viewAs], queryFn: () => api<RepDealDetail>(`/api/me/deals/${encodeURIComponent(id)}`) });
+  const [editContact, setEditContact] = useState(false);
   const d = q.data;
+  const canEdit = !viewAs && auth?.canEditContacts !== false;
+  const MISSING: Record<string, string> = { contact: 'contact name', email: 'email', phone: 'phone' };
   return (
     <Drawer title={d ? <>{d.crmId ?? d.id} <span className="muted" style={{ fontWeight: 500 }}>· {d.business}</span></> : id} sub={d && `Sheet ${d.id} · ${d.lender} · ${d.product} · funded ${fullDay(d.date)}`} onClose={onClose}>
       {!d ? (
@@ -26,6 +31,21 @@ export function DealDrawer({ id, onClose }: { id: string; onClose: () => void })
               <b style={{ color: d.owed ? 'var(--amber-bright)' : 'var(--teal-bright)' }}>{d.owed ? `${money(d.owed)} still owed to me` : d.paid >= d.share ? 'paid in full' : d.paid > 0 ? 'rest awaiting lender payment' : 'awaiting lender payment'}</b>
             </div>
           </div>
+
+          {editContact ? (
+            <ContactEditor deal={d} base="/api/me" businessEditable={false} onDone={async (label) => { setEditContact(false); notify(label); await qc.invalidateQueries({ queryKey: ['deal', id] }); await qc.invalidateQueries({ queryKey: ['deals'] }); await qc.invalidateQueries({ queryKey: ['my-renewals'] }); }} onCancel={() => setEditContact(false)} />
+          ) : (
+            <section className="card" style={d.missingContact.length ? { borderColor: 'var(--amber-light-3)', background: 'var(--amber-light-2)' } : undefined}>
+              <h3>Merchant <small>{d.missingContact.length ? `profile incomplete — missing ${d.missingContact.map((m) => MISSING[m]).join(', ')}` : 'profile complete'}</small></h3>
+              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', fontSize: 14.5 }}>
+                <span><b>{d.business}</b></span>
+                <span>{d.merchantContact || <span className="subtle">no contact name</span>}</span>
+                <span>{d.merchantEmail ? <a href={`mailto:${d.merchantEmail}`}>{d.merchantEmail}</a> : <span className="subtle">no email</span>}</span>
+                <span className="num">{d.merchantPhone || <span className="subtle">no phone</span>}</span>
+                {canEdit && <button className="btn" style={{ height: 30, padding: '0 10px', marginLeft: 'auto' }} onClick={() => setEditContact(true)}>{d.missingContact.length ? 'Fill in details' : 'Edit contact'}</button>}
+              </div>
+            </section>
+          )}
 
           <section className="card">
             <h3>Deal terms</h3>

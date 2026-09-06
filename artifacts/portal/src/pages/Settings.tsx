@@ -669,6 +669,7 @@ function PortalTab({ settings, run }: { settings: SettingsData; run: Run }) {
       </Card>
       <Card title="Permissions" extra="what reps may do from their portal">
         <Toggle on={perm.merchantEmail} onChange={(v) => setPerm({ ...perm, merchantEmail: v })} label="Reps can email merchants from a deal" hint="Off hides the button for everyone. On, you can still block individual reps under Reps › Merchant email. Emails go out under the rep's name from the templates under Playbooks." />
+        <Toggle on={perm.contactEdit} onChange={(v) => setPerm({ ...perm, contactEdit: v })} label="Reps can fill in merchant details on their deals" hint="Contact name, email and phone — never the business name or the money. Saved to the merchant record and audited, so Merchants, renewals and playbooks see it too." />
         <button className="btn primary" style={{ marginTop: 12 }} onClick={() => void run('Permissions saved', () => post('/api/admin/settings/permissions', perm, 'PUT'))}>Save permissions</button>
       </Card>
       <Card title="Security" extra={isSuper ? 'passwords and two-factor' : 'super admin only'}>

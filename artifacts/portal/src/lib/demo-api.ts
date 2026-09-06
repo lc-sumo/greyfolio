@@ -125,7 +125,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
   if (p === '/auth/me') {
     if (!u) throw new ApiError(401, 'Sign in required');
     const meRep = d.reps.find((r) => r.id === u.repId);
-    return json({ user: u, canViewAs: u.role !== 'rep', oidc: false, devAuth: true, password: true, branding: settings.portal, mustEnrollTotp: false, idleMinutes: 0, superAdmin: !!meRep?.superAdmin, canEmailMerchants: settings.permissions.merchantEmail && meRep?.perms?.merchantEmail !== false });
+    return json({ user: u, canViewAs: u.role !== 'rep', oidc: false, devAuth: true, password: true, branding: settings.portal, mustEnrollTotp: false, idleMinutes: 0, superAdmin: !!meRep?.superAdmin, canEmailMerchants: settings.permissions.merchantEmail && meRep?.perms?.merchantEmail !== false, canEditContacts: settings.permissions.contactEdit });
   }
   if (p === '/auth/dev-login') {
     const email = (q.get('email') ?? '').trim().toLowerCase();
@@ -233,6 +233,13 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
   const dtm = p.match(/^\/api\/me\/deals\/([^/]+)\/tasks$/);
   if (dtm && method === 'POST') return json(await createTask(repo, { dealId: decodeURIComponent(dtm[1]!), repId: u.repId, title: body.title, dueDate: body.dueDate }, u.repId, today));
   if (p === '/api/me/templates') { const meRep = d.reps.find((r) => r.id === effective); return json({ merchant: settings.templates.merchant, live: true, allowed: settings.permissions.merchantEmail && meRep?.perms?.merchantEmail !== false }); }
+  const mcm = p.match(/^\/api\/me\/deals\/([^/]+)\/contact$/);
+  if (mcm && method === 'PATCH') {
+    const deal = repDeals(ctx.deals, u.repId).find((x) => x.id === decodeURIComponent(mcm[1]!));
+    if (!deal) throw new ApiError(404, 'Deal not found');
+    const r2 = await updateContact(repo, deal.id, { merchantContact: body.merchantContact, merchantEmail: body.merchantEmail, merchantPhone: body.merchantPhone, applyToMerchant: body.applyToMerchant }, u.repId);
+    return json({ ...repDealView(r2.deal, u.repId, ctx.lines, ctx.clawbacks, settings), updatedDeals: r2.updated });
+  }
   const mpm = p.match(/^\/api\/me\/deals\/([^/]+)\/merchant-email(?:\/preview)?$/);
   if (mpm) {
     const deal = repDeals(ctx.deals, u.repId).find((x) => x.id === decodeURIComponent(mpm[1]!));

@@ -1,14 +1,16 @@
 /**
  * Outbound email. One tiny interface, four providers:
- *  - sendgrid — HTTPS API (MAIL_PROVIDER=sendgrid, MAIL_API_KEY=SG.…)
+ *  - sendgrid — Replit connector, or HTTPS API when MAIL_API_KEY is set
  *  - resend   — HTTPS API (MAIL_PROVIDER=resend, MAIL_API_KEY=re_…)
  *  - postmark — HTTPS API (MAIL_PROVIDER=postmark, MAIL_API_KEY=server token)
  *  - log      — prints the message as a JSON log line (development default)
  *  - off      — nothing is sent; callers that need email say so to the user
  *
- * No SDKs: both providers are one POST with `fetch`, which keeps the server
- * image small and the demo bundle free of Node-only modules.
+ * SendGrid defaults to Replit's managed connector so no API key needs to be
+ * copied into the application environment.
  */
+
+import { ReplitConnectors } from '@replit/connectors-sdk';
 
 export interface Mail {
   to: string | string[];
@@ -41,10 +43,10 @@ export interface MailConfig {
 export function mailConfigFromEnv(env: NodeJS.ProcessEnv, production: boolean): MailConfig {
   const raw = (env.MAIL_PROVIDER ?? (production ? 'off' : 'log')).toLowerCase();
   const provider = raw === 'sendgrid' || raw === 'resend' || raw === 'postmark' || raw === 'log' || raw === 'off' ? raw : 'off';
-  // SendGrid's own variable name works too, so a Replit integration needs no renaming.
+  // A key remains supported for non-Replit environments; Replit uses its managed connector.
   const apiKey = env.MAIL_API_KEY || (provider === 'sendgrid' ? env.SENDGRID_API_KEY : undefined) || null;
-  if ((provider === 'sendgrid' || provider === 'resend' || provider === 'postmark') && !apiKey) throw new Error(`MAIL_PROVIDER=${provider} needs MAIL_API_KEY`);
-  return { provider, apiKey, from: env.MAIL_FROM || 'Greystone Commission Portal <portal@greystoneus.com>' };
+  if ((provider === 'resend' || provider === 'postmark') && !apiKey) throw new Error(`MAIL_PROVIDER=${provider} needs MAIL_API_KEY`);
+  return { provider, apiKey, from: env.MAIL_FROM || 'Greystone Funded Portal <portal@greystoneus.com>' };
 }
 
 const list = (to: string | string[]) => (Array.isArray(to) ? to : [to]);
@@ -80,23 +82,29 @@ export function mailerFor(cfg: MailConfig): Mailer {
       kind: 'sendgrid',
       live: true,
       async send(m) {
-        const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
-          method: 'POST',
-          headers: { authorization: `Bearer ${cfg.apiKey}`, 'content-type': 'application/json' },
-          body: JSON.stringify({
-            personalizations: [{ to: list(m.to).map((email) => ({ email })) }],
-            from: parseFrom(cfg.from),
-            ...(m.replyTo ? { reply_to: { email: m.replyTo } } : {}),
-            subject: m.subject,
-            content: [
-              { type: 'text/plain', value: m.text },
-              { type: 'text/html', value: m.html ?? textToHtml(m.text) },
-            ],
-          }),
-        });
+        const body = {
+          personalizations: [{ to: list(m.to).map((email) => ({ email })) }],
+          from: parseFrom(cfg.from),
+          ...(m.replyTo ? { reply_to: { email: m.replyTo } } : {}),
+          subject: m.subject,
+          content: [
+            { type: 'text/plain', value: m.text },
+            { type: 'text/html', value: m.html ?? textToHtml(m.text) },
+          ],
+        };
+        const res = cfg.apiKey
+          ? await fetch('https://api.sendgrid.com/v3/mail/send', {
+              method: 'POST',
+              headers: { authorization: `Bearer ${cfg.apiKey}`, 'content-type': 'application/json' },
+              body: JSON.stringify(body),
+            })
+          : await new ReplitConnectors().proxy('sendgrid', '/v3/mail/send', {
+              method: 'POST',
+              body,
+            });
         if (res.ok) return { ok: true, id: res.headers.get('x-message-id') ?? undefined };
-        const body = (await res.json().catch(() => ({}))) as { errors?: Array<{ message?: string }> };
-        return { ok: false, error: body.errors?.map((e) => e.message).filter(Boolean).join('; ') || `SendGrid responded ${res.status}` };
+        const errorBody = (await res.json().catch(() => ({}))) as { errors?: Array<{ message?: string }> };
+        return { ok: false, error: errorBody.errors?.map((e) => e.message).filter(Boolean).join('; ') || `SendGrid responded ${res.status}` };
       },
     };
   }

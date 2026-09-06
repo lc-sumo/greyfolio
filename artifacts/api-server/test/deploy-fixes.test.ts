@@ -1,9 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { configFromEnv } from '../src/config.js';
 import { mailConfigFromEnv, mailerFor, memoryMailer, parseFrom } from '../src/services/mail.js';
 import { memoryRepo } from './memory-repo.js';
+
+const connectorProxy = vi.hoisted(() => vi.fn());
+vi.mock('@replit/connectors-sdk', () => ({
+  ReplitConnectors: class {
+    proxy = connectorProxy;
+  },
+}));
 
 async function harness(env: Record<string, string> = {}) {
   const repo = memoryRepo();
@@ -15,9 +22,13 @@ async function harness(env: Record<string, string> = {}) {
 }
 
 describe('SendGrid mailer', () => {
-  it('reads MAIL_PROVIDER=sendgrid with either key variable and posts the v3 payload', async () => {
+  it('uses an optional API key or the Replit connector and posts the v3 payload', async () => {
     expect(mailConfigFromEnv({ MAIL_PROVIDER: 'sendgrid', SENDGRID_API_KEY: 'SG.x', MAIL_FROM: 'Greystone <portal@greystoneus.com>' } as never, true)).toEqual({ provider: 'sendgrid', apiKey: 'SG.x', from: 'Greystone <portal@greystoneus.com>' });
-    expect(() => mailConfigFromEnv({ MAIL_PROVIDER: 'sendgrid' } as never, true)).toThrow(/MAIL_API_KEY/);
+    expect(mailConfigFromEnv({ MAIL_PROVIDER: 'sendgrid' } as never, true)).toEqual({
+      provider: 'sendgrid',
+      apiKey: null,
+      from: 'Greystone Funded Portal <portal@greystoneus.com>',
+    });
     expect(parseFrom('Greystone Portal <portal@greystoneus.com>')).toEqual({ email: 'portal@greystoneus.com', name: 'Greystone Portal' });
     expect(parseFrom('portal@greystoneus.com')).toEqual({ email: 'portal@greystoneus.com' });
     const calls: Array<{ url: string; init: RequestInit }> = [];
@@ -39,6 +50,17 @@ describe('SendGrid mailer', () => {
       expect((calls[0]!.init.headers as Record<string, string>).authorization).toBe('Bearer SG.x');
       globalThis.fetch = (async () => new Response(JSON.stringify({ errors: [{ message: 'The from address does not match a verified Sender Identity.' }] }), { status: 403 })) as typeof fetch;
       expect(await m.send({ to: 'a@b.c', subject: 's', text: 't' })).toEqual({ ok: false, error: 'The from address does not match a verified Sender Identity.' });
+
+      connectorProxy.mockResolvedValueOnce(new Response('', { status: 202, headers: { 'x-message-id': 'sg-connector-1' } }));
+      const connected = mailerFor({ provider: 'sendgrid', apiKey: null, from: 'Greystone Funded Portal <portal@greystoneus.com>' });
+      expect(await connected.send({ to: 'a@b.c', subject: 'Connected', text: 'Body' })).toEqual({ ok: true, id: 'sg-connector-1' });
+      expect(connectorProxy).toHaveBeenLastCalledWith('sendgrid', '/v3/mail/send', {
+        method: 'POST',
+        body: expect.objectContaining({
+          from: { email: 'portal@greystoneus.com', name: 'Greystone Funded Portal' },
+          subject: 'Connected',
+        }),
+      });
     } finally {
       globalThis.fetch = realFetch;
     }

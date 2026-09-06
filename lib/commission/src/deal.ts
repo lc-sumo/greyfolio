@@ -14,6 +14,8 @@ export interface NewDealDraft {
   lender: string;
   product: string;
   parentId?: string | null;
+  /** The deal this one renews or refinances; links the renewal chain. */
+  renewedFromId?: string | null;
   amount: number;
   termDays?: number | null;
   factor?: number | null;
@@ -120,6 +122,7 @@ export function priceDeal(draft: NewDealDraft, ctx: PricingContext): Deal {
     id: ctx.id,
     opportunityId: draft.parentId || ctx.id,
     parentId: draft.parentId || null,
+    renewedFromId: draft.renewedFromId || null,
     date: draft.fundedDate,
     business: draft.business.trim(),
     merchantContact: draft.merchantContact?.trim() ?? '',

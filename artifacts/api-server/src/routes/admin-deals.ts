@@ -2,9 +2,9 @@ import { Router } from 'express';
 import { repOptions } from '@greystone/commission';
 import { HttpError, currentUser, requireRole } from '../auth/middleware.js';
 import { adminDealDetail, adminDealRow, adminRenewals } from '../admin-views.js';
-import { adminMerchants, adminOverview } from '../analytics-views.js';
+import { adminMerchants, adminOverview, merchantKey } from '../analytics-views.js';
 import type { Repo } from '../repo.js';
-import { addDraw, createDeal, deleteClawback, deleteDeal, deleteDraw, recordClawback, updateClawback, updateContact, updateDrawTerms, setCollection, setCrmId, setDealStatus, updateSplits, updateTerms } from '../services/deals.js';
+import { addDraw, createDeal, deleteClawback, deleteDeal, deleteDraw, linkRenewal, recordClawback, updateClawback, updateContact, updateDrawTerms, setCollection, setCrmId, setDealStatus, updateSplits, updateTerms } from '../services/deals.js';
 import { addFile, addNote, fetchFile, removeFile, removeNote } from '../services/notes.js';
 import { notifyClawback, type NotifyDeps } from '../services/notify.js';
 
@@ -24,8 +24,23 @@ export function adminDealsRouter(repo: Repo, notify?: Omit<NotifyDeps, 'repo'>):
   });
 
   r.get('/merchants', async (_req, res) => {
-    const [ctx, settings] = await Promise.all([repo.loadContext(), repo.getSettings()]);
-    res.json({ merchants: adminMerchants(ctx, settings, today()) });
+    const [ctx, settings, reps] = await Promise.all([repo.loadContext(), repo.getSettings(), repo.listReps()]);
+    res.json({ merchants: adminMerchants(ctx, settings, today(), reps) });
+  });
+  /** One merchant's whole history: notes across every deal, open tasks, files. Key = merchant email, or business:<name>. */
+  r.get('/merchants/:key', async (req, res) => {
+    const key = String(req.params.key).toLowerCase();
+    const [ctx, settings, reps] = await Promise.all([repo.loadContext(), repo.getSettings(), repo.listReps()]);
+    const row = adminMerchants(ctx, settings, today(), reps).find((m) => merchantKey({ merchantEmail: m.email, business: m.business }) === key);
+    if (!row) throw new HttpError(404, 'Merchant not found');
+    const ids = row.deals.map((d) => d.id);
+    const name = new Map(reps.map((r) => [r.id, r.name]));
+    const [notes, tasks, files] = await Promise.all([
+      Promise.all(ids.map((id) => repo.listNotes(id))).then((x) => x.flat().sort((a, b) => b.createdAt.localeCompare(a.createdAt))),
+      Promise.all(ids.map((id) => repo.listTasks({ dealId: id }))).then((x) => x.flat().filter((t) => t.status === 'open')),
+      Promise.all(ids.map((id) => repo.listFiles(id))).then((x) => x.flat()),
+    ]);
+    res.json({ merchant: row, notes: notes.map((n) => ({ ...n, author: name.get(n.authorRepId) ?? n.authorRepId })), tasks: tasks.map((t) => ({ ...t, repName: name.get(t.repId) ?? t.repId })), files });
   });
 
   r.get('/overview', async (req, res) => {
@@ -93,6 +108,10 @@ export function adminDealsRouter(repo: Repo, notify?: Omit<NotifyDeps, 'repo'>):
   });
   r.patch('/deals/:id/status', async (req, res) => {
     await setDealStatus(repo, String(req.params.id), String(req.body?.dealStatus ?? ''), currentUser(req)!.repId);
+    res.json(await detailOf(String(req.params.id)));
+  });
+  r.patch('/deals/:id/renewal', async (req, res) => {
+    await linkRenewal(repo, String(req.params.id), req.body?.renewedFromId, currentUser(req)!.repId);
     res.json(await detailOf(String(req.params.id)));
   });
   r.patch('/deals/:id/crm', async (req, res) => {

@@ -82,7 +82,7 @@ export interface Settings {
 export interface MerchantTemplate { id: string; name: string; subject: string; body: string }
 export interface RoleView { role: Role; repId: string | null; name: string | null; rate: number; amount: number; paid: number }
 export interface AdminDealRow {
-  id: string; opportunityId: string; parentId: string | null; date: string; business: string; drawCount: number;
+  id: string; renewedFromId: string | null; renewedById: string | null; opportunityId: string; parentId: string | null; date: string; business: string; drawCount: number;
   merchantContact: string; merchantEmail: string; merchantPhone: string; lender: string; product: string;
   funded: number; factor: number | null; apr: number | null; termDays: number | null; frequency: string; payback: number | null;
   commRate: number; psfPct: number; originationFee: number; lineRate: number | null; lineFee: number; gross: number; referralPartner: string | null; referralRate: number; referralFee: number; net: number;
@@ -138,8 +138,10 @@ export const MANUAL_DEAL_STATUSES = ['Refinanced', 'Default', 'Slow Pay', 'Paid 
 export const DEAL_STATUS_OPTIONS = [{ value: 'Performing', label: 'Auto (Performing → Prospecting → Refi Ready)' }, ...MANUAL_DEAL_STATUSES.map((v) => ({ value: v, label: v }))];
 
 /* ---- Merchants + overview (Phase 6b). Admin only. ---- */
-export interface MerchantDealRow { id: string; crmId: string | null; date: string; business: string; lender: string; product: string; funded: number; gross: number; outstanding: number; commissionStatus: string; dealStatus: string; drawCount: number; crmUrl: string }
-export interface MerchantRow { email: string; business: string; contact: string; phone: string; dealCount: number; funded: number; gross: number; outstanding: number; firstFunded: string; lastFunded: string; deals: MerchantDealRow[] }
+export interface MerchantDealRow { id: string; crmId: string | null; date: string; business: string; lender: string; product: string; funded: number; gross: number; outstanding: number; commissionStatus: string; dealStatus: string; drawCount: number; crmUrl: string; renewedFromId: string | null; renewedById: string | null; prospectingDate: string; bucket: string; bucketLabel: string; ownerRepId: string | null; owner: string }
+export interface MerchantRow { email: string; business: string; contact: string; phone: string; dealCount: number; funded: number; gross: number; outstanding: number; firstFunded: string; lastFunded: string; houseNet: number; openPositions: number; renewals: number; nextEligible: string | null; stage: string; deals: MerchantDealRow[] }
+export interface MerchantDetail { merchant: MerchantRow; notes: Array<DealNoteView>; tasks: Array<{ id: string; dealId: string; title: string; dueDate: string; repName: string }>; files: Array<{ id: string; dealId: string; name: string; size: number; createdAt: string }> }
+export interface Scorecard { repId: string; name: string; team: string | null; active: boolean; deals: number; funded: number; gross: number; renewable: number; renewed: number; renewalRate: number | null; tasksClosed: number; tasksWon: number; taskWinRate: number | null; onTimeRate: number | null; openTasks: number; overdueTasks: number; daysToClose: number | null }
 export interface Overview {
   period: { from: string; to: string };
   cards: { funded: number; commissions: number; opportunities: number; drawLines: number; avgDealSize: number; avgFactor: number | null; paid: number; owed: number; clawbackExposure: number; renewalReady: number; renewalGross: number; expected30: number; expected30Count: number; overdueReceipts: number };

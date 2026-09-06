@@ -4,6 +4,7 @@ import { HttpError } from '../http-error.js';
 import type { Repo } from '../repo.js';
 import { booksCsv, cashView, exceptions, markPartnerPaid, partnerPayables, receivables } from '../services/books.js';
 import { addRepFile, fetchRepFile, removeRepFile } from '../services/notes.js';
+import { scorecards } from '../services/scorecards.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -36,6 +37,11 @@ export function adminBooksRouter(repo: Repo): Router {
   r.get('/books/exceptions', async (_req, res) => {
     const [ctx, settings] = await Promise.all([repo.loadContext(), repo.getSettings()]);
     res.json(exceptions(ctx, settings, today()));
+  });
+
+  r.get('/scorecards', async (req, res) => {
+    const [ctx, reps, teams, settings, tasks] = await Promise.all([repo.loadContext(), repo.listReps(), repo.listTeams(), repo.getSettings(), repo.listTasks()]);
+    res.json({ year: yearOf(req), rows: scorecards(ctx, reps, teams, settings, tasks, yearOf(req), today()) });
   });
 
   /* ---- Rep files (W-9, agreements) ---- */

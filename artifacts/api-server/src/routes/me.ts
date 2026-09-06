@@ -10,6 +10,7 @@ import { annualReport } from '../payroll-views.js';
 import { addRepFile, fetchRepFile } from '../services/notes.js';
 import { createTask, logOutcome, merchantPreview, sendMerchantEmail, taskViews } from '../services/playbooks.js';
 import { TASK_OUTCOMES } from '../services/playbook-rules.js';
+import { issueCalendarToken, revokeCalendarToken } from '../services/calendar.js';
 
 /**
  * The rep portal. Every handler reads `scopeOf(req).effectiveRepId` — the
@@ -156,6 +157,25 @@ export function meRouter(repo: Repo, appName = 'Greystone Commission Portal', no
     const s = scopeOf(req);
     if (s.viewAs) throw new HttpError(403, 'Outcomes are logged by the rep, not from View as');
     res.json(await logOutcome(repo, String(req.params.id), req.body ?? {}, s.actor.repId, today(), { asAdmin: false }));
+  });
+
+  /* ---- Private calendar feed ---- */
+  const feedUrl = (token: string) => `${notify?.origin ?? ''}/calendar/${token}.ics`;
+  r.get('/calendar', async (req, res) => {
+    const s = scopeOf(req);
+    const token = await repo.getCalendarToken(s.effectiveRepId);
+    res.json({ url: token && !s.viewAs ? feedUrl(token) : null, enabled: !!token });
+  });
+  r.post('/calendar', async (req, res) => {
+    const s = scopeOf(req);
+    if (s.viewAs) throw new HttpError(403, 'The feed belongs to the account holder');
+    res.json({ url: feedUrl(await issueCalendarToken(repo, s.actor.repId)), enabled: true });
+  });
+  r.delete('/calendar', async (req, res) => {
+    const s = scopeOf(req);
+    if (s.viewAs) throw new HttpError(403, 'The feed belongs to the account holder');
+    await revokeCalendarToken(repo, s.actor.repId);
+    res.json({ url: null, enabled: false });
   });
 
   /* ---- Email the merchant from a template, under my name ---- */

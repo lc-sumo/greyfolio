@@ -14,6 +14,7 @@ import { rateLimit, requestLog, securityHeaders } from './hardening.js';
 import { healthRouter } from './routes/health.js';
 import { adminBooksRouter } from './routes/admin-books.js';
 import { adminPlaybooksRouter } from './routes/admin-playbooks.js';
+import { calendarForToken } from './services/calendar.js';
 import { meRouter } from './routes/me.js';
 import { mailerFor, type Mailer } from './services/mail.js';
 
@@ -45,6 +46,17 @@ export function createApp(config: AppConfig, repo: Repo, deps: AppDeps = {}): ex
   );
 
   app.use('/', healthRouter(() => repo.getSetting('portal')));
+  // Public by token: a rep's calendar feed, subscribed from Google/Apple/Outlook.
+  app.get('/calendar/:token.ics', rateLimit({ windowMs: 60_000, max: 60, keyPrefix: 'cal:' }), async (req, res, next) => {
+    try {
+      const { ics } = await calendarForToken(repo, String(req.params.token), new Date().toISOString().slice(0, 10), config.appName);
+      res.setHeader('content-type', 'text/calendar; charset=utf-8');
+      res.setHeader('cache-control', 'private, max-age=300');
+      res.send(ics);
+    } catch (e) {
+      next(e);
+    }
+  });
   app.use('/auth', rateLimit({ windowMs: 60_000, max: 30, keyPrefix: 'auth:' }), authRouter(config, repo, mailer));
   app.use('/api', rateLimit({ windowMs: 60_000, max: 600 }), refreshSession(repo));
   app.use('/api/me', meRouter(repo, config.appName, notify));

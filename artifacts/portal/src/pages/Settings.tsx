@@ -411,9 +411,9 @@ function tempPassword(): string {
 }
 
 /* ---------- Import from sheet ---------- */
-interface ImportRow { line: number; id: string; action: 'deal' | 'draw' | 'skip'; parentId: string | null; business: string; lender: string; product: string; amount: number; date: string; opener: string | null; closer: string | null; override: string | null; commissionStatus: string; repPaid: string | null; clawback: number | null; problems: string[]; warnings: string[] }
+interface ImportRow { line: number; id: string; action: 'deal' | 'draw' | 'skip' | 'update'; changes?: string[]; parentId: string | null; business: string; lender: string; product: string; amount: number; date: string; opener: string | null; closer: string | null; override: string | null; commissionStatus: string; repPaid: string | null; clawback: number | null; problems: string[]; warnings: string[] }
 interface MissingRefs { lenders: string[]; products: string[]; partners: string[]; reps: string[] }
-interface ImportPreview { rows: ImportRow[]; skipped: number; skippedExisting: number; problems: string[]; missing: MissingRefs; summary: { deals: number; draws: number; funded: number; withPayouts: number; warnings: number; clawbacks: number; problems: number } }
+interface ImportPreview { rows: ImportRow[]; skipped: number; skippedExisting: number; updated: number; problems: string[]; missing: MissingRefs; summary: { deals: number; draws: number; funded: number; withPayouts: number; warnings: number; clawbacks: number; problems: number } }
 function ImportTab() {
   const { notify } = useSession();
   const qc = useQueryClient();
@@ -423,8 +423,9 @@ function ImportTab() {
   const [busy, setBusy] = useState(false);
   const [onlyProblems, setOnlyProblems] = useState(false);
   const [skipExisting, setSkipExisting] = useState(false);
-  const [done, setDone] = useState<{ deals: number; draws: number; clawbacks: number; payoutLines: number; runId: string | null } | null>(null);
-  const body = () => (xlsx ? { xlsx: xlsx.data, skipExisting } : { csv, skipExisting });
+  const [updateExisting, setUpdateExisting] = useState(false);
+  const [done, setDone] = useState<{ deals: number; updated?: number; draws: number; clawbacks: number; payoutLines: number; runId: string | null } | null>(null);
+  const body = () => (xlsx ? { xlsx: xlsx.data, skipExisting, updateExisting } : { csv, skipExisting, updateExisting });
   async function file(f: File | undefined) {
     if (!f) return;
     setPreview(null); setDone(null);
@@ -457,14 +458,15 @@ function ImportTab() {
           <input type="file" accept=".xlsx,.xls,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(e) => void file(e.target.files?.[0])} />
           <span className="count">{xlsx ? `${xlsx.name} loaded` : csv ? `${csv.length.toLocaleString()} characters loaded` : 'or paste the CSV below'}</span>
           <label className="subtle" style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }} title="Re-exporting the whole sheet? Deals and draws the portal already holds are left alone; only new rows come in."><input type="checkbox" className="big" checked={skipExisting} onChange={(e) => { setSkipExisting(e.target.checked); setPreview(null); }} /> skip rows already in the portal</label>
+          {skipExisting && <label className="subtle" style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }} title="For rows already in the portal: take the sheet's Deal Status (Refinanced, Default, Slow Pay, Paid In Full) and Lender Paid Date. Money and the ledger are never touched."><input type="checkbox" className="big" checked={updateExisting} onChange={(e) => { setUpdateExisting(e.target.checked); setPreview(null); }} /> refresh status &amp; lender-paid on existing rows</label>}
           <button className="btn primary" disabled={(!csv.trim() && !xlsx) || busy} onClick={() => void run()}>{busy ? 'Working…' : 'Preview'}</button>
         </div>
         <textarea rows={4} value={csv} onChange={(e) => { setCsv(e.target.value); setXlsx(null); setPreview(null); }} placeholder="Deal ID,Parent Deal,Date,Business Name,Lender,Product,…" style={{ border: '1px solid var(--border-strong)', borderRadius: 8, padding: '8px 10px', background: 'var(--input-bg)', color: 'inherit', font: 'inherit', fontFamily: 'var(--mono)', fontSize: 12.5, resize: 'vertical', outline: 'none' }} />
-        {done && <div className="note" style={{ background: 'var(--teal-light)', borderColor: 'var(--teal-light-2)' }}>Imported <b>{done.deals}</b> deals, <b>{done.draws}</b> draws, <b>{done.clawbacks}</b> clawbacks and <b>{done.payoutLines}</b> paid ledger lines{done.runId ? ` (run ${done.runId})` : ''}. The master board, rep portals and payroll now reflect them.</div>}
+        {done && <div className="note" style={{ background: 'var(--teal-light)', borderColor: 'var(--teal-light-2)' }}>Imported <b>{done.deals}</b> deals{done.updated ? <>, refreshed <b>{done.updated}</b></> : null}, <b>{done.draws}</b> draws, <b>{done.clawbacks}</b> clawbacks and <b>{done.payoutLines}</b> paid ledger lines{done.runId ? ` (run ${done.runId})` : ''}. The master board, rep portals and payroll now reflect them.</div>}
         {preview && (
           <>
             <div className="grid-auto">
-              <section className="card"><div className="label">Deals</div><div className="metric">{preview.summary.deals}</div><div className="sub">{preview.summary.draws} draws · {preview.skipped} banner/total rows skipped{preview.skippedExisting ? ` · ${preview.skippedExisting} already in the portal` : ''}</div></section>
+              <section className="card"><div className="label">Deals</div><div className="metric">{preview.summary.deals}</div><div className="sub">{preview.summary.draws} draws · {preview.skipped} banner/total rows skipped{preview.skippedExisting ? ` · ${preview.skippedExisting} already in the portal` : ''}{preview.updated ? ` · ${preview.updated} to refresh` : ''}</div></section>
               <section className="card"><div className="label">Funded</div><div className="metric">{compact(preview.summary.funded)}</div></section>
               <section className="card"><div className="label">Already paid to reps</div><div className="metric">{preview.summary.withPayouts}</div><div className="sub">rows with a Rep Paid Date → ledger</div></section>
               <section className="card"><div className="label">Problems</div><div className={`metric ${preview.summary.problems ? 'neg' : 'pos'}`}>{preview.summary.problems}</div><div className="sub">{preview.summary.warnings} warning{preview.summary.warnings === 1 ? '' : 's'} · {preview.summary.clawbacks} clawbacks</div></section>
@@ -483,7 +485,7 @@ function ImportTab() {
                   <div className={`tr ${r.problems.length ? 'tint' : ''}`} key={r.line}>
                     <div className="td num subtle">{r.line}</div>
                     <div className="td num">{r.id || <span className="subtle">new</span>}</div>
-                    <div className="td">{r.action === 'skip' ? <Pill tone="grey">skip</Pill> : r.action === 'draw' ? <Pill tone="amber">draw of {r.parentId}</Pill> : <Pill tone="teal">deal</Pill>}</div>
+                    <div className="td">{r.action === 'skip' ? <Pill tone="grey">skip</Pill> : r.action === 'update' ? <Pill tone="amber">refresh · {r.changes?.join(', ')}</Pill> : r.action === 'draw' ? <Pill tone="amber">draw of {r.parentId}</Pill> : <Pill tone="teal">deal</Pill>}</div>
                     <div className="td ellipsis">{r.business}</div>
                     <div className="td ellipsis">{r.lender}</div>
                     <div className="td ellipsis">{r.product}</div>

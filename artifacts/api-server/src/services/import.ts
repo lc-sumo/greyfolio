@@ -31,7 +31,9 @@ const today = () => new Date().toISOString().slice(0, 10);
 export interface ImportRowPreview {
   line: number;
   id: string;
-  action: 'deal' | 'draw' | 'skip';
+  action: 'deal' | 'draw' | 'skip' | 'update';
+  /** With `updateExisting`: the fields that would change on the existing deal. */
+  changes?: string[];
   parentId: string | null;
   business: string;
   lender: string;
@@ -52,6 +54,8 @@ export interface ImportRowPreview {
 export interface ImportOptions {
   /** Re-exporting the whole sheet: rows already in the portal are skipped instead of flagged. */
   skipExisting?: boolean;
+  /** With skipExisting: rows already in the portal get their ops-typed status and lender-paid date refreshed from the sheet. Never touches money or the ledger. */
+  updateExisting?: boolean;
   /** An already-parsed grid (from an .xlsx upload) instead of CSV text. */
   grid?: string[][];
 }
@@ -69,9 +73,21 @@ export interface ImportPreview {
   skipped: number;
   /** Rows left alone because the portal already has them (only with `skipExisting`). */
   skippedExisting: number;
+  /** Rows whose status or lender-paid date will be refreshed (only with `updateExisting`). */
+  updated: number;
   problems: string[];
   missing: MissingRefs;
   summary: { deals: number; draws: number; funded: number; withPayouts: number; warnings: number; clawbacks: number; problems: number };
+}
+
+const MANUAL_STATUSES = ['Refinanced', 'Default', 'Slow Pay', 'Paid In Full'];
+
+/** What a re-exported row would change on a deal already in the portal: the ops-typed status and the lender-paid date, never money or the ledger. */
+function existingChanges(deal: Deal, r: SheetRow, settings: Settings): string[] {
+  const out: string[] = [];
+  if (r.dealStatus && settings.lists.dealStatuses.includes(r.dealStatus) && MANUAL_STATUSES.includes(r.dealStatus) && r.dealStatus !== deal.dealStatus) out.push(`status → ${r.dealStatus}`);
+  if (r.lenderPaid && r.lenderPaid !== deal.lenderPaid) out.push(`lender paid ${r.lenderPaid}`);
+  return out;
 }
 
 function repByName(reps: Rep[], name: string): Rep | undefined {
@@ -127,6 +143,7 @@ export async function previewImport(repo: Repo, csv: string, opts: ImportOptions
     const isDraw = !!r.parent && r.parent !== r.id && (rule?.basis === 'draw' || rule?.parent === true || ids.has(r.parent) || existing.has(r.parent));
     if (isDraw && !ids.has(r.parent) && !existing.has(r.parent)) problems.push(`Parent deal ${r.parent} is not in the file or the portal`);
     let skip = false;
+    let changes: string[] | undefined;
     if (isDraw && opts.skipExisting) {
       // The same draw re-exported: its parent already carries a draw on that date for that amount.
       const parent = ctx.deals.find((d) => d.id === r.parent);
@@ -140,7 +157,11 @@ export async function previewImport(repo: Repo, csv: string, opts: ImportOptions
       if (r.id && existing.has(r.id)) {
         if (opts.skipExisting) {
           skip = true;
-          warnings.push(`${r.id} is already in the portal — skipped`);
+          if (opts.updateExisting) {
+            changes = existingChanges(ctx.deals.find((d) => d.id === r.id)!, r, settings);
+            if (changes.length) warnings.push(`${r.id}: ${changes.join(', ')} refreshed from the sheet`);
+            else warnings.push(`${r.id} is already in the portal and unchanged — skipped`);
+          } else warnings.push(`${r.id} is already in the portal — skipped`);
         } else problems.push(`${r.id} already exists in the portal (tick "skip rows already in the portal" to re-import a full export)`);
       }
       if (r.id && seen.has(r.id)) warnings.push(`${r.id} appears twice in the file — this copy gets the next free id`);
@@ -150,7 +171,8 @@ export async function previewImport(repo: Repo, csv: string, opts: ImportOptions
     return {
       line: r.line,
       id: r.id,
-      action: skip ? 'skip' : isDraw ? 'draw' : 'deal',
+      action: skip ? (changes?.length ? 'update' : 'skip') : isDraw ? 'draw' : 'deal',
+      ...(changes?.length ? { changes } : {}),
       parentId: isDraw ? r.parent : null,
       business: r.business,
       lender: r.lender,
@@ -168,12 +190,13 @@ export async function previewImport(repo: Repo, csv: string, opts: ImportOptions
     };
   });
   const problems = [...read.problems];
-  const live = rows.filter((x) => x.action !== 'skip');
+  const live = rows.filter((x) => x.action !== 'skip' && x.action !== 'update');
   const deals = live.filter((x) => x.action === 'deal');
   return {
     rows,
     skipped: read.skipped,
-    skippedExisting: rows.length - live.length,
+    skippedExisting: rows.filter((x) => x.action === 'skip').length,
+    updated: rows.filter((x) => x.action === 'update').length,
     problems,
     missing,
     summary: {
@@ -190,6 +213,7 @@ export async function previewImport(repo: Repo, csv: string, opts: ImportOptions
 
 export interface ImportResult {
   deals: number;
+  updated: number;
   draws: number;
   clawbacks: number;
   payoutLines: number;
@@ -270,6 +294,20 @@ export async function commitImport(repo: Repo, csv: string, actorRepId: string, 
     await repo.insertDeal(deal);
     created.push(deal);
   }
+  // Refresh existing deals from the sheet (status, contact, CRM id) when asked.
+  let updated = 0;
+  for (const row of preview.rows.filter((x) => x.action === 'update')) {
+    const r = byLine.get(row.line)!;
+    const deal = known.find((d) => d.id === r.id);
+    if (!deal) continue;
+    const patch: Partial<Deal> = {};
+    if (r.dealStatus && settings.lists.dealStatuses.includes(r.dealStatus) && MANUAL_STATUSES.includes(r.dealStatus) && r.dealStatus !== deal.dealStatus) patch.dealStatus = r.dealStatus;
+    if (r.lenderPaid && r.lenderPaid !== deal.lenderPaid) patch.lenderPaid = r.lenderPaid;
+    if (Object.keys(patch).length) {
+      await repo.updateDeal(deal.id, patch);
+      updated++;
+    }
+  }
   // Draws under their parents.
   let drawCount = 0;
   const all = [...known, ...created];
@@ -336,6 +374,6 @@ export async function commitImport(repo: Repo, csv: string, actorRepId: string, 
     await repo.commitPayout({ lines, clawbackUpdates: [], dealsFullyPaid: [], paidAt: today() });
     for (const [id, paidAt] of paidDeals) if (isDealFullyPaid(all.find((d) => d.id === id)!, after)) await repo.updateDeal(id, { repPaid: paidAt });
   }
-  await repo.writeAudit({ actorRepId, action: 'deal.import', targetRepId: null, path: '/api/admin/import', detail: { deals: created.length, draws: drawCount, clawbacks, payoutLines: lines.length, runId } });
-  return { deals: created.length, draws: drawCount, clawbacks, payoutLines: lines.length, runId };
+  await repo.writeAudit({ actorRepId, action: 'deal.import', targetRepId: null, path: '/api/admin/import', detail: { deals: created.length, updated, draws: drawCount, clawbacks, payoutLines: lines.length, runId } });
+  return { deals: created.length, updated, draws: drawCount, clawbacks, payoutLines: lines.length, runId };
 }

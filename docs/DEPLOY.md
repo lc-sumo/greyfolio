@@ -4,7 +4,11 @@ Three supported paths. All run the same thing: the Express API serving the built
 
 ## Option 0 — Replit (what is live today)
 
-`.replit` is set up for it: import the GitHub repo, add the Postgres database, set `SESSION_SECRET`, `BASE_URL`/`APP_ORIGIN` (the published URL) and, once, `SEED=workbook` in Secrets, then **Publish → Autoscale**. Later releases: push to GitHub, **Pull** in the Replit Git pane, **Republish**. The run command applies schema changes with `pnpm db:push` before starting, so a pull never needs a manual migration step.
+`.replit` is set up for it: import the GitHub repo, add the Postgres database, set `SESSION_SECRET`, `BASE_URL`/`APP_ORIGIN` (the published URL), `MAIL_PROVIDER=sendgrid` + `SENDGRID_API_KEY` + `MAIL_FROM`, and `SEED=workbook` in Secrets, then **Publish → Autoscale**. Later releases: push to GitHub, **Pull** in the Replit Git pane, **Republish**. The run command applies schema changes with `pnpm db:up` before starting: the first time it records the tables a push already created into the migration ledger, after that it only runs reviewed migration files, so a pull never needs a manual step and nothing is dropped by surprise.
+
+**Uptime:** create a free monitor (UptimeRobot, Better Stack) on `https://<your-app>/health` every 5 minutes. It returns 503 with the database error when the database is unreachable.
+
+**Backups:** Settings › Portal › *Download everything* gives one JSON file with every table (no secrets). Do it weekly and after every import; keep the copies outside Replit.
 
 ## Option A — Render (managed, ~15 minutes)
 
@@ -46,6 +50,8 @@ Set `SEED=workbook` for the very first boot only, then `none`.
 | `BASE_URL`, `APP_ORIGIN` | yes | Public URL; used in emails and reset links |
 | `NODE_ENV=production` | yes | Secure cookies, refuses dev sign-in, requires the above |
 | `AUTH_PASSWORD` | no | `off` to disable email + password sign-in (then SSO is required) |
+| `MAIL_PROVIDER` | no | `sendgrid`, `resend`, `postmark`, `log` (dev) or `off` |
+| `SENDGRID_API_KEY` | no | Accepted in place of `MAIL_API_KEY` when the provider is SendGrid |
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | no | SSO (Google Workspace, Okta, Entra) |
 | `MAIL_PROVIDER` | no | `resend`, `postmark`, `log` (print only), `off` (default in production) |
 | `MAIL_API_KEY`, `MAIL_FROM` | with mail | Provider key and verified sender |

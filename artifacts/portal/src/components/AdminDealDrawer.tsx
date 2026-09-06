@@ -40,7 +40,8 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
   const [contact, setContact] = useState(false);
   const [editDraw, setEditDraw] = useState<string | null>(null);
   // Rep options for the splits editor: passed in from the master board, otherwise fetched — never an empty list that could wipe a deal's roles.
-  const board = useQuery({ queryKey: ['deals-board-for-edit'], queryFn: () => api<MasterBoard>('/api/admin/deals'), enabled: editing || editOptions.length === 0 });
+  // Also feeds the renewal-chain picker, so it always loads.
+  const board = useQuery({ queryKey: ['deals-board-for-edit'], queryFn: () => api<MasterBoard>('/api/admin/deals') });
   const opts = editOptions.length ? editOptions : board.data?.repOptions.edit ?? [];
   /** "Partially Paid" needs the dollars; the API otherwise guesses half the gross. */
   const statusChange = (segmentKey: string, status: string, label: string) => {
@@ -105,6 +106,16 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
                 </span>
               </dd>
               <dt>Sheet #</dt><dd>{d.id}</dd>
+              <dt>Renewal chain</dt><dd style={{ fontFamily: 'var(--sans)' }}>
+                {d.renewedFromId ? <>renews <b className="num">{d.renewedFromId}</b>{' '}</> : <span className="subtle">first funding · </span>}
+                {d.renewedById ? <>→ renewed by <b className="num">{d.renewedById}</b></> : null}
+                {!d.renewedById && (
+                  <select className="mini" value={d.renewedFromId ?? ''} style={{ marginLeft: 6 }} title="Which earlier deal did this one renew or refinance?" onChange={(e) => run(e.target.value ? `${d.id} renews ${e.target.value}` : `${d.id} — renewal link removed`, () => post(`/api/admin/deals/${id}/renewal`, { renewedFromId: e.target.value || null }, 'PATCH'))}>
+                    <option value="">{d.renewedFromId ? 'unlink' : 'link an earlier deal…'}</option>
+                    {(board.data?.deals ?? []).filter((x) => x.id !== d.id && x.date <= d.date && (x.merchantEmail && x.merchantEmail === d.merchantEmail || x.business.toLowerCase() === d.business.toLowerCase())).map((x) => <option key={x.id} value={x.id}>{x.crmId ?? x.id} · {x.lender} · {day(x.date)}</option>)}
+                  </select>
+                )}
+              </dd>
               <dt>Funded amount</dt><dd>{money(d.funded)}{d.drawCount ? ` (${d.drawCount} draw${d.drawCount > 1 ? 's' : ''})` : ''}</dd>
               {d.creditLine !== null && <><dt>Credit line</dt><dd>{money(d.creditLine)}</dd></>}
               {d.factor !== null && <><dt>Factor rate</dt><dd>{d.factor.toFixed(2)}</dd></>}

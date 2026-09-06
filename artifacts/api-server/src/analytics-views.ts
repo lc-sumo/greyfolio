@@ -1,5 +1,6 @@
 /** Admin analytics: merchants and the funding overview. Read-only, admin-only. */
 import {
+  RENEWAL_BUCKET_LABEL,
   clawbackRepTotal,
   clawbackRecovered,
   collectedGross,
@@ -39,6 +40,14 @@ export interface MerchantDealRow {
   dealStatus: string;
   drawCount: number;
   crmUrl: string;
+  renewedFromId: string | null;
+  renewedById: string | null;
+  /** Renewal engine: when this deal is (or was) eligible for more capital, and its stage today. */
+  prospectingDate: string;
+  bucket: string;
+  bucketLabel: string;
+  ownerRepId: string | null;
+  owner: string;
 }
 
 export interface MerchantRow {
@@ -53,19 +62,40 @@ export interface MerchantRow {
   outstanding: number;
   firstFunded: string;
   lastFunded: string;
+  /** Lifetime commission kept by the house (gross − referral − rep shares). */
+  houseNet: number;
+  /** Deals still live (not refinanced, paid in full or defaulted). */
+  openPositions: number;
+  /** Deals that were renewed into a later one. */
+  renewals: number;
+  /** Earliest "more capital" date across live deals, or null. */
+  nextEligible: string | null;
+  /** Stage of the most recent live deal. */
+  stage: string;
   deals: MerchantDealRow[];
 }
 
-export function adminMerchants(ctx: LedgerContext, settings: Settings, today: string): MerchantRow[] {
+/** Everything groups on merchant email; a deal with no email groups under its business name. */
+export function merchantKey(d: Pick<Deal, 'merchantEmail' | 'business'>): string {
+  return (d.merchantEmail || `business:${d.business}`).toLowerCase();
+}
+
+export function adminMerchants(ctx: LedgerContext, settings: Settings, today: string, reps: Rep[] = []): MerchantRow[] {
   const groups = new Map<string, Deal[]>();
   for (const d of ctx.deals) {
-    const key = (d.merchantEmail || `business:${d.business}`).toLowerCase();
+    const key = merchantKey(d);
     groups.set(key, [...(groups.get(key) ?? []), d]);
   }
+  const repName = new Map(reps.map((r) => [r.id, r.name]));
+  const final = (d: Deal) => ['Refinanced', 'Paid In Full', 'Default'].includes(d.dealStatus);
   return [...groups.entries()]
     .map(([key, deals]) => {
       const sorted = [...deals].sort((a, b) => b.date.localeCompare(a.date));
       const latest = sorted[0]!;
+      const live = sorted.filter((d) => !final(d));
+      const ren = new Map(sorted.map((d) => [d.id, renewalOf(d, settings.thresholds, today)]));
+      const nextEligible = live.map((d) => ren.get(d.id)!.prospectingDate).sort()[0] ?? null;
+      const latestLive = live[0] ?? latest;
       return {
         email: key.startsWith('business:') ? '' : latest.merchantEmail,
         business: latest.business,
@@ -77,6 +107,11 @@ export function adminMerchants(ctx: LedgerContext, settings: Settings, today: st
         outstanding: sum(deals.map(outstandingGross)),
         firstFunded: sorted.at(-1)!.date,
         lastFunded: latest.date,
+        houseNet: sum(deals.map((d) => totalNet(d) - totalRepPayout(d))),
+        openPositions: live.length,
+        renewals: sorted.filter((d) => sorted.some((x) => x.renewedFromId === d.id)).length,
+        nextEligible,
+        stage: RENEWAL_BUCKET_LABEL[ren.get(latestLive.id)!.bucket],
         deals: sorted.map((d) => ({
           id: d.id,
           crmId: d.crmId,
@@ -91,6 +126,13 @@ export function adminMerchants(ctx: LedgerContext, settings: Settings, today: st
           dealStatus: effectiveDealStatus(d, settings.thresholds, today),
           drawCount: d.draws.length,
           crmUrl: crmUrl(settings.crm.urlTemplate, d),
+          renewedFromId: d.renewedFromId ?? null,
+          renewedById: sorted.find((x) => x.renewedFromId === d.id)?.id ?? null,
+          prospectingDate: ren.get(d.id)!.prospectingDate,
+          bucket: ren.get(d.id)!.bucket,
+          bucketLabel: RENEWAL_BUCKET_LABEL[ren.get(d.id)!.bucket],
+          ownerRepId: d.closerId ?? d.openerId ?? null,
+          owner: (d.closerId ?? d.openerId) ? repName.get((d.closerId ?? d.openerId)!) ?? '—' : '—',
         })),
       };
     })

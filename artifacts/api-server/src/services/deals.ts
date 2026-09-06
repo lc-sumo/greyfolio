@@ -54,6 +54,8 @@ export async function createDeal(repo: Repo, draft: NewDealDraft, actorRepId: st
     if (id && !reps.find((r) => r.id === id)?.active) throw new HttpError(400, `${label} rep is inactive — new deals assign active reps only`);
   }
   if (draft.parentId && !ctx.deals.some((d) => d.id === draft.parentId)) throw new HttpError(400, `Parent deal ${draft.parentId} does not exist`);
+  const renewed = draft.renewedFromId ? ctx.deals.find((d) => d.id === draft.renewedFromId) : undefined;
+  if (draft.renewedFromId && !renewed) throw new HttpError(400, `Renewed deal ${draft.renewedFromId} does not exist`);
   let deal: Deal;
   try {
     deal = priceDeal(draft, {
@@ -68,8 +70,25 @@ export async function createDeal(repo: Repo, draft: NewDealDraft, actorRepId: st
     bad(e);
   }
   await repo.insertDeal(deal);
-  await repo.writeAudit({ actorRepId, action: 'deal.create', targetRepId: null, path: `/api/admin/deals/${deal.id}`, detail: { business: deal.business, funded: deal.funded } });
+  // A renewal closes the deal it replaces, unless ops already gave that one a final status.
+  if (renewed && !['Refinanced', 'Paid In Full', 'Default'].includes(renewed.dealStatus)) await repo.updateDeal(renewed.id, { dealStatus: 'Refinanced' });
+  await repo.writeAudit({ actorRepId, action: 'deal.create', targetRepId: null, path: `/api/admin/deals/${deal.id}`, detail: { business: deal.business, funded: deal.funded, ...(renewed ? { renewedFrom: renewed.id } : {}) } });
   return deal;
+}
+
+/** Link (or unlink, with null) the deal this one renewed. Marks the earlier deal Refinanced when it is still live. */
+export async function linkRenewal(repo: Repo, id: string, fromId: unknown, actorRepId: string): Promise<{ renewedFromId: string | null }> {
+  const deal = await requireDeal(repo, id);
+  const from = fromId === null || fromId === undefined || fromId === '' ? null : String(fromId);
+  if (from === id) throw new HttpError(400, 'A deal cannot renew itself');
+  const ctx = await repo.loadContext();
+  const prev = from ? ctx.deals.find((d) => d.id === from) : null;
+  if (from && !prev) throw new HttpError(404, `Deal ${from} not found`);
+  if (prev && prev.date > deal.date) throw new HttpError(400, `${prev.id} funded after ${deal.id} — the renewal comes second`);
+  await repo.updateDeal(id, { renewedFromId: from });
+  if (prev && !['Refinanced', 'Paid In Full', 'Default'].includes(prev.dealStatus)) await repo.updateDeal(prev.id, { dealStatus: 'Refinanced' });
+  await repo.writeAudit({ actorRepId, action: 'deal.update', targetRepId: null, path: `/api/admin/deals/${id}/renewal`, detail: { renewedFromId: from } });
+  return { renewedFromId: from };
 }
 
 export interface SplitsInput {

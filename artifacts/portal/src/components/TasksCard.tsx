@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { api, post, type MyTasks, type TaskView } from '../lib/api';
+import { DEMO, api, post, type MyTasks, type TaskView } from '../lib/api';
 import { day } from '../lib/format';
 import { useSession } from '../lib/session';
 import { Card, Pill } from './ui';
@@ -32,7 +32,7 @@ export function TasksCard({ onOpenDeal }: { onOpenDeal: (dealId: string) => void
   }
   const overdue = t.tasks.filter((x) => x.overdue).length;
   return (
-    <Card title="My calls" extra={t.tasks.length ? `${t.tasks.length} open${overdue ? ` · ${overdue} overdue` : ''} · log what happened and the reminder stops` : 'nothing waiting on you'}>
+    <Card title="My calls" extra={<span style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>{t.tasks.length ? `${t.tasks.length} open${overdue ? ` · ${overdue} overdue` : ''} · log what happened and the reminder stops` : 'nothing waiting on you'}{!viewAs && <CalendarFeed />}</span>}>
       {t.tasks.length === 0 ? <div className="muted">Renewal and draw reminders land here as soon as a deal qualifies. Add your own from any deal.</div> : (
         <div className="pl">
           {t.tasks.map((x) => (
@@ -113,5 +113,27 @@ export function DealTasks({ dealId }: { dealId: string }) {
       )}
       <AddTask dealId={dealId} base="/api/admin" />
     </section>
+  );
+}
+
+/** Subscribe-once calendar of my tasks, eligibility and maturity dates. */
+function CalendarFeed() {
+  const { notify } = useSession();
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['calendar-feed'], queryFn: () => api<{ url: string | null; enabled: boolean }>('/api/me/calendar') });
+  const [show, setShow] = useState(false);
+  if (!q.data) return null;
+  return (
+    <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+      {q.data.url && show ? (
+        <>
+          <input readOnly value={q.data.url} onFocus={(e) => e.target.select()} style={{ height: 28, width: 280, fontFamily: 'var(--mono)', fontSize: 12 }} />
+          <button className="btn" style={{ height: 28, padding: '0 8px' }} onClick={() => { void navigator.clipboard?.writeText(q.data!.url!); notify('Feed link copied — add it as a calendar subscription (URL) in Google, Apple or Outlook'); }}>Copy</button>
+          <button className="btn" style={{ height: 28, padding: '0 8px' }} title="Revoke this link; a new one can be made any time" onClick={async () => { await post('/api/me/calendar', {}, 'DELETE'); await qc.invalidateQueries({ queryKey: ['calendar-feed'] }); setShow(false); }}>Revoke</button>
+        </>
+      ) : (
+        <button className="btn" style={{ height: 28, padding: '0 8px' }} disabled={DEMO} title={DEMO ? 'Available on the live portal' : 'A private calendar link with your tasks, eligibility and maturity dates'} onClick={async () => { if (!q.data!.url) { await post('/api/me/calendar', {}); await qc.invalidateQueries({ queryKey: ['calendar-feed'] }); } setShow(true); }}>{q.data.enabled ? 'Calendar link' : 'Add to my calendar'}</button>
+      )}
+    </span>
   );
 }

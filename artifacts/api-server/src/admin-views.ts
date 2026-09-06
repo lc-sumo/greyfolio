@@ -13,6 +13,9 @@ export interface RoleView {
 
 export interface AdminDealRow {
   id: string;
+  /** Renewal chain: the deal this one replaced, and the one that replaced it. */
+  renewedFromId: string | null;
+  renewedById: string | null;
   opportunityId: string;
   parentId: string | null;
   date: string;
@@ -121,6 +124,8 @@ export function adminDealRow(deal: Deal, ctx: LedgerContext, reps: Rep[], settin
     lenderPaid: deal.lenderPaid,
     crmId: deal.crmId,
     crmUrl: crmUrl(settings.crm.urlTemplate, deal),
+    renewedFromId: deal.renewedFromId ?? null,
+    renewedById: ctx.deals.find((d) => d.renewedFromId === deal.id)?.id ?? null,
     creditLine: deal.creditLine,
     drawSubsequentPct: deal.drawSubsequentPct,
     hasClawback: ctx.clawbacks.some((c) => c.dealId === deal.id),

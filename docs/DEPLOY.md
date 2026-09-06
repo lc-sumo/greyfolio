@@ -53,7 +53,6 @@ Set `SEED=workbook` for the very first boot only, then `none`.
 | `MAIL_PROVIDER` | no | `sendgrid`, `resend`, `postmark`, `log` (dev) or `off` |
 | `SENDGRID_API_KEY` | no | Accepted in place of `MAIL_API_KEY` when the provider is SendGrid |
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | no | SSO (Google Workspace, Okta, Entra) |
-| `MAIL_PROVIDER` | no | `resend`, `postmark`, `log` (print only), `off` (default in production) |
 | `MAIL_API_KEY`, `MAIL_FROM` | with mail | Provider key and verified sender |
 | `RENEWAL_DIGEST_HOUR_UTC` | no | Hour the renewal digest goes to admins (default 13); `off` disables |
 | `SEED` | no | `workbook` on first boot, `none` afterwards, `demo` only for previews |

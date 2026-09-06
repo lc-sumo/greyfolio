@@ -1,0 +1,24 @@
+# Replit: one service that builds the portal, applies migrations and serves API + portal on 8080.
+# Set Secrets first (see README "Launch checklist" and docs/DEPLOY.md):
+#   DATABASE_URL (Replit PostgreSQL adds this), SESSION_SECRET (32+ chars),
+#   BASE_URL and APP_ORIGIN (your repl URL), NODE_ENV=production, SEED=workbook on the first boot then none,
+#   MAIL_PROVIDER / MAIL_API_KEY / MAIL_FROM when email is ready.
+run = ["sh", "-c", "corepack enable && corepack prepare pnpm@10.0.0 --activate && pnpm install --frozen-lockfile && pnpm portal:build && pnpm db:migrate && ([ \"${SEED:-none}\" = none ] || pnpm db:seed) && PORTAL_DIST=artifacts/portal/dist pnpm --filter @greystone/api-server start"]
+entrypoint = "artifacts/api-server/src/index.ts"
+modules = ["nodejs-22"]
+
+[nix]
+channel = "stable-24_05"
+
+[env]
+PORT = "8080"
+PORTAL_DIST = "artifacts/portal/dist"
+
+[deployment]
+deploymentTarget = "cloudrun"
+build = ["sh", "-c", "corepack enable && corepack prepare pnpm@10.0.0 --activate && pnpm install --frozen-lockfile && pnpm portal:build"]
+run = ["sh", "-c", "corepack enable && corepack prepare pnpm@10.0.0 --activate && pnpm db:migrate && ([ \"${SEED:-none}\" = none ] || pnpm db:seed) && PORTAL_DIST=artifacts/portal/dist pnpm --filter @greystone/api-server start"]
+
+[[ports]]
+localPort = 8080
+externalPort = 80

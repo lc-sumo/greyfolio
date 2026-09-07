@@ -131,7 +131,7 @@ export function Login({ oidc, devAuth, password: passwordAuth = true, setup = fa
         ) : (
           <form onSubmit={signIn}>
             <h2>Sign in</h2>
-            {signedOutWhy && <div className="note" style={{ background: 'var(--amber-light)', borderColor: 'var(--amber-light-3)', color: 'var(--amber-deep)' }}>{signedOutWhy} <button type="button" className="linkish" style={{ color: 'inherit', padding: '0 0 0 6px', font: 'inherit' }} onClick={clearSignedOut}>✕</button></div>}
+            {signedOutWhy && <div className="note" style={{ background: 'var(--amber-light)', borderColor: 'var(--amber-light-3)', color: 'var(--amber-deep)' }}>{signedOutWhy} <button type="button" className="linkish" style={{ color: 'inherit', padding: '0 0 0 6px', font: 'inherit' }} aria-label="Dismiss message" onClick={clearSignedOut}>Dismiss</button></div>}
             {oidc && (
               <a className="btn primary big" style={{ display: 'grid', placeItems: 'center' }} href={`/auth/login?returnTo=${encodeURIComponent(window.location.pathname)}`}>
                 Continue with Greystone SSO

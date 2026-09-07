@@ -13,11 +13,11 @@ export function readTheme(): Theme {
 
 export function applyTheme(t: Theme): void {
   const root = document.documentElement;
-  if (t === 'auto') delete root.dataset.theme;
-  else root.dataset.theme = t;
+  // Greystone's approved production surface is always the light Graphite deck.
+  // Keep the API for callers, but never allow OS or persisted dark mode to alter it.
+  root.dataset.theme = 'light';
   try {
-    if (t === 'auto') localStorage.removeItem(KEY);
-    else localStorage.setItem(KEY, t);
+    localStorage.setItem(KEY, 'light');
   } catch {
     /* private mode: the choice just does not persist */
   }

@@ -37,7 +37,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .brand img { width: 26px; height: 26px; object-fit: contain; flex-shrink: 0; }
 .brand b { display: block; font-size: 14px; font-weight: 700; letter-spacing: -.02em; color: #fff; }
 .brand span { display: block; font-size: 9px; letter-spacing: .18em; text-transform: uppercase; color: var(--navy-text-3); margin-top: 2px; }
-.nav { padding: 14px 8px; display: flex; flex-direction: column; gap: 1px; flex: 1; overflow-y: auto; }
+.nav { padding: 14px 8px; display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .nav-group { padding: 6px 12px 8px; font-size: 9px; letter-spacing: .18em; }
 .nav a, .nav button { position: relative; display: flex; align-items: center; gap: 10px; width: 100%; min-height: 34px; text-align: left; background: none; border: none; color: var(--navy-text-2); padding: 0 11px 0 14px; border-radius: 7px; font-size: 13px; font-weight: 500; cursor: pointer; overflow: hidden; }
 .nav a::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: 0 2px 2px 0; background: transparent; }
@@ -45,7 +45,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .nav a.active { background: var(--navy-raised-2); color: #fff; }
 .nav a.active::before { background: var(--accent-chrome); }
 .nav a .dot { display: none; }
-.sidebar-foot { border-top: 1px solid var(--navy-border); padding: 12px 14px; display: grid; gap: 6px; }
+.sidebar-foot { border-top: 1px solid var(--navy-border); padding: 12px 14px; display: grid; gap: 6px; flex: 0 1 auto; max-height: min(56vh, 520px); overflow-y: auto; overscroll-behavior: contain; }
 .viewas { display: grid; gap: 6px; padding-bottom: 8px; margin-bottom: 4px; border-bottom: 1px solid var(--navy-border); }
 .viewas .label { color: var(--navy-text-3); font-size: 9px; letter-spacing: .18em; }
 .viewas select { width: 100%; height: 32px; background: var(--navy-raised); color: var(--navy-text); border: 1px solid var(--navy-border-2); border-radius: 7px; padding: 0 7px; font-size: 12px; outline: none; }
@@ -383,9 +383,10 @@ input.mini-input:focus { border-color: var(--teal); }
 .srow input[inputmode] { font-family: var(--mono); text-align: right; }
 .srow input:disabled { background: var(--sunken); color: var(--ink-muted); }
 .srow .btn { white-space: nowrap; }
-.tog { width: 34px; height: 20px; border-radius: 10px; border: none; background: var(--border-strong); position: relative; cursor: pointer; padding: 0; }
-.tog i { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .15s ease; }
-.tog.on { background: var(--teal); } .tog.on i { left: 16px; }
+.tog { width: 54px; height: 22px; border-radius: 11px; border: none; background: var(--border-strong); position: relative; cursor: pointer; padding: 0; color: var(--ink-tint); font-size: 9px; font-weight: 800; letter-spacing: .06em; }
+.tog::after { content: 'OFF'; position: absolute; right: 5px; top: 3px; line-height: 16px; }
+.tog i { position: absolute; z-index: 1; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .15s ease; }
+.tog.on { background: var(--teal); color: #fff; } .tog.on::after { content: 'ON'; left: 6px; right: auto; } .tog.on i { left: 35px; }
 .tog:disabled { opacity: .5; cursor: default; }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .chip { border: 1px solid var(--border); background: var(--input-bg); color: var(--ink-muted); border-radius: 999px; font: inherit; font-size: 11.5px; padding: 2px 8px; cursor: pointer; line-height: 1.3; }
@@ -396,6 +397,8 @@ input.mini-input:focus { border-color: var(--teal); }
 .gridpreview span { flex: 1 1 0; min-width: 3px; background: var(--teal); opacity: .75; border-radius: 2px 2px 0 0; }
 .pwform { display: grid; gap: 6px; margin: 4px 0 8px; }
 .pwform input { height: 30px; border: 1px solid var(--navy-border-2); border-radius: 7px; padding: 0 8px; background: var(--navy-raised); color: #fff; font: inherit; font-size: 12.5px; outline: none; }
+.sidebar-foot .pwform { min-width: 0; overflow-wrap: anywhere; }
+.sidebar-foot .pwform > div { flex-wrap: wrap; }
 .login .pwform input, .drawer .pwform input, .card .pwform input { border-color: var(--border); background: var(--input-bg); color: var(--ink); }
 .cleared { display: inline-flex; align-items: center; gap: 6px; color: var(--teal); font-weight: 600; font-size: 12px; }
 .cleared i { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--teal); color: #fff; font-style: normal; font-size: 11px; }

@@ -2,7 +2,8 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { configFromEnv } from '../src/config.js';
-import { nextPeriod } from '../src/services/payroll.js';
+import { paySelected, nextPeriod } from '../src/services/payroll.js';
+import { updateTerms } from '../src/services/deals.js';
 import { repLedger } from '@greystone/commission';
 import { clawbacks, deals, lines, memoryRepo } from './memory-repo.js';
 
@@ -25,6 +26,7 @@ describe('nextPeriod', () => {
     expect(nextPeriod([{ id: 'x', label: '', start: '2026-08-16', end: '2026-08-31', status: 'paid' }])).toEqual({ start: '2026-09-01', end: '2026-09-15' });
     expect(nextPeriod([{ id: 'x', label: '', start: '2026-09-01', end: '2026-09-15', status: 'paid' }])).toEqual({ start: '2026-09-16', end: '2026-09-30' });
     expect(nextPeriod([{ id: 'x', label: '', start: '2026-12-16', end: '2026-12-31', status: 'paid' }])).toEqual({ start: '2027-01-01', end: '2027-01-15' });
+    expect(nextPeriod([{ id: 'x', label: '', start: '2026-08-16', end: '2026-08-31', status: 'archived' }], '2026-08-20')).toEqual({ start: '2026-08-16', end: '2026-08-31' });
     expect(nextPeriod([], '2026-02-20')).toEqual({ start: '2026-02-16', end: '2026-02-28' });
     expect(nextPeriod([], '2026-02-03')).toEqual({ start: '2026-02-01', end: '2026-02-15' });
   });
@@ -73,6 +75,55 @@ describe('runs', () => {
     expect((await admin.post('/api/admin/payroll/runs/run-4/advance')).body.status).toBe('paid');
     expect((await admin.post('/api/admin/payroll/runs/run-4/advance')).status).toBe(400);
     expect((await admin.post('/api/admin/payroll/runs/nope/advance')).status).toBe(404);
+  });
+
+  it('archives draft or approved excess runs without deleting ledger history, while paid runs stay locked', async () => {
+    const { admin, repo } = await harness();
+    // A run with payout rows must never be hard-deleted, but can leave the active workflow.
+    await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: ['F2|Opener|base'] });
+    expect((await admin.delete('/api/admin/payroll/runs/run-4')).status).toBe(400);
+    const archived = await admin.post('/api/admin/payroll/runs/run-4/archive');
+    expect(archived.status).toBe(200);
+    expect(archived.body.status).toBe('archived');
+    expect(repo.data.lines.filter((l) => l.runId === 'run-4')).toHaveLength(2);
+    expect((await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: ['F3|Opener|base'] })).body.error).toMatch(/archived/);
+    expect((await admin.post('/api/admin/payroll/runs/run-4/advance')).body.error).toMatch(/archived/);
+    expect((await admin.post('/api/admin/payroll/runs/run-4/reopen')).body.error).toMatch(/archived/);
+    expect((await admin.post('/api/admin/payroll/runs/run-4/void').send({ repId: 'rep-julian-ribak' })).body.error).toMatch(/archived/);
+    expect((await admin.post('/api/admin/payroll/runs/run-3/archive')).body.error).toMatch(/paid and locked/);
+    expect((await admin.get('/api/admin/audit')).body.entries.some((e: { action: string }) => e.action === 'payroll.run.archive')).toBe(true);
+    // Archived periods no longer reserve a date range, so an actual replacement can be opened.
+    const replacement = await admin.post('/api/admin/payroll/runs').send({ start: '2026-09-01', end: '2026-09-15' });
+    expect(replacement.status).toBe(201);
+    expect((await admin.post(`/api/admin/payroll/runs/${replacement.body.id}/advance`)).body.status).toBe('approved');
+    expect((await admin.post(`/api/admin/payroll/runs/${replacement.body.id}/archive`)).body.status).toBe('archived');
+
+    // IDs remain immutable: replacing an archived deterministic ID never
+    // collides with the archived record or its audit/ledger references.
+    const first = await admin.post('/api/admin/payroll/runs').send({ start: '2026-10-01', end: '2026-10-15' });
+    expect(first.body.id).toBe('run-2026-10-01');
+    await admin.post(`/api/admin/payroll/runs/${first.body.id}/archive`);
+    const second = await admin.post('/api/admin/payroll/runs').send({ start: '2026-10-01', end: '2026-10-15' });
+    expect(second.status).toBe(201);
+    expect(second.body.id).toBe('run-2026-10-01-2');
+  });
+
+  it('conditionally refuses a payout commit after a run is archived', async () => {
+    const { admin, repo } = await harness();
+    const created = await admin.post('/api/admin/payroll/runs').send({ start: '2026-10-01', end: '2026-10-15' });
+    await admin.post(`/api/admin/payroll/runs/${created.body.id}/archive`);
+    // Models the final, transactional state check after a payout was planned:
+    // no ledger mutation may occur if archival won the race.
+    expect(await repo.commitPayoutForOpenRun(created.body.id, { lines: [], clawbackUpdates: [], dealsFullyPaid: [], paidAt: today })).toBe(false);
+  });
+
+  it('conditionally refuses a void commit when archive wins the race', async () => {
+    const { admin, repo } = await harness();
+    const created = await admin.post('/api/admin/payroll/runs').send({ start: '2026-10-01', end: '2026-10-15' });
+    await admin.post(`/api/admin/payroll/runs/${created.body.id}/archive`);
+    // A void plan may have been calculated before archival; its final write
+    // still cannot append a reversing ledger row into the archived run.
+    expect(await repo.commitPayoutForUnarchivedRun(created.body.id, { lines: [], clawbackUpdates: [], dealsFullyPaid: [], paidAt: today })).toBe(false);
   });
 });
 
@@ -148,6 +199,45 @@ describe('POST pay', () => {
     expect((await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-ghost', selectedKeys: ['F2|Opener|base'] })).status).toBe(404);
     expect((await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: [] })).body.error).toMatch(/at least one/);
     expect((await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: ['F1|Closer|base'] })).body.error).toMatch(/not payable/);
+  });
+
+  it('rejects a stale payout deterministically when deal terms change after planning but before commit', async () => {
+    const { repo } = await harness();
+    const originalCommit = repo.commitPayoutForOpenRun.bind(repo);
+    let injected = false;
+    repo.commitPayoutForOpenRun = async (runId, commit, validateDeals) => {
+      // This hook is the exact boundary after paySelected loaded its context
+      // and built the plan, but before the repository validates and appends.
+      injected = true;
+      const current = repo.data.deals.find((d) => d.id === 'F2')!;
+      await repo.updateDeal('F2', { termDays: (current.termDays ?? 0) + 1 });
+      return originalCommit(runId, commit, validateDeals);
+    };
+
+    await expect(paySelected(repo, {
+      runId: 'run-4',
+      repId: 'rep-julian-ribak',
+      selectedKeys: ['F2|Opener|base'],
+    }, 'rep-leor')).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringMatching(/deal.*changed.*no payout was recorded.*review and try again/i),
+    });
+    expect(injected).toBe(true);
+    expect(repo.data.lines.filter((l) => l.runId === 'run-4')).toEqual([]);
+  });
+
+  it('retains the opposite ordering: payout commits first, then an economics edit is rejected', async () => {
+    const { repo } = await harness();
+    await paySelected(repo, {
+      runId: 'run-4',
+      repId: 'rep-julian-ribak',
+      selectedKeys: ['F2|Opener|base'],
+    }, 'rep-leor');
+    expect(repo.data.lines.some((l) => l.runId === 'run-4' && l.dealId === 'F2')).toBe(true);
+    await expect(updateTerms(repo, 'F2', { amount: 3_000 }, 'rep-leor')).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringMatching(/payouts in the ledger.*void them before changing its terms/i),
+    });
   });
 });
 

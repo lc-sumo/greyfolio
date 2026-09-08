@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { commissionFor, defaultSplits, repOptions } from '@greystone/commission';
 import { FUNDED_DEALS_COLUMNS, collectedFromSheetStatus, columnFor, parsePsfCell } from '../src/seed/funded-deals-columns.js';
+import { readFundedDealsCsv, selectFundedDealsSheet } from '../src/seed/funded-deals-csv.js';
 import { COMMISSION_STATUSES, DEAL_STATUSES, FREQUENCIES, LENDERS, PARTNERS, PRODUCTS, THRESHOLDS, WORKBOOK_REPS, repEmail, repId, seedReps, seedSettings } from '../src/seed/workbook.js';
 
 describe('REPS tab', () => {
@@ -155,5 +156,42 @@ describe('FUNDED DEALS column map', () => {
     expect(collectedFromSheetStatus('Invoice Sent', 1000)).toBe(0);
     expect(collectedFromSheetStatus('Waiting for payment', 1000)).toBe(0);
     expect(collectedFromSheetStatus(null, 1000)).toBe(0);
+  });
+});
+
+describe('FUNDED DEALS import validation', () => {
+  it('uses the same complete-sheet preference and explicit tab selection in server and demo', () => {
+    const incomplete = { name: 'FUNDED DEALS - OLD', grid: [['Business Name', 'Lender'], ['Old Co', 'MBC']] };
+    const complete = { name: 'FUNDED DEALS - CURRENT', grid: [['Business Name', 'Lender', 'Product', 'Funded / Draw Amount ($)', 'Date'], ['New Co', 'MBC', 'MCA', '1000', '4/1/2026']] };
+    const other = { name: 'Notes', grid: [['hello']] };
+    expect(selectFundedDealsSheet([incomplete, complete, other])).toMatchObject({
+      sheetName: 'FUNDED DEALS - CURRENT',
+      matchingSheets: ['FUNDED DEALS - CURRENT'],
+      grid: complete.grid,
+    });
+    expect(selectFundedDealsSheet([incomplete, complete, other], 'funded deals - old')).toMatchObject({
+      sheetName: 'FUNDED DEALS - OLD',
+      matchingSheets: ['FUNDED DEALS - CURRENT'],
+      grid: incomplete.grid,
+    });
+  });
+
+  it('reports structured missing required headers', () => {
+    const read = readFundedDealsCsv('Business Name,Lender\nAcme,MBC');
+    expect(read.missingRequired).toEqual(['Product', 'Funded or Draw Amount', 'Date']);
+    expect(read.problems[0]).toMatch(/Missing required columns/);
+  });
+
+  it('keeps incomplete deal rows for preview instead of silently skipping them', () => {
+    const read = readFundedDealsCsv('Business Name,Lender,Product,Funded / Draw Amount ($),Date\nAcme,MBC,MCA,,');
+    expect(read.skipped).toBe(0);
+    expect(read.rows).toHaveLength(1);
+    expect(read.rows[0]).toMatchObject({ business: 'Acme', amount: 0, date: '' });
+  });
+
+  it('continues to skip month banners and totals', () => {
+    const read = readFundedDealsCsv('Business Name,Lender,Product,Funded / Draw Amount ($),Date\n▼ APRIL\nAcme,MBC,MCA,1000,4/1/2026\nAPRIL TOTAL,,,1000');
+    expect(read.rows).toHaveLength(1);
+    expect(read.skipped).toBe(2);
   });
 });

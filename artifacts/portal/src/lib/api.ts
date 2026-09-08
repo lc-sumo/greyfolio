@@ -28,9 +28,9 @@ export interface RepDashboard {
   owedToMe: RepDealView[];
 }
 export interface RepClawbackView { id: string; dealId: string; date: string; business: string; dealClawback: number; chargedToMe: number; recovered: number; remaining: number; reason: string; status: 'open' | 'recovered' }
-export interface RepStatement { runId: string; period: string; status: 'draft' | 'approved' | 'paid'; dealCount: number; grossPaid: number; clawbacks: number; netPaid: number }
+export interface RepStatement { runId: string; period: string; status: 'draft' | 'approved' | 'paid' | 'archived'; dealCount: number; grossPaid: number; clawbacks: number; netPaid: number }
 export interface MeInfo { rep: { id: string; name: string; email: string; role: string; active: boolean }; viewAs: boolean; actor: { id: string; name: string; role: string } | null }
-export interface RosterRep { id: string; name: string; email: string; role: string; teamId: string | null; team: string | null; openerRate: number; closerRate: number; overrideRate: number | null; active: boolean; hasPassword?: boolean; hasTotp?: boolean; superAdmin?: boolean; perms?: { merchantEmail?: boolean } | null; earned: number; paid: number; held: number; owed: number; dealCount: number }
+export interface RosterRep { id: string; name: string; email: string; role: string; teamId: string | null; team: string | null; openerRate: number; closerRate: number; overrideRate: number | null; /** False for portal-only users who must not be assigned commission roles. */ commissionEligible?: boolean; active: boolean; hasPassword?: boolean; hasTotp?: boolean; superAdmin?: boolean; perms?: { merchantEmail?: boolean } | null; earned: number; paid: number; held: number; owed: number; dealCount: number }
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -94,7 +94,7 @@ export interface AdminDealRow {
   commRate: number; psfPct: number; originationFee: number; lineRate: number | null; lineFee: number; gross: number; referralPartner: string | null; referralRate: number; referralFee: number; net: number;
   roles: RoleView[]; totalRepPayout: number; houseNet: number; collected: number; outstanding: number; lenderPaidLabel: string;
   commissionStatus: string; dealStatus: string; storedDealStatus: string; atRisk: boolean; repPaid: string | null; lenderPaid: string | null; crmId: string | null; crmUrl: string;
-  creditLine: number | null; drawSubsequentPct: number | null; hasClawback: boolean; clawbackWindow: ClawbackWindow; overdueReceipts: number; overdueAmount: number; increments: { total: number; lenderPaid: number; repPaid: number; disbursed: number; planned: number; perIncrement: number; stopped: boolean } | null;
+  creditLine: number | null; creditLineUsed: number | null; creditLineAvailable: number | null; leadSource: string | null; notes: string | null; drawSubsequentPct: number | null; hasClawback: boolean; clawbackWindow: ClawbackWindow; overdueReceipts: number; overdueAmount: number; increments: { total: number; lenderPaid: number; repPaid: number; disbursed: number; planned: number; perIncrement: number; stopped: boolean } | null;
 }
 export interface ScheduleEvent { kind: 'upfront' | 'increment' | 'remainder'; n: number; label: string; expected: string | null; amount: number; received: boolean; overdue: boolean; funding?: number }
 export interface Disbursement { planned: number; perIncrement: number; disbursed: number; final: number; count: number; total: number; stopped: boolean; uneven: boolean }
@@ -117,7 +117,7 @@ export interface NewDealDraft {
 export const post = <T,>(path: string, body: unknown, method = 'POST') => api<T>(path, { method, body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
 
 /* ---- Payroll (Phase 5). Admin only. ---- */
-export interface RunSummary { id: string; label: string; start: string; end: string; status: 'draft' | 'approved' | 'paid'; paidGross: number; recovered: number; cash: number; repCount: number; lineCount: number }
+export interface RunSummary { id: string; label: string; start: string; end: string; status: 'draft' | 'approved' | 'paid' | 'archived'; paidGross: number; recovered: number; cash: number; repCount: number; lineCount: number }
 export interface PayrollRepRow { id: string; name: string; active: boolean; owed: number; held: number; lineCount: number }
 export interface PayrollOverview { runs: RunSummary[]; reps: PayrollRepRow[]; outstanding: number }
 export interface PayableLineView { key: string; dealId: string; segmentKey: string; segmentLabel: string; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string; lender: string; funded: number; role: string; rate: number; amount: number; lenderPaidLabel: string; collected: boolean; collectedKeys: string[]; collectedAmount: number; uncollectedKeys: string[]; uncollectedAmount: number; units: { paid: number; total: number; collected: number } | null }

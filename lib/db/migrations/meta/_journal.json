@@ -78,6 +78,13 @@
       "when": 1788709540966,
       "tag": "0010_super_admin_perms",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788710000000,
+      "tag": "0011_rep_commission_eligible",
+      "breakpoints": true
     }
   ]
 }

@@ -70,6 +70,8 @@ export const commissionReps = pgTable(
     teamId: text('team_id').references(() => commissionTeams.id, { onDelete: 'set null' }),
     /** Deactivating a rep must not alter historical assignments (invariant #9). */
     active: boolean('active').notNull().default(true),
+    /** Portal-only identities are not eligible for opener, closer, or override splits. */
+    commissionEligible: boolean('commission_eligible').notNull().default(true),
     /** scrypt hash for email + password sign-in; null = SSO / no password set. Never leaves the API. */
     passwordHash: text('password_hash'),
     /** Base32 TOTP secret for two-factor sign-in; null = not enrolled. Enabled only once a code has been verified. */
@@ -207,7 +209,7 @@ export const commissionPayrollRuns = pgTable('commission_payroll_runs', {
   label: text('label').notNull(),
   start: isoDate('start').notNull(),
   end: isoDate('end').notNull(),
-  /** draft | approved | paid */
+  /** draft | approved | paid | archived */
   status: text('status').notNull().default('draft'),
   approvedAt: timestamp('approved_at', { withTimezone: true }),
   paidAt: timestamp('paid_at', { withTimezone: true }),

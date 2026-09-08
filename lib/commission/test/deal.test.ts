@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collectedOf, segments } from '../src/index.js';
+import { collectedOf, newDraw, segments } from '../src/index.js';
 import { atRisk, crmUrl, nextDealId, priceDeal, type PricingContext } from '../src/deal.js';
 import type { ProductRule } from '../src/types.js';
 import { ValidationError } from '../src/validate.js';
@@ -52,6 +52,13 @@ describe('priceDeal', () => {
   it('multi-draw products take the initial draw rate and carry draw settings', () => {
     const d = priceDeal({ ...draft, product: 'LOC - INITIAL', commRate: undefined, factor: undefined, creditLine: 250_000 }, ctx({ rule: LOC }));
     expect(d).toMatchObject({ commRate: 0.08, gross: 8_000 + 2_000 + 500, creditLine: 250_000, drawInitialPct: 0.08, drawSubsequentPct: 0.04, factor: null });
+  });
+  it('does not allow initial or subsequent LOC funding beyond the facility ceiling', () => {
+    expect(() => priceDeal({ ...draft, product: LOC.name, creditLine: 50_000, amount: 50_001 }, ctx({ rule: LOC }))).toThrow(/cannot exceed the credit line/);
+    const loc = priceDeal({ ...draft, product: LOC.name, creditLine: 100_000, amount: 60_000 }, ctx({ rule: LOC }));
+    const first = newDraw(loc, { amount: 25_000, date: '2026-09-01' });
+    expect(newDraw({ ...loc, draws: [first] }, { amount: 15_000, date: '2026-09-01' })).toMatchObject({ amount: 15_000 });
+    expect(() => newDraw({ ...loc, draws: [first] }, { amount: 15_001, date: '2026-09-01' })).toThrow(/remaining credit-line availability/);
   });
   it('amortizing products use APR × term / 252 for payback', () => {
     const d = priceDeal({ ...draft, product: 'TERM LOAN', factor: undefined, apr: 12.6, termDays: 252, commRate: 5 }, ctx({ rule: TERM }));

@@ -15,7 +15,7 @@ const iso = (y: number, m: number, d: number) => `${y}-${String(m).padStart(2, '
 
 /** The twice-monthly period that follows `after` (or contains `on` when there are no runs). */
 export function nextPeriod(runs: PayrollRun[], on = today()): { start: string; end: string } {
-  const latest = [...runs].filter((r) => !r.id.startsWith('import-')).sort((a, b) => b.end.localeCompare(a.end))[0];
+  const latest = [...runs].filter((r) => !r.id.startsWith('import-') && r.status !== 'archived').sort((a, b) => b.end.localeCompare(a.end))[0];
   if (!latest) {
     const [y, m, d] = on.split('-').map(Number) as [number, number, number];
     return d <= 15 ? { start: iso(y, m, 1), end: iso(y, m, 15) } : { start: iso(y, m, 16), end: iso(y, m, lastDay(y, m)) };
@@ -32,8 +32,13 @@ export async function createRun(repo: Repo, actorRepId: string, period?: { start
   const p = period ?? nextPeriod(runs);
   if (p.start > p.end) throw new HttpError(400, 'Run start must not be after its end');
   // Sheet-import runs span the whole imported history; they never block a real pay period.
-  if (runs.some((r) => !r.id.startsWith('import-') && r.start <= p.end && r.end >= p.start)) throw new HttpError(400, `A run already covers ${label(p.start, p.end)}`);
-  const run: PayrollRun = { id: `run-${p.start}`, label: label(p.start, p.end), start: p.start, end: p.end, status: 'draft' };
+  if (runs.some((r) => !r.id.startsWith('import-') && r.status !== 'archived' && r.start <= p.end && r.end >= p.start)) throw new HttpError(400, `A run already covers ${label(p.start, p.end)}`);
+  const baseId = `run-${p.start}`;
+  let n = 1;
+  let id = baseId;
+  const ids = new Set(runs.map((r) => r.id));
+  while (ids.has(id)) id = `${baseId}-${++n}`;
+  const run: PayrollRun = { id, label: label(p.start, p.end), start: p.start, end: p.end, status: 'draft' };
   await repo.insertRun(run);
   await repo.writeAudit({ actorRepId, action: 'payroll.run', targetRepId: null, path: `/api/admin/payroll/runs/${run.id}`, detail: { created: run.label } });
   return run;
@@ -44,8 +49,11 @@ export async function advanceRun(repo: Repo, id: string, actorRepId: string): Pr
   const run = (await repo.listRuns()).find((r) => r.id === id);
   if (!run) throw new HttpError(404, `Run ${id} not found`);
   if (run.status === 'paid') throw new HttpError(400, `${run.label} is already paid and locked`);
+  if (run.status === 'archived') throw new HttpError(400, `${run.label} is archived and closed`);
   const next = run.status === 'draft' ? 'approved' : 'paid';
-  await repo.updateRun(id, { status: next, ...(next === 'approved' ? { approvedAt: new Date().toISOString() } : { paidAt: new Date().toISOString() }) });
+  if (!await repo.transitionRun(id, [run.status], { status: next, ...(next === 'approved' ? { approvedAt: new Date().toISOString() } : { paidAt: new Date().toISOString() }) })) {
+    throw new HttpError(400, `${run.label} changed status; refresh before trying again`);
+  }
   await repo.writeAudit({ actorRepId, action: 'payroll.run', targetRepId: null, path: `/api/admin/payroll/runs/${id}`, detail: { status: next } });
   return { ...run, status: next };
 }
@@ -54,17 +62,34 @@ export async function advanceRun(repo: Repo, id: string, actorRepId: string): Pr
 export async function reopenRun(repo: Repo, id: string, actorRepId: string): Promise<PayrollRun> {
   const run = (await repo.listRuns()).find((r) => r.id === id);
   if (!run) throw new HttpError(404, `Run ${id} not found`);
-  if (run.status !== 'approved') throw new HttpError(400, run.status === 'paid' ? `${run.label} is paid and locked` : `${run.label} is already a draft`);
-  await repo.updateRun(id, { status: 'draft', approvedAt: null });
+  if (run.status !== 'approved') throw new HttpError(400, run.status === 'paid' ? `${run.label} is paid and locked` : run.status === 'archived' ? `${run.label} is archived and closed` : `${run.label} is already a draft`);
+  if (!await repo.transitionRun(id, ['approved'], { status: 'draft', approvedAt: null })) {
+    throw new HttpError(400, `${run.label} changed status; refresh before trying again`);
+  }
   await repo.writeAudit({ actorRepId, action: 'payroll.run.reopen', targetRepId: null, path: `/api/admin/payroll/runs/${id}/reopen`, detail: { label: run.label } });
   return { ...run, status: 'draft' };
+}
+
+/**
+ * Close an excess draft or approved run without deleting its period or ledger
+ * history. Paid runs deliberately remain locked and must be corrected by
+ * appending Void ledger rows through the existing void workflow.
+ */
+export async function archiveRun(repo: Repo, id: string, actorRepId: string): Promise<PayrollRun> {
+  const run = (await repo.listRuns()).find((r) => r.id === id);
+  if (!run) throw new HttpError(404, `Run ${id} not found`);
+  if (run.status === 'paid') throw new HttpError(400, `${run.label} is paid and locked; use voids to correct its ledger`);
+  if (run.status === 'archived') throw new HttpError(400, `${run.label} is already archived`);
+  if (!await repo.transitionRun(id, ['draft', 'approved'], { status: 'archived' })) throw new HttpError(400, `${run.label} is no longer open and cannot be archived`);
+  await repo.writeAudit({ actorRepId, action: 'payroll.run.archive', targetRepId: null, path: `/api/admin/payroll/runs/${id}/archive`, detail: { label: run.label, previousStatus: run.status } });
+  return { ...run, status: 'archived' };
 }
 
 /** Close out a run that was opened by mistake. Only a draft with nothing paid in it can go; paid history is never deleted. */
 export async function deleteRun(repo: Repo, id: string, actorRepId: string): Promise<{ deleted: string }> {
   const run = (await repo.listRuns()).find((r) => r.id === id);
   if (!run) throw new HttpError(404, `Run ${id} not found`);
-  if (run.status !== 'draft') throw new HttpError(400, `${run.label} is ${run.status} — only draft runs can be removed`);
+  if (run.status !== 'draft') throw new HttpError(400, `${run.label} is ${run.status} — only empty draft runs can be removed; archive other open runs`);
   const ctx = await repo.loadContext();
   if (ctx.lines.some((l) => l.runId === id)) throw new HttpError(400, `${run.label} has payouts recorded in it — void them first or mark the run paid`);
   await repo.deleteRun(id);
@@ -88,6 +113,7 @@ export async function paySelected(repo: Repo, req: PayRequest, actorRepId: strin
   const run = runs.find((r) => r.id === req.runId);
   if (!run) throw new HttpError(404, `Run ${req.runId} not found`);
   if (run.status === 'paid') throw new HttpError(400, `${run.label} is paid and locked — open a new run`);
+  if (run.status === 'archived') throw new HttpError(400, `${run.label} is archived and closed — open a new run`);
   const rep = await repo.findRep(req.repId);
   if (!rep) throw new HttpError(404, `Rep ${req.repId} not found`);
   const ctx = await repo.loadContext();
@@ -98,9 +124,20 @@ export async function paySelected(repo: Repo, req: PayRequest, actorRepId: strin
     if (e instanceof PayoutError) throw new HttpError(400, e.message);
     throw e;
   }
+  const affectedDealIds = new Set([...plan.lines, ...plan.recoveries].map((line) => line.dealId));
+  const snapshot = (deals: typeof ctx.deals) => JSON.stringify(
+    deals.filter((deal) => affectedDealIds.has(deal.id)).sort((a, b) => a.id.localeCompare(b.id)),
+  );
+  const plannedEconomics = snapshot(ctx.deals);
   // Sanity: applying the plan must leave the ledger consistent before we write it.
   applyPayout(ctx, plan);
-  await repo.commitPayout({ lines: [...plan.lines, ...plan.recoveries], clawbackUpdates: plan.clawbackUpdates, dealsFullyPaid: plan.dealsFullyPaid, paidAt: today() });
+  if (!await repo.commitPayoutForOpenRun(
+    run.id,
+    { lines: [...plan.lines, ...plan.recoveries], clawbackUpdates: plan.clawbackUpdates, dealsFullyPaid: plan.dealsFullyPaid, paidAt: today() },
+    (currentDeals) => snapshot(currentDeals) === plannedEconomics,
+  )) {
+    throw new HttpError(400, `${run.label} or one of its deals changed while payroll was being prepared — no payout was recorded; review and try again`);
+  }
   await repo.writeAudit({ actorRepId, action: 'payroll.pay', targetRepId: req.repId, path: `/api/admin/payroll/runs/${run.id}/pay`, detail: { lines: plan.lines.length, gross: plan.gross, withheld: plan.withheld, net: plan.net } });
   return plan;
 }
@@ -121,6 +158,7 @@ export async function voidPayout(repo: Repo, req: VoidRequestInput, actorRepId: 
   const runs = await repo.listRuns();
   const run = runs.find((r) => r.id === req.runId);
   if (!run) throw new HttpError(404, `Run ${req.runId} not found`);
+  if (run.status === 'archived') throw new HttpError(400, `${run.label} is archived and closed`);
   const ctx = await repo.loadContext();
   let plan: VoidPlan;
   try {
@@ -130,7 +168,9 @@ export async function voidPayout(repo: Repo, req: VoidRequestInput, actorRepId: 
     throw e;
   }
   applyVoid(ctx, plan);
-  await repo.commitPayout({ lines: plan.lines, clawbackUpdates: plan.clawbackUpdates, dealsFullyPaid: [], dealsUnstamped: plan.dealsUnstamped, paidAt: today() });
+  if (!await repo.commitPayoutForUnarchivedRun(run.id, { lines: plan.lines, clawbackUpdates: plan.clawbackUpdates, dealsFullyPaid: [], dealsUnstamped: plan.dealsUnstamped, paidAt: today() })) {
+    throw new HttpError(400, `${run.label} is archived and closed — no void was recorded`);
+  }
   await repo.writeAudit({ actorRepId, action: 'payroll.void', targetRepId: req.repId, path: `/api/admin/payroll/runs/${run.id}/void`, detail: { rows: plan.lines.length, reversed: plan.reversed, recoveriesReturned: plan.recoveriesReturned, keys: plan.lines.map((l) => l.voids) } });
   return plan;
 }

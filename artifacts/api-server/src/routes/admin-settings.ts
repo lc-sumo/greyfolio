@@ -36,7 +36,14 @@ export function adminSettingsRouter(repo: Repo, notify: Omit<NotifyDeps, 'repo'>
 
   /** Import the tracker's FUNDED DEALS tab (CSV text in the body). */
   /** Body: `{ csv }` (text) or `{ xlsx }` (base64 of the Google Sheets → Download → Microsoft Excel file). */
-  const importOpts = async (req: Parameters<Router>[0]) => ({ skipExisting: !!req.body?.skipExisting || !!req.body?.updateExisting, updateExisting: !!req.body?.updateExisting, grid: await sheetSource(req.body) });
+  const importOpts = async (req: Parameters<Router>[0]) => {
+    const source = await sheetSource(req.body);
+    return {
+      skipExisting: !!req.body?.skipExisting || !!req.body?.updateExisting,
+      updateExisting: !!req.body?.updateExisting,
+      ...(source ? { grid: source.grid, sheetName: source.sheetName, matchingSheets: source.matchingSheets } : {}),
+    };
+  };
   r.post('/import/preview', async (req, res) => res.json(await previewImport(repo, String(req.body?.csv ?? ''), await importOpts(req))));
   r.post('/import', async (req, res) => res.status(201).json(await commitImport(repo, String(req.body?.csv ?? ''), actor(req), await importOpts(req))));
   /** Lender remittance report (CSV): match payments to deals and mark increments / dollars received. */

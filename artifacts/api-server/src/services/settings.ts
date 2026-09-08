@@ -207,6 +207,7 @@ async function applyLeader(repo: Repo, team: Team, leaderRepId: string | null) {
   if (!leaderRepId) return;
   const leader = await repo.findRep(leaderRepId);
   if (!leader) throw new HttpError(400, `Leader rep ${leaderRepId} does not exist`);
+  if (leader.commissionEligible === false) throw new HttpError(400, `${leader.name} is not commission-eligible and cannot be a team leader`);
   // A leader belongs to the team they lead and gets team-lead access unless already an admin.
   await repo.updateRep(leader.id, { teamId: team.id, ...(leader.role === 'rep' ? { role: 'manager' as const } : {}) });
 }
@@ -258,6 +259,8 @@ export interface RepInput {
   closerRate?: number | null;
   overrideRate?: number | null;
   role?: Rep['role'];
+  /** False means portal access without commission-role eligibility. */
+  commissionEligible?: boolean;
   active?: boolean;
   superAdmin?: boolean;
   perms?: { merchantEmail?: boolean } | null;
@@ -276,15 +279,19 @@ export async function createRep(repo: Repo, input: RepInput, actorRepId: string)
   let id = `rep-${slug(name)}`;
   while (reps.some((r) => r.id === id)) id += '-2';
   if (input.teamId && !(await repo.listTeams()).some((t) => t.id === input.teamId)) throw new HttpError(400, `Team ${input.teamId} does not exist`);
+  const role = input.role && ROLES.includes(input.role) ? input.role : 'rep';
   const rep: Rep = {
     id,
     name,
     email,
-    role: input.role && ROLES.includes(input.role) ? input.role : 'rep',
+    role,
     teamId: input.teamId || null,
     openerRate: asRate(input.openerRate ?? 0.2),
     closerRate: asRate(input.closerRate ?? 0.2),
     overrideRate: input.overrideRate === null || input.overrideRate === undefined || input.overrideRate === ('' as unknown) ? null : asRate(input.overrideRate),
+    // A newly provisioned Master is normally an admin-only partner. Existing
+    // commission users retain the backwards-compatible default of true.
+    commissionEligible: input.commissionEligible ?? role !== 'admin',
     active: input.active ?? true,
     superAdmin: !!input.superAdmin && (input.role === 'admin'),
     perms: input.perms === undefined ? null : cleanPerms(input.perms),
@@ -340,6 +347,7 @@ export async function updateRep(repo: Repo, id: string, input: RepInput, actorRe
     if (!ROLES.includes(input.role)) throw new HttpError(400, `Access must be one of: ${ROLES.join(', ')}`);
     patch.role = input.role;
   }
+  if (input.commissionEligible !== undefined) patch.commissionEligible = !!input.commissionEligible;
   if (input.active !== undefined) patch.active = !!input.active;
   // Guards: never lock everyone out.
   if ((patch.role && patch.role !== 'admin' && rep.role === 'admin') || (patch.active === false && rep.role === 'admin')) {

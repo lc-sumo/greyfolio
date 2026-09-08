@@ -145,6 +145,11 @@ export interface Rep {
   closerRate: number;
   /** `null` = fall back to the team's override rate. */
   overrideRate: number | null;
+  /**
+   * Whether this identity may be selected for new commission roles. Older
+   * records omit this field and are intentionally treated as eligible.
+   */
+  commissionEligible?: boolean;
   active: boolean;
   /** Owner tier: the only role that can create admins, change admins, or change security settings. */
   superAdmin?: boolean;
@@ -238,6 +243,10 @@ export interface Deal {
   /** Stamped when every role line on every segment is in the ledger. */
   repPaid: string | null;
   lenderPaid: string | null;
+  /** Original import / CRM lead attribution. */
+  leadSource?: string | null;
+  /** Legacy deal note imported with the funding row; the note history is separate. */
+  notes?: string | null;
   crmId: string | null;
   draws: DealDraw[];
 }
@@ -297,7 +306,8 @@ export interface PayrollRun {
   label: string;
   start: string;
   end: string;
-  status: 'draft' | 'approved' | 'paid';
+  /** Archived runs retain their period and any ledger rows, but are closed to workflow changes. */
+  status: 'draft' | 'approved' | 'paid' | 'archived';
 }
 
 /** Everything the ledger needs. Loaded once per request, then pure. */

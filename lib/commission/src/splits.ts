@@ -190,7 +190,7 @@ export function defaultSplits(
   teams: Team[],
 ): { openerRate: number; closerRate: number; overrideId: string | null; overrideRate: number } {
   const team = opener?.teamId ? teams.find((t) => t.id === opener.teamId) ?? null : null;
-  const leader = team?.leaderRepId ? reps.find((r) => r.id === team.leaderRepId) ?? null : null;
+  const leader = team?.leaderRepId ? reps.find((r) => r.id === team.leaderRepId && r.commissionEligible !== false) ?? null : null;
   const overrideId = leader && leader.id !== opener?.id && leader.id !== closer?.id ? leader.id : null;
   const overrideRate = overrideId ? (leader?.overrideRate ?? team?.overrideRate ?? 0) : 0;
   return {
@@ -208,6 +208,8 @@ export function defaultSplits(
  *  - admin View-as → all reps
  */
 export function repOptions(reps: Rep[], purpose: 'assign' | 'edit' | 'view-as'): Array<{ id: string; label: string }> {
-  const list = purpose === 'assign' ? reps.filter((r) => r.active) : reps;
+  // Commission pickers never offer portal-only users. Existing deal records
+  // retain their rep IDs and are resolved independently from these selectors.
+  const list = purpose === 'assign' ? reps.filter((r) => r.active && r.commissionEligible !== false) : purpose === 'edit' ? reps.filter((r) => r.commissionEligible !== false) : reps;
   return list.map((r) => ({ id: r.id, label: r.active || purpose === 'assign' ? r.name : `${r.name} (inactive)` }));
 }

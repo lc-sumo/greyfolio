@@ -51,7 +51,9 @@ export async function createDeal(repo: Repo, draft: NewDealDraft, actorRepId: st
   const [settings, ctx, reps] = await Promise.all([repo.getSettings(), repo.loadContext(), repo.listReps()]);
   for (const [label, id] of [['Opener', draft.openerId], ['Closer', draft.closerId], ['Override', draft.overrideId]] as const) {
     if (id && !reps.some((r) => r.id === id)) throw new HttpError(400, `${label} rep ${id} does not exist`);
-    if (id && !reps.find((r) => r.id === id)?.active) throw new HttpError(400, `${label} rep is inactive — new deals assign active reps only`);
+    const rep = id ? reps.find((r) => r.id === id) : null;
+    if (id && !rep?.active) throw new HttpError(400, `${label} rep is inactive — new deals assign active reps only`);
+    if (id && rep?.commissionEligible === false) throw new HttpError(400, `${label} user is not commission-eligible and cannot be assigned to a new deal`);
   }
   if (draft.parentId && !ctx.deals.some((d) => d.id === draft.parentId)) throw new HttpError(400, `Parent deal ${draft.parentId} does not exist`);
   const renewed = draft.renewedFromId ? ctx.deals.find((d) => d.id === draft.renewedFromId) : undefined;
@@ -141,6 +143,8 @@ export async function updateTerms(repo: Repo, id: string, input: Partial<NewDeal
     commCadenceDays: input.commCadenceDays === undefined ? (s?.cadenceDays ?? null) : input.commCadenceDays,
     commStartDate: input.commStartDate === undefined ? (s?.startDate ?? null) : input.commStartDate,
     commAmounts: input.commAmounts === undefined ? (s?.amounts ?? null) : input.commAmounts,
+    leadSource: input.leadSource === undefined ? deal.leadSource ?? null : input.leadSource,
+    notes: input.notes === undefined ? deal.notes ?? null : input.notes,
   };
   if (draft.parentId && draft.parentId !== deal.parentId && !ctx.deals.some((d) => d.id === draft.parentId)) throw new HttpError(400, `Parent deal ${draft.parentId} does not exist`);
   let priced: Deal;
@@ -166,7 +170,12 @@ export async function updateTerms(repo: Repo, id: string, input: Partial<NewDeal
   }
   const { id: _id, draws: _draws, opportunityId: _opp, dealStatus: _st, repPaid: _rp, lenderPaid: _lp, crmId: _crm, ...pricedFields } = priced as Deal & { crmId?: string | null };
   const patch = { ...pricedFields, commSchedule, commCollected, parentId: draft.parentId || null, opportunityId: draft.parentId || id };
-  await repo.updateDeal(id, patch);
+  await repo.updateDealLocked(id, patch, (current, lockedLines) => {
+    if (lockedLines.length) throw new HttpError(400, `${id} has payouts in the ledger — void them before changing its terms`);
+    if (priced.creditLine === null) return;
+    const used = priced.funded + current.draws.reduce((sum, draw) => sum + draw.amount, 0);
+    if (used > priced.creditLine + 0.005) throw new HttpError(400, `Initial funding plus active draws (${used.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}) cannot exceed the credit line of ${priced.creditLine.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}`);
+  });
   await repo.writeAudit({ actorRepId, action: 'deal.update', targetRepId: null, path: `/api/admin/deals/${id}/terms`, detail: { funded: priced.funded, lender: priced.lender, product: priced.product, date: priced.date, gross: priced.gross } });
   return requireDeal(repo, id);
 }
@@ -195,8 +204,11 @@ export async function updateSplits(repo: Repo, id: string, input: SplitsInput, a
     closerRate: input.closerRate === undefined ? deal.closerRate : asRate(input.closerRate),
     overrideRate: input.overrideRate === undefined ? deal.overrideRate : asRate(input.overrideRate),
   };
-  for (const [label, rid] of [['Opener', patch.openerId], ['Closer', patch.closerId], ['Override', patch.overrideId]] as const) {
+  for (const [label, rid, supplied] of [['Opener', patch.openerId, input.openerId !== undefined], ['Closer', patch.closerId, input.closerId !== undefined], ['Override', patch.overrideId, input.overrideId !== undefined]] as const) {
     if (rid && !reps.some((r) => r.id === rid)) throw new HttpError(400, `${label} rep ${rid} does not exist`);
+    // Do not reject a retained historical assignment merely because the
+    // identity later became portal-only. Only a newly supplied role is barred.
+    if (rid && supplied && reps.find((r) => r.id === rid)?.commissionEligible === false) throw new HttpError(400, `${label} user is not commission-eligible and cannot be assigned to a commission role`);
   }
   if (!patch.openerId) patch.openerRate = 0;
   if (!patch.closerId) patch.closerRate = 0;
@@ -223,9 +235,9 @@ export async function addDraw(repo: Repo, id: string, input: { amount: number; d
   const lender = settings.lenders.find((l) => l.name === deal.lender);
   const partner = settings.partners.find((p) => p.name === deal.referralPartner) ?? null;
   const incremental = !!settings.products.find((p) => p.name === deal.product)?.incremental;
-  let draw;
+  let draw: DealDraw;
   try {
-    draw = newDraw(deal, {
+    draw = await repo.insertDrawLocked(id, (current) => newDraw(current, {
       amount: Number(input.amount),
       date,
       partner,
@@ -233,11 +245,10 @@ export async function addDraw(repo: Repo, id: string, input: { amount: number; d
       factor: input.factor ? Number(input.factor) : null,
       // LOC draws are paid upfront; only an incremental (consolidation) product schedules its draws.
       schedule: incremental ? scheduleFor(lender, date) : null,
-    });
+    }));
   } catch (e) {
     bad(e);
   }
-  await repo.insertDraw(id, draw);
   await repo.writeAudit({ actorRepId, action: 'deal.draw', targetRepId: null, path: `/api/admin/deals/${id}/draws`, detail: { ref: draw.ref, amount: draw.amount, net: draw.net } });
   return { ...deal, draws: [...deal.draws, draw] };
 }
@@ -306,6 +317,16 @@ export async function setCrmId(repo: Repo, id: string, crmId: string | null, act
   await repo.updateDeal(id, { crmId: value });
   await repo.writeAudit({ actorRepId, action: 'deal.update', targetRepId: null, path: `/api/admin/deals/${id}/crm`, detail: { crmId: value } });
   return { ...deal, crmId: value };
+}
+
+/** Correct imported CRM attribution or its legacy deal note without changing money or ledger history. */
+export async function updateDealMetadata(repo: Repo, id: string, input: { leadSource?: unknown; notes?: unknown }, actorRepId: string): Promise<Deal> {
+  const deal = await requireDeal(repo, id);
+  const text = (v: unknown, current: string | null | undefined) => v === undefined ? current ?? null : String(v ?? '').trim().slice(0, 2_000) || null;
+  const patch = { leadSource: text(input.leadSource, deal.leadSource), notes: text(input.notes, deal.notes) };
+  await repo.updateDeal(id, patch);
+  await repo.writeAudit({ actorRepId, action: 'deal.update', targetRepId: null, path: `/api/admin/deals/${id}/metadata`, detail: patch });
+  return { ...deal, ...patch };
 }
 
 export interface ClawbackInput {
@@ -410,20 +431,29 @@ export async function updateDrawTerms(repo: Repo, dealId: string, ref: string, i
   const commRate = rateIn === null ? draw.commRate : rateIn > 1 ? rateIn / 100 : rateIn;
   const settings = await repo.getSettings();
   const partner = deal.referralPartner ? settings.partners.find((p) => p.name === deal.referralPartner) ?? null : null;
-  const others = deal.draws.filter((d) => d.ref !== ref);
-  const repriced = newDraw({ ...deal, draws: others.slice(0, draw.n - 1) }, {
-    amount,
-    date,
-    commRate,
-    partner,
-    termDays: numOr(input.termDays, draw.termDays),
-    factor: numOr(input.factor, draw.factor),
-    schedule: draw.schedule ? { mode: 'weekly', weeks: draw.schedule.weeks, received: 0, startDate: date } : null,
-    frequency: deal.frequency,
-    referralPaidThisMonth: referralPaidInMonth(ctx.deals.filter((d) => d.id !== dealId), deal.referralPartner, date),
-  });
-  const next: DealDraw = { ...repriced, n: draw.n, ref: draw.ref, collected: draw.schedule ? null : Math.min(draw.collected ?? 0, repriced.gross), schedule: draw.schedule ? { ...draw.schedule, startDate: date } : null };
-  await repo.replaceDraw(dealId, ref, next);
+  let next: DealDraw;
+  try {
+    next = await repo.replaceDrawLocked(dealId, ref, (current, lockedLines) => {
+      if (lockedLines.some((line) => line.segmentKey === ref)) throw new HttpError(400, `${dealId} ${ref} has been paid on — void those payouts first, then edit the draw`);
+      const currentDraw = current.draws.find((d) => d.ref === ref);
+      if (!currentDraw) throw new HttpError(404, `Draw ${ref} not found on ${dealId}`);
+      const others = current.draws.filter((d) => d.ref !== ref);
+      const repriced = newDraw({ ...current, draws: others }, {
+        amount,
+        date,
+        commRate,
+        partner,
+        termDays: numOr(input.termDays, currentDraw.termDays),
+        factor: numOr(input.factor, currentDraw.factor),
+        schedule: currentDraw.schedule ? { mode: 'weekly', weeks: currentDraw.schedule.weeks, received: 0, startDate: date } : null,
+        frequency: current.frequency,
+        referralPaidThisMonth: referralPaidInMonth(ctx.deals.filter((d) => d.id !== dealId), current.referralPartner, date),
+      });
+      return { ...repriced, n: currentDraw.n, ref: currentDraw.ref, collected: currentDraw.schedule ? null : Math.min(currentDraw.collected ?? 0, repriced.gross), schedule: currentDraw.schedule ? { ...currentDraw.schedule, startDate: date } : null };
+    });
+  } catch (e) {
+    bad(e);
+  }
   await repo.writeAudit({ actorRepId, action: 'deal.draw.update', targetRepId: null, path: `/api/admin/deals/${dealId}/draws/${ref}`, detail: { amount: next.amount, date: next.date, commRate: next.commRate, gross: next.gross } });
   return requireDeal(repo, dealId);
 }

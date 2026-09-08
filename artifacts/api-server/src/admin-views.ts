@@ -60,6 +60,12 @@ export interface AdminDealRow {
   crmId: string | null;
   crmUrl: string;
   creditLine: number | null;
+  /** Facility funding used (initial funding plus active draw entries). */
+  creditLineUsed: number | null;
+  /** Facility capacity still available for an additional draw. */
+  creditLineAvailable: number | null;
+  leadSource: string | null;
+  notes: string | null;
   drawSubsequentPct: number | null;
   hasClawback: boolean;
   /** Lender receipts expected before today that have not landed. */
@@ -127,6 +133,10 @@ export function adminDealRow(deal: Deal, ctx: LedgerContext, reps: Rep[], settin
     renewedFromId: deal.renewedFromId ?? null,
     renewedById: ctx.deals.find((d) => d.renewedFromId === deal.id)?.id ?? null,
     creditLine: deal.creditLine,
+    creditLineUsed: deal.creditLine === null ? null : totalFunded(deal),
+    creditLineAvailable: deal.creditLine === null ? null : Math.max(0, deal.creditLine - totalFunded(deal)),
+    leadSource: deal.leadSource ?? null,
+    notes: deal.notes ?? null,
     drawSubsequentPct: deal.drawSubsequentPct,
     hasClawback: ctx.clawbacks.some((c) => c.dealId === deal.id),
     increments: (() => {

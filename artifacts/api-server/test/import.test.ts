@@ -31,6 +31,22 @@ const csv = [
 ].join('\r\n');
 
 describe('sheet import', () => {
+  it('blocks missing required headers and incomplete data rows', async () => {
+    const { admin } = await harness();
+    const missingHeaders = await admin.post('/api/admin/import/preview').send({ csv: 'Business Name,Lender\nAcme,MBC' });
+    expect(missingHeaders.status).toBe(200);
+    expect(missingHeaders.body.missingRequired).toEqual(['Product', 'Funded or Draw Amount', 'Date']);
+    expect(missingHeaders.body.summary.problems).toBeGreaterThan(0);
+
+    const incomplete = await admin.post('/api/admin/import/preview').send({ csv: 'Business Name,Lender,Product,Funded / Draw Amount ($),Date\nAcme,MBC,MCA,,' });
+    expect(incomplete.body.rows).toHaveLength(1);
+    expect(incomplete.body.rows[0].problems).toEqual(expect.arrayContaining([
+      'Date is required and must be readable',
+      'Funded or Draw Amount is required and must be positive',
+    ]));
+    expect((await admin.post('/api/admin/import').send({ csv: 'Business Name,Lender,Product,Funded / Draw Amount ($),Date\nAcme,MBC,MCA,,' })).status).toBe(400);
+  });
+
   it('previews every row with its problems, then commits deals, draws, clawbacks and paid history', async () => {
     const { admin } = await harness();
     const bad = await admin.post('/api/admin/import/preview').send({ csv: csv.replace('Zach Sanders,40', 'Nobody Here,40') });

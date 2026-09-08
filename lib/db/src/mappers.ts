@@ -16,6 +16,7 @@ export function toRep(r: RepRow): Rep {
     openerRate: r.openerRate,
     closerRate: r.closerRate,
     overrideRate: r.overrideRate,
+    commissionEligible: r.commissionEligible,
     active: r.active,
     superAdmin: r.superAdmin,
     perms: r.perms ?? null,
@@ -89,6 +90,8 @@ export function toDeal(d: DealRow, draws: DealDrawRow[] = []): Deal {
     dealStatus: d.dealStatus,
     repPaid: d.repPaid,
     lenderPaid: d.lenderPaid,
+    leadSource: d.leadSource,
+    notes: d.notes,
     crmId: d.crmId,
     draws: draws.filter((x) => x.dealId === d.id).sort((a, b) => a.n - b.n).map(toDraw),
   };

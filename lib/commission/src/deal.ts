@@ -79,6 +79,9 @@ export function priceDeal(draft: NewDealDraft, ctx: PricingContext): Deal {
     if (Math.abs(total - draft.amount) > 1) errors.push(`The increment grid totals ${total.toLocaleString('en-US', { maximumFractionDigits: 2 })} but the funded amount is ${draft.amount.toLocaleString('en-US', { maximumFractionDigits: 2 })}`);
     if (draft.commAmounts.some((a) => !(a >= 0))) errors.push('Every increment amount must be zero or more');
   }
+  if (rule0?.multiDraw && draft.creditLine !== null && draft.creditLine !== undefined && (!(draft.creditLine > 0) || draft.amount > draft.creditLine + 0.005)) {
+    errors.push(`Initial funding of ${draft.amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} cannot exceed the credit line of ${Number(draft.creditLine).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}`);
+  }
   if (errors.length) throw new ValidationError(errors);
   const rule = ctx.rule!;
 
@@ -160,6 +163,8 @@ export function priceDeal(draft: NewDealDraft, ctx: PricingContext): Deal {
     dealStatus: 'Performing',
     repPaid: null,
     lenderPaid: null,
+    leadSource: draft.leadSource?.trim() || null,
+    notes: draft.notes?.trim() || null,
     crmId: draft.crmId?.trim() || null,
     draws: [],
   };

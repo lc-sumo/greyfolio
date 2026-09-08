@@ -58,6 +58,9 @@ export interface ImportOptions {
   updateExisting?: boolean;
   /** An already-parsed grid (from an .xlsx upload) instead of CSV text. */
   grid?: string[][];
+  /** Workbook selection is echoed back so a multi-tab upload is never ambiguous. */
+  sheetName?: string;
+  matchingSheets?: string[];
 }
 
 /** Names the sheet uses that Settings / the roster do not know yet — each is one thing to add before the import can run. */
@@ -76,6 +79,9 @@ export interface ImportPreview {
   /** Rows whose status or lender-paid date will be refreshed (only with `updateExisting`). */
   updated: number;
   problems: string[];
+  missingRequired: string[];
+  sheetName?: string;
+  matchingSheets?: string[];
   missing: MissingRefs;
   summary: { deals: number; draws: number; funded: number; withPayouts: number; warnings: number; clawbacks: number; problems: number };
 }
@@ -113,11 +119,14 @@ export async function previewImport(repo: Repo, csv: string, opts: ImportOptions
     const warnings: string[] = [];
     const rule = settings.products.find((p) => p.name.toLowerCase() === r.product.toLowerCase());
     const lender = settings.lenders.find((l) => l.name.toLowerCase() === r.lender.toLowerCase());
-    if (!rule) {
+    if (!r.business) problems.push('Business Name is required');
+    if (!r.lender) problems.push('Lender is required');
+    if (!r.product) problems.push('Product is required');
+    if (r.product && !rule) {
       problems.push(`Unknown product "${r.product}" — add it in Settings › Product rules`);
       note(missing.products, r.product);
     }
-    if (!lender) {
+    if (r.lender && !lender) {
       problems.push(`Unknown lender "${r.lender}" — add it in Settings › Lenders`);
       note(missing.lenders, r.lender);
     }
@@ -125,9 +134,9 @@ export async function previewImport(repo: Repo, csv: string, opts: ImportOptions
       problems.push(`Unknown referral partner "${r.referralPartner}"`);
       note(missing.partners, r.referralPartner);
     }
-    if (!r.date) problems.push('Date is missing or unreadable');
+    if (!r.date) problems.push('Date is required and must be readable');
     else if (r.date > today()) problems.push(`Funded date ${r.date} is in the future`);
-    if (!(r.amount > 0)) problems.push('Amount must be positive');
+    if (!(r.amount > 0)) problems.push('Funded or Draw Amount is required and must be positive');
     const who = (label: string, name: string) => {
       if (!name) return null;
       const rep = repByName(reps, name);
@@ -198,6 +207,9 @@ export async function previewImport(repo: Repo, csv: string, opts: ImportOptions
     skippedExisting: rows.filter((x) => x.action === 'skip').length,
     updated: rows.filter((x) => x.action === 'update').length,
     problems,
+    missingRequired: read.missingRequired,
+    ...(opts.sheetName ? { sheetName: opts.sheetName } : {}),
+    ...(opts.matchingSheets ? { matchingSheets: opts.matchingSheets } : {}),
     missing,
     summary: {
       deals: deals.length,

@@ -4,7 +4,7 @@ import { HttpError, currentUser, requireRole } from '../auth/middleware.js';
 import { adminDealDetail, adminDealRow, adminRenewals } from '../admin-views.js';
 import { adminMerchants, adminOverview, merchantKey } from '../analytics-views.js';
 import type { Repo } from '../repo.js';
-import { addDraw, createDeal, deleteClawback, deleteDeal, deleteDraw, linkRenewal, recordClawback, updateClawback, updateContact, updateDrawTerms, setCollection, setCrmId, setDealStatus, updateSplits, updateTerms } from '../services/deals.js';
+import { addDraw, createDeal, deleteClawback, deleteDeal, deleteDraw, linkRenewal, recordClawback, updateClawback, updateContact, updateDealMetadata, updateDrawTerms, setCollection, setCrmId, setDealStatus, updateSplits, updateTerms } from '../services/deals.js';
 import { addFile, addNote, fetchFile, removeFile, removeNote } from '../services/notes.js';
 import { notifyClawback, type NotifyDeps } from '../services/notify.js';
 
@@ -116,6 +116,10 @@ export function adminDealsRouter(repo: Repo, notify?: Omit<NotifyDeps, 'repo'>):
   });
   r.patch('/deals/:id/crm', async (req, res) => {
     await setCrmId(repo, String(req.params.id), req.body?.crmId === null ? null : String(req.body?.crmId ?? ''), currentUser(req)!.repId);
+    res.json(await detailOf(String(req.params.id)));
+  });
+  r.patch('/deals/:id/metadata', async (req, res) => {
+    await updateDealMetadata(repo, String(req.params.id), req.body ?? {}, currentUser(req)!.repId);
     res.json(await detailOf(String(req.params.id)));
   });
   r.post('/deals/:id/draws', async (req, res) => {

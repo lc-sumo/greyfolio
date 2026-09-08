@@ -1,0 +1,1 @@
+ALTER TABLE "commission_reps" ADD COLUMN "commission_eligible" boolean DEFAULT true NOT NULL;

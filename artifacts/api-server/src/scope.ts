@@ -303,7 +303,7 @@ export function repDashboard(ctx: LedgerContext, reps: Rep[], runs: PayrollRun[]
     .sort((a, b) => b.earned - a.earned || a.id.localeCompare(b.id));
   const rankIdx = ranked.findIndex((r) => r.id === repId);
   // Next payout: the first unpaid run whose period has not ended. None open yet → null (the UI says so) rather than a past date.
-  const unpaid = [...runs].filter((r) => r.status !== 'paid' && !r.id.startsWith('import-')).sort((a, b) => a.end.localeCompare(b.end));
+  const unpaid = [...runs].filter((r) => r.status !== 'paid' && r.status !== 'archived' && !r.id.startsWith('import-')).sort((a, b) => a.end.localeCompare(b.end));
   const next = unpaid.find((r) => r.end >= to) ?? null;
   const owedToMe = mine
     .map((d) => repDealView(d, repId, ctx.lines, ctx.clawbacks, settings))

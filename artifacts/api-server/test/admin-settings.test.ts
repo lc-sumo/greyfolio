@@ -130,6 +130,28 @@ describe('teams', () => {
 });
 
 describe('reps', () => {
+  it('supports portal-only admin users without exposing them to commission assignment', async () => {
+    const { admin } = await harness();
+    // A Master created as an access-only partner is persisted as ineligible
+    // unless the owner explicitly opts them into commission participation.
+    const created = await admin.post('/api/admin/reps').send({ name: 'Operations Partner', email: 'ops.partner@greystoneus.com', role: 'admin' });
+    expect(created.status).toBe(201);
+    expect(created.body).toMatchObject({ role: 'admin', commissionEligible: false, active: true });
+    const roster = (await admin.get('/api/admin/reps')).body.reps;
+    expect(roster.find((r: { id: string }) => r.id === created.body.id)).toMatchObject({ commissionEligible: false });
+    const options = (await admin.get('/api/admin/reps/options').query({ purpose: 'assign' })).body.options;
+    expect(options.map((r: { id: string }) => r.id)).not.toContain(created.body.id);
+    expect((await admin.post('/api/admin/deals').send({ business: 'No Commission Partner', fundedDate: '2026-08-01', lender: 'MBC', product: 'MCA', amount: 10_000, openerId: created.body.id })).body.error).toMatch(/not commission-eligible/);
+
+    // Making an existing identity portal-only removes it from every commission
+    // picker but preserves the references and names on historical deals.
+    expect((await admin.patch('/api/admin/reps/rep-julian-ribak').send({ commissionEligible: false })).body.commissionEligible).toBe(false);
+    const board = (await admin.get('/api/admin/deals')).body;
+    expect(board.repOptions.assign.map((r: { id: string }) => r.id)).not.toContain('rep-julian-ribak');
+    expect(board.repOptions.edit.map((r: { id: string }) => r.id)).not.toContain('rep-julian-ribak');
+    expect((await admin.get('/api/admin/deals/F1')).body.roles[0]).toMatchObject({ repId: 'rep-julian-ribak', name: 'Julian Ribak' });
+    expect((await admin.patch('/api/admin/deals/F2/splits').send({ openerId: 'rep-julian-ribak' })).body.error).toMatch(/not commission-eligible/);
+  });
   it('creates a rep who can then sign in', async () => {
     const { admin, repo } = await harness();
     const res = await admin.post('/api/admin/reps').send({ name: 'Levi Forgash', email: 'Levi.Forgash@greystoneus.com', teamId: 'team-a', openerRate: 20, closerRate: 20 });

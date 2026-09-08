@@ -19,6 +19,8 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
   const [drawTerm, setDrawTerm] = useState('');
   const [drawFactor, setDrawFactor] = useState('');
   const [crm, setCrm] = useState<string | null>(null);
+  const [leadSource, setLeadSource] = useState<string | null>(null);
+  const [legacyNotes, setLegacyNotes] = useState<string | null>(null);
   const [splits, setSplits] = useState<Record<string, string>>({});
   const [err, setErr] = useState('');
   useEffect(() => {
@@ -106,6 +108,8 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
                 </span>
               </dd>
               <dt>Sheet #</dt><dd>{d.id}</dd>
+               <dt>Lead source</dt><dd style={{ fontFamily: 'var(--sans)' }}><span style={{ display: 'inline-flex', gap: 6 }}><input className="mini-input" placeholder="—" value={leadSource ?? d.leadSource ?? ''} onChange={(e) => setLeadSource(e.target.value)} />{leadSource !== null && leadSource !== (d.leadSource ?? '') && <button className="btn" style={{ height: 28, padding: '0 10px' }} onClick={() => run(`${d.id} — lead source saved`, async () => { await post(`/api/admin/deals/${id}/metadata`, { leadSource }, 'PATCH'); setLeadSource(null); })}>Save</button>}</span></dd>
+               <dt>Imported notes</dt><dd style={{ fontFamily: 'var(--sans)' }}><span style={{ display: 'inline-flex', gap: 6 }}><input className="mini-input" placeholder="—" value={legacyNotes ?? d.notes ?? ''} onChange={(e) => setLegacyNotes(e.target.value)} />{legacyNotes !== null && legacyNotes !== (d.notes ?? '') && <button className="btn" style={{ height: 28, padding: '0 10px' }} onClick={() => run(`${d.id} — imported notes saved`, async () => { await post(`/api/admin/deals/${id}/metadata`, { notes: legacyNotes }, 'PATCH'); setLegacyNotes(null); })}>Save</button>}</span></dd>
               <dt>Renewal chain</dt><dd style={{ fontFamily: 'var(--sans)' }}>
                 {d.renewedFromId ? <>renews <b className="num">{d.renewedFromId}</b>{' '}</> : <span className="subtle">first funding · </span>}
                 {d.renewedById ? <>→ renewed by <b className="num">{d.renewedById}</b></> : null}
@@ -117,7 +121,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
                 )}
               </dd>
               <dt>Funded amount</dt><dd>{money(d.funded)}{d.drawCount ? ` (${d.drawCount} draw${d.drawCount > 1 ? 's' : ''})` : ''}</dd>
-              {d.creditLine !== null && <><dt>Credit line</dt><dd>{money(d.creditLine)}</dd></>}
+               {d.creditLine !== null && <><dt>LOC facility</dt><dd>{money(d.creditLine)} <span className="subtle">· {money(d.creditLineUsed ?? 0)} used · <b className="pos">{money(d.creditLineAvailable ?? 0)} available</b></span></dd></>}
               {d.factor !== null && <><dt>Factor rate</dt><dd>{d.factor.toFixed(2)}</dd></>}
               {d.apr !== null && <><dt>APR</dt><dd>{d.apr}%</dd></>}
               {d.termDays !== null && <><dt>Term</dt><dd>{d.termDays} business days · {d.frequency}</dd></>}
@@ -182,8 +186,8 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
                 </div>
               </details>
               <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                <button className="btn primary" disabled={s.schedule.received >= s.schedule.weeks} onClick={() => void collect({ segmentKey: s.sk, recordWeeks: 1 }, `${d.id} — increment ${s.schedule!.received + 1} of ${s.schedule!.weeks} received`)}>Record increment received</button>
-                <button className="btn" disabled={s.schedule.received <= 0} onClick={() => void collect({ segmentKey: s.sk, recordWeeks: -1 }, `${d.id} — last increment reversed`)}>Reverse last</button>
+                <button className="btn primary" disabled={s.schedule.received >= s.schedule.weeks} onClick={() => { const n = s.schedule!.received + 1; const event = s.schedule!.events.filter((e) => e.kind === 'increment')[n - 1]; if (window.confirm(`Add collected increment ${n} of ${s.schedule!.weeks}${event ? ` (${money(event.amount)} · expected ${event.expected ? fullDay(event.expected) : 'no date'})` : ''}?`)) void collect({ segmentKey: s.sk, recordWeeks: 1 }, `${d.id} — collected increment ${n} of ${s.schedule!.weeks} · ${money(event?.amount ?? 0)}`); }}>Add collected increment</button>
+                <button className="btn" disabled={s.schedule.received <= 0} onClick={() => { const n = s.schedule!.received; const event = s.schedule!.events.filter((e) => e.kind === 'increment')[n - 1]; if (window.confirm(`Remove collected increment ${n} of ${s.schedule!.weeks}${event ? ` (${money(event.amount)} · expected ${event.expected ? fullDay(event.expected) : 'no date'})` : ''}? This only reverses the most recently recorded lender collection.`)) void collect({ segmentKey: s.sk, recordWeeks: -1 }, `${d.id} — removed collected increment ${n} of ${s.schedule!.weeks}`); }}>Remove last increment</button>
                 {s.schedule.disbursement.stopped
                   ? <button className="btn" onClick={() => void collect({ segmentKey: s.sk, stopIncrements: false }, `${d.id} — plan reopened to ${s.schedule!.planned?.increments ?? s.schedule!.weeks} increments`)}>Reopen full plan</button>
                   : <button className="btn" disabled={s.schedule.received >= s.schedule.weeks} title="The merchant is not taking the rest: the deal becomes what was disbursed so far" onClick={() => void collect({ segmentKey: s.sk, stopIncrements: true }, `${d.id} — merchant opted out after ${s.schedule!.received} increments`)}>Merchant opted out</button>}
@@ -193,7 +197,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
 
           {(d.drawSubsequentPct || d.drawCount > 0) && (
             <section className="card">
-              <h3>Draw ledger <small>one opportunity · {d.segments.length} segment{d.segments.length > 1 ? 's' : ''}</small></h3>
+              <h3>{d.product.includes('LOC') ? 'LOC funding entries' : 'Additional funding entries'} <small>one opportunity · {d.segments.length} segment{d.segments.length > 1 ? 's' : ''}</small></h3>
               <div className="pl">
                 {d.segments.map((s) => (
                   <div className="row draw" key={s.sk}>
@@ -217,7 +221,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
                 return (
                   <div className="add-draw">
                     <div className="form" style={{ gridTemplateColumns: '1.4fr 1fr 1fr' }}>
-                      <label className="field"><span className="label">Draw amount</span><input inputMode="decimal" placeholder="25000" value={drawAmount} onChange={(e) => setDrawAmount(e.target.value)} /></label>
+                       <label className="field"><span className="label">{d.product.includes('LOC') ? `LOC draw amount · ${money(d.creditLineAvailable ?? 0)} available` : 'Additional funding amount'}</span><input inputMode="decimal" placeholder="25000" value={drawAmount} onChange={(e) => setDrawAmount(e.target.value)} /></label>
                       <label className="field"><span className="label">Term (bus. days) · optional</span><input inputMode="numeric" placeholder={d.termDays ? String(d.termDays) : '—'} value={drawTerm} onChange={(e) => setDrawTerm(e.target.value)} /></label>
                       <label className="field"><span className="label">Factor rate · optional</span><input inputMode="decimal" placeholder={d.factor ? d.factor.toFixed(2) : '—'} value={drawFactor} onChange={(e) => setDrawFactor(e.target.value)} /></label>
                     </div>
@@ -225,7 +229,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
                       <div><span className="label">Commission</span><b className="num">{money(amt * d.drawSubsequentPct)}</b><span className="subtle">at {pct(d.drawSubsequentPct)}</span></div>
                       <div><span className="label">Payback</span><b className="num">{payback === null ? '—' : money(payback)}</b><span className="subtle">{factor ? `${money(amt)} × ${factor}` : 'needs a factor rate'}</span></div>
                       <div><span className="label">Payment</span><b className="num">{payment === null ? '—' : money(payment)}</b><span className="subtle">{payment === null ? 'needs term + factor' : `per ${d.frequency.toLowerCase()} · ${term} bus. days`}</span></div>
-                      <button className="btn primary" disabled={!amt} onClick={() => run(`Draw added to ${d.id}`, async () => { await post(`/api/admin/deals/${id}/draws`, { amount: amt, termDays: term, factor }); setDrawAmount(''); setDrawTerm(''); setDrawFactor(''); })}>Add draw at {pct(d.drawSubsequentPct)}</button>
+                       <button className="btn primary" disabled={!amt || (d.creditLineAvailable !== null && amt > d.creditLineAvailable)} onClick={() => run(`${d.product.includes('LOC') ? 'LOC draw' : 'Funding entry'} added to ${d.id}`, async () => { await post(`/api/admin/deals/${id}/draws`, { amount: amt, termDays: term, factor }); setDrawAmount(''); setDrawTerm(''); setDrawFactor(''); })}>Add {d.product.includes('LOC') ? 'LOC draw' : 'funding entry'} at {pct(d.drawSubsequentPct)}</button>
                     </div>
                   </div>
                 );

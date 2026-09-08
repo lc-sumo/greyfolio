@@ -189,6 +189,51 @@ describe('deal edits', () => {
     expect(withTerms.body.segments[2]).toMatchObject({ sk: 'D2', termDays: 80, factor: 1.2, payback: 12_000, payment: 150 });
     expect(withTerms.body.segments[0]).toMatchObject({ sk: 'base', termDays: 120, factor: null, payment: null });
   });
+  it('enforces an LOC ceiling for creation, additions, and edits while returning remaining availability', async () => {
+    const { admin } = await harness();
+    const tooLarge = await admin.post('/api/admin/deals').send({ ...draft, product: 'LOC - INITIAL', factor: undefined, commRate: undefined, amount: 250_001, creditLine: 250_000, referralPartner: null });
+    expect(tooLarge.status).toBe(400);
+    expect(tooLarge.body.error).toMatch(/cannot exceed the credit line/);
+    const created = await admin.post('/api/admin/deals').send({ ...draft, product: 'LOC - INITIAL', factor: undefined, commRate: undefined, amount: 200_000, creditLine: 250_000, referralPartner: null });
+    expect(created.body).toMatchObject({ creditLineUsed: 200_000, creditLineAvailable: 50_000 });
+    const draw = await admin.post(`/api/admin/deals/${created.body.id}/draws`).send({ amount: 40_000 });
+    expect(draw.status).toBe(201);
+    expect(draw.body).toMatchObject({ creditLineUsed: 240_000, creditLineAvailable: 10_000 });
+    expect((await admin.post(`/api/admin/deals/${created.body.id}/draws`).send({ amount: 10_001 })).body.error).toMatch(/remaining credit-line availability/);
+    expect((await admin.patch(`/api/admin/deals/${created.body.id}/draws/D1`).send({ amount: 50_001 })).body.error).toMatch(/remaining credit-line availability/);
+  });
+  it('serializes concurrent LOC draw additions so only capacity that remains under lock is committed', async () => {
+    const { admin } = await harness();
+    const created = await admin.post('/api/admin/deals').send({ ...draft, product: 'LOC - INITIAL', factor: undefined, commRate: undefined, amount: 200_000, creditLine: 250_000, referralPartner: null });
+    const id = created.body.id;
+    const results = await Promise.all([
+      admin.post(`/api/admin/deals/${id}/draws`).send({ amount: 30_000 }),
+      admin.post(`/api/admin/deals/${id}/draws`).send({ amount: 30_000 }),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([201, 400]);
+    expect((await admin.get(`/api/admin/deals/${id}`)).body).toMatchObject({ creditLineUsed: 230_000, creditLineAvailable: 20_000, drawCount: 1 });
+  });
+  it('serializes concurrent draw edits and credit-line reductions with active LOC draws', async () => {
+    const { admin } = await harness();
+    const created = await admin.post('/api/admin/deals').send({ ...draft, product: 'LOC - INITIAL', factor: undefined, commRate: undefined, amount: 40_000, creditLine: 110_000, referralPartner: null });
+    const id = created.body.id;
+    await admin.post(`/api/admin/deals/${id}/draws`).send({ amount: 20_000 });
+    await admin.post(`/api/admin/deals/${id}/draws`).send({ amount: 20_000 });
+    const edits = await Promise.all([
+      admin.patch(`/api/admin/deals/${id}/draws/D1`).send({ amount: 40_000 }),
+      admin.patch(`/api/admin/deals/${id}/draws/D2`).send({ amount: 40_000 }),
+    ]);
+    expect(edits.map((r) => r.status).sort()).toEqual([200, 400]);
+    const afterEdit = await admin.get(`/api/admin/deals/${id}`);
+    expect(afterEdit.body.creditLineUsed).toBe(100_000);
+    const race = await Promise.all([
+      admin.post(`/api/admin/deals/${id}/draws`).send({ amount: 5_000 }),
+      admin.patch(`/api/admin/deals/${id}/terms`).send({ creditLine: 90_000 }),
+    ]);
+    expect(race.map((r) => r.status).sort()).toEqual([201, 400]);
+    const final = await admin.get(`/api/admin/deals/${id}`);
+    expect(final.body.creditLineUsed).toBeLessThanOrEqual(final.body.creditLine);
+  });
 });
 
 describe('consolidation payout structures', () => {

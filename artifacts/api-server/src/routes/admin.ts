@@ -28,6 +28,7 @@ export function adminRouter(repo: Repo, geo?: Geo): Router {
           openerRate: rep.openerRate,
           closerRate: rep.closerRate,
           overrideRate: rep.overrideRate,
+           commissionEligible: rep.commissionEligible !== false,
           active: rep.active,
           hasPassword: hasPw.has(rep.id),
           hasTotp: hasTotp.has(rep.id),

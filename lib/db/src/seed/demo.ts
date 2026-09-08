@@ -203,7 +203,10 @@ export function buildDemo(today = iso(new Date()), seed = 20260902): DemoData {
       for (let k = 1; k <= pulls; k++) {
         const date = addDays(cursor, k * 18 + r.int(0, 12));
         if (date > today) break;
-        const amount = Math.round(((0.1 + r.next() * 0.35) * deal.creditLine!) / 1000) * 1000;
+        const remaining = deal.creditLine! - deal.funded - deal.draws.reduce((sum, draw) => sum + draw.amount, 0);
+        if (remaining <= 0) break;
+        const proposed = Math.round(((0.1 + r.next() * 0.35) * deal.creditLine!) / 1000) * 1000;
+        const amount = Math.min(proposed, remaining);
         const dAge = daysBetween(date, today);
         const draw = newDraw(deal, { amount, date, partner: partner.pct > 0 ? partner : null, schedule: product.incremental ? scheduleFor(lender, addDays(date, 7)) : null });
         if (draw.schedule) draw.schedule.received = Math.min(draw.schedule.weeks, Math.floor(dAge / 7));

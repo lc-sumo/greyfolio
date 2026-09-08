@@ -11,26 +11,25 @@ import { LENDERS, LISTS, PARTNERS, PRODUCTS, THRESHOLDS } from '@greystone/db/se
 import { adminDealDetail, adminDealRow, adminRenewals } from '../../../api-server/src/admin-views';
 import { adminMerchants, adminOverview, merchantKey } from '../../../api-server/src/analytics-views';
 import { scorecards } from '../../../api-server/src/services/scorecards';
-import { linkRenewal } from '../../../api-server/src/services/deals';
 import { memoryRepo } from '../../../api-server/src/repo.memory';
 import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repPayHistory, repRenewals, repStatements, repWallet } from '../../../api-server/src/scope';
-import { addDraw, createDeal, deleteClawback, deleteDeal, deleteDraw, recordClawback, setCollection, setCrmId, setDealStatus, updateClawback, updateContact, updateDrawTerms, updateSplits, updateTerms } from '../../../api-server/src/services/deals';
+import { addDraw, createDeal, deleteClawback, deleteDeal, deleteDraw, linkRenewal, recordClawback, setCollection, setCrmId, setDealStatus, updateClawback, updateContact, updateDealMetadata, updateDrawTerms, updateSplits, updateTerms } from '../../../api-server/src/services/deals';
 import { addFile, addNote, addRepFile, removeFile, removeNote, removeRepFile } from '../../../api-server/src/services/notes';
 import { cashView, exceptions, markPartnerPaid, partnerPayables, receivables } from '../../../api-server/src/services/books';
-import { advanceRun, createRun, deleteRun, paySelected, reopenRun, voidPayout } from '../../../api-server/src/services/payroll';
+import { advanceRun, archiveRun, createRun, deleteRun, paySelected, reopenRun, voidPayout } from '../../../api-server/src/services/payroll';
 import { commitImport, previewImport } from '../../../api-server/src/services/import';
 import { commitRemittance, previewRemittance } from '../../../api-server/src/services/remittance';
 import { base64ToBytes, readXlsx } from '@greystone/db/seed/xlsx';
+import { selectFundedDealsSheet } from '@greystone/db/seed/csv';
 
 /** Browser-side .xlsx decoding for the demo: DecompressionStream stands in for node:zlib. */
-async function demoSheetGrid(body: Record<string, unknown>): Promise<string[][] | undefined> {
+async function demoSheetGrid(body: Record<string, unknown>): Promise<{ grid: string[][]; sheetName: string; matchingSheets: string[] } | undefined> {
   if (typeof body.xlsx !== 'string' || !body.xlsx) return undefined;
   const inflate = async (b: Uint8Array) => new Uint8Array(await new Response(new Blob([b as BlobPart]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
   const wb = await readXlsx(base64ToBytes(body.xlsx), inflate);
-  const ok = (g: string[][]) => g.some((r) => r.some((c) => c.trim().toLowerCase() === 'business name') && r.some((c) => c.trim().toLowerCase() === 'lender'));
-  const sheet = wb.sheets.find((s) => s.name.toLowerCase() === 'funded deals' && ok(s.grid)) ?? wb.sheets.find((s) => /funded/i.test(s.name) && ok(s.grid)) ?? wb.sheets.find((s) => ok(s.grid));
-  if (!sheet) throw new ApiError(400, `No FUNDED DEALS tab found (sheets: ${wb.sheets.map((s) => s.name).join(', ')})`);
-  return sheet.grid;
+  const source = selectFundedDealsSheet(wb.sheets, typeof body.sheet === 'string' ? body.sheet : null);
+  if (!source) throw new ApiError(400, `No FUNDED DEALS tab found (sheets: ${wb.sheets.map((s) => s.name).join(', ')})`);
+  return source;
 }
 import { createRep, createTeam, deleteTeam, saveCrm, saveLenders, saveLists, saveNotifications, savePartners, savePayroll, savePermissions, savePortal, saveProducts, saveSecurity, saveThresholds, updateRep, updateTeam, usage } from '../../../api-server/src/services/settings';
 import { annualReport, payrollRepDetail, payrollReps, preview, runSummary } from '../../../api-server/src/payroll-views';
@@ -280,7 +279,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     return json({
       reps: d.reps.map((rep) => {
         const l = repLedger(ctx, rep.id);
-        return { id: rep.id, name: rep.name, email: rep.email, role: rep.role, teamId: rep.teamId, team: rep.teamId ? teamName.get(rep.teamId) ?? null : null, openerRate: rep.openerRate, closerRate: rep.closerRate, overrideRate: rep.overrideRate, active: rep.active, hasPassword: demoPasswords.has(rep.id), hasTotp: demoTotp.has(rep.id), superAdmin: !!rep.superAdmin, perms: rep.perms ?? null, earned: l.earned, paid: l.paid, held: l.held, owed: l.owed, dealCount: l.deals.length };
+        return { id: rep.id, name: rep.name, email: rep.email, role: rep.role, teamId: rep.teamId, team: rep.teamId ? teamName.get(rep.teamId) ?? null : null, openerRate: rep.openerRate, closerRate: rep.closerRate, overrideRate: rep.overrideRate, commissionEligible: rep.commissionEligible !== false, active: rep.active, hasPassword: demoPasswords.has(rep.id), hasTotp: demoTotp.has(rep.id), superAdmin: !!rep.superAdmin, perms: rep.perms ?? null, earned: l.earned, paid: l.paid, held: l.held, owed: l.owed, dealCount: l.deals.length };
       }),
     });
   }
@@ -307,8 +306,8 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     const tm = p.match(/^\/api\/admin\/teams\/([^/]+)$/);
     if (tm && method === 'PATCH') return json(await updateTeam(repo, decodeURIComponent(tm[1]!), body as never, me.repId));
     if (tm && method === 'DELETE') { await deleteTeam(repo, decodeURIComponent(tm[1]!), me.repId); return json(null); }
-    if (p === '/api/admin/import/preview' && method === 'POST') return json(await previewImport(repo, String(body.csv ?? ''), { skipExisting: !!body.skipExisting || !!body.updateExisting, updateExisting: !!body.updateExisting, grid: await demoSheetGrid(body) }));
-    if (p === '/api/admin/import' && method === 'POST') return json(await commitImport(repo, String(body.csv ?? ''), me.repId, { skipExisting: !!body.skipExisting || !!body.updateExisting, updateExisting: !!body.updateExisting, grid: await demoSheetGrid(body) }));
+    if (p === '/api/admin/import/preview' && method === 'POST') { const source = await demoSheetGrid(body); return json(await previewImport(repo, String(body.csv ?? ''), { skipExisting: !!body.skipExisting || !!body.updateExisting, updateExisting: !!body.updateExisting, ...(source ?? {}) })); }
+    if (p === '/api/admin/import' && method === 'POST') { const source = await demoSheetGrid(body); return json(await commitImport(repo, String(body.csv ?? ''), me.repId, { skipExisting: !!body.skipExisting || !!body.updateExisting, updateExisting: !!body.updateExisting, ...(source ?? {}) })); }
     if (p === '/api/admin/remittance/preview' && method === 'POST') return json(await previewRemittance(repo, String(body.csv ?? '')));
     if (p === '/api/admin/remittance' && method === 'POST') return json(await commitRemittance(repo, String(body.csv ?? ''), me.repId));
     if (p === '/api/admin/reports/annual') return json(annualReport(ctx, d.reps, Number(q.get('year') ?? today.slice(0, 4))));
@@ -401,6 +400,8 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
       return json({ runs: [...d.runs].sort((a, b) => b.start.localeCompare(a.start)).map((run) => runSummary(run, ctx)), reps: rows, outstanding: rows.reduce((s2, x) => s2 + x.owed, 0) });
     }
     if (p === '/api/admin/payroll/runs' && method === 'POST') return json(await createRun(repo, me.repId, body.start && body.end ? { start: String(body.start), end: String(body.end) } : undefined));
+    const archive = p.match(/^\/api\/admin\/payroll\/runs\/([^/]+)\/archive$/);
+    if (archive && method === 'POST') return json(await archiveRun(repo, decodeURIComponent(archive[1]!), me.repId));
     const vm = p.match(/^\/api\/admin\/payroll\/runs\/([^/]+)\/void$/);
     if (vm && method === 'POST') {
       const plan = await voidPayout(repo, { runId: decodeURIComponent(vm[1]!), repId: String(body.repId ?? ''), keys: Array.isArray(body.keys) ? (body.keys as unknown[]).map(String) : undefined }, me.repId);
@@ -466,7 +467,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     if (dm2 && method === 'DELETE') { await deleteDraw(repo, decodeURIComponent(dm2[1]!), dm2[2]!, me.repId); return json(await detail(decodeURIComponent(dm2[1]!))); }
     const cm = p.match(/^\/api\/admin\/deals\/([^/]+)\/contact$/);
     if (cm && method === 'PATCH') { const r2 = await updateContact(repo, decodeURIComponent(cm[1]!), body as never, me.repId); return json({ ...(await detail(decodeURIComponent(cm[1]!))), updatedDeals: r2.updated }); }
-    const m = p.match(/^\/api\/admin\/deals\/([^/]+)(?:\/(splits|status|draws|collection|crm|terms|renewal))?$/);
+    const m = p.match(/^\/api\/admin\/deals\/([^/]+)(?:\/(splits|status|draws|collection|crm|metadata|terms|renewal))?$/);
     if (m) {
       const id = decodeURIComponent(m[1]!);
       const sub = m[2];
@@ -476,6 +477,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
       if (sub === 'splits') await updateSplits(repo, id, body as never, me.repId);
       if (sub === 'status') await setDealStatus(repo, id, String(body.dealStatus ?? ''), me.repId);
       if (sub === 'crm') await setCrmId(repo, id, body.crmId === null ? null : String(body.crmId ?? ''), me.repId);
+      if (sub === 'metadata') await updateDealMetadata(repo, id, body as never, me.repId);
       if (sub === 'renewal') await linkRenewal(repo, id, body.renewedFromId, me.repId);
       if (sub === 'draws') await addDraw(repo, id, body as never, me.repId);
       if (sub === 'collection') await setCollection(repo, id, body as never, me.repId);

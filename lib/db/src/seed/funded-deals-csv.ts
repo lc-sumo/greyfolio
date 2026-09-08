@@ -74,7 +74,7 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9%$]+/g, ' ').trim()
 function headerIndex(header: string[]): Map<string, number> {
   const want = new Map(FUNDED_DEALS_COLUMNS.filter((c) => c.header).map((c) => [norm(c.header), c.col]));
   // Later tracker versions renamed a few headers.
-  for (const [alias, col] of [['psf %', 'M'], ['psf $', 'N'], ['funded draw amount $', 'G'], ['funded / draw amount $', 'G'], ['term bus days', 'I'], ['comm %', 'L']] as const) if (!want.has(alias)) want.set(alias, col);
+  for (const [alias, col] of [['business', 'D'], ['merchant name', 'D'], ['merchant', 'D'], ['lender name', 'E'], ['product name', 'F'], ['funded draw amount $', 'G'], ['funded / draw amount $', 'G'], ['funded draw amount', 'G'], ['funded / draw amount', 'G'], ['funded amount', 'G'], ['draw amount', 'G'], ['amount', 'G'], ['funded date', 'C'], ['draw date', 'C'], ['psf %', 'M'], ['psf $', 'N'], ['term bus days', 'I'], ['comm %', 'L']] as const) if (!want.has(alias)) want.set(alias, col);
   const out = new Map<string, number>();
   header.forEach((h, i) => {
     const col = want.get(norm(h));
@@ -115,6 +115,64 @@ export interface SheetRead {
   /** Lines skipped as banners, blanks or totals. */
   skipped: number;
   problems: string[];
+  /** Required tracker columns that were not found in the header. */
+  missingRequired: string[];
+}
+
+/** Required import fields and the Google Sheets export headings we recognize for each. */
+export const REQUIRED_FUNDED_DEALS_COLUMNS = [
+  { field: 'Business Name', aliases: ['business name', 'business', 'merchant name', 'merchant'] },
+  { field: 'Lender', aliases: ['lender', 'lender name'] },
+  { field: 'Product', aliases: ['product', 'product name'] },
+  { field: 'Funded or Draw Amount', aliases: ['funded draw amount $', 'funded / draw amount $', 'funded draw amount', 'funded / draw amount', 'funded amount', 'draw amount', 'amount'] },
+  { field: 'Date', aliases: ['date', 'funded date', 'draw date'] },
+] as const;
+
+/** Locate a plausible tracker header and report required columns absent from it. */
+export function fundedDealsHeader(grid: string[][]): { at: number; missingRequired: string[] } {
+  let best = -1;
+  let bestHits = 0;
+  for (let n = 0; n < grid.length; n++) {
+    const cells = new Set(grid[n]!.map(norm));
+    const hits = REQUIRED_FUNDED_DEALS_COLUMNS.filter((required) => required.aliases.some((alias) => cells.has(alias))).length;
+    if (hits > bestHits) { best = n; bestHits = hits; }
+  }
+  // Two known headings distinguishes a header from ordinary tracker text.
+  if (bestHits < 2) return { at: -1, missingRequired: REQUIRED_FUNDED_DEALS_COLUMNS.map((x) => x.field) };
+  const cells = new Set(grid[best]!.map(norm));
+  return { at: best, missingRequired: REQUIRED_FUNDED_DEALS_COLUMNS.filter((required) => !required.aliases.some((alias) => cells.has(alias))).map((x) => x.field) };
+}
+
+/** A workbook-shaped sheet, kept dependency-free for both browser demo and server use. */
+export interface FundedDealsWorkbookSheet {
+  name: string;
+  grid: string[][];
+}
+
+export interface FundedDealsSheetSelection {
+  grid: string[][];
+  sheetName: string;
+  /** Every sheet with all required columns, in workbook order. */
+  matchingSheets: string[];
+}
+
+/**
+ * Select an import sheet consistently everywhere. A requested existing tab wins
+ * (so an operator can intentionally preview its missing columns); otherwise a
+ * complete tab wins over an earlier incomplete candidate. If no complete tab
+ * exists, retain the best header candidate so validation can explain what to add.
+ */
+export function selectFundedDealsSheet(sheets: FundedDealsWorkbookSheet[], requestedSheet?: string | null): FundedDealsSheetSelection | undefined {
+  const requested = requestedSheet?.trim().toLowerCase();
+  const named = requested ? sheets.find((sheet) => sheet.name.toLowerCase() === requested) : undefined;
+  const candidates = sheets.filter((sheet) => fundedDealsHeader(sheet.grid).at >= 0);
+  const matchingSheets = sheets.filter((sheet) => {
+    const header = fundedDealsHeader(sheet.grid);
+    return header.at >= 0 && header.missingRequired.length === 0;
+  }).map((sheet) => sheet.name);
+  const complete = sheets.filter((sheet) => matchingSheets.includes(sheet.name));
+  const selected = named ?? complete.find((sheet) => /funded/i.test(sheet.name)) ?? complete[0] ?? candidates[0];
+  return selected ? { grid: selected.grid, sheetName: selected.name, matchingSheets } : undefined;
 }
 
 export function readFundedDealsCsv(text: string): SheetRead {
@@ -123,8 +181,9 @@ export function readFundedDealsCsv(text: string): SheetRead {
 
 /** The same reader over an already-parsed grid (CSV or a workbook sheet). */
 export function readFundedDealsTable(grid: string[][]): SheetRead {
-  const headerAt = grid.findIndex((r) => r.some((c) => norm(c) === 'business name') && r.some((c) => norm(c) === 'lender'));
-  if (headerAt < 0) return { rows: [], skipped: grid.length, problems: ['Could not find the FUNDED DEALS header row (needs "Business Name" and "Lender" columns)'] };
+  const header = fundedDealsHeader(grid);
+  const headerAt = header.at;
+  if (headerAt < 0) return { rows: [], skipped: grid.length, problems: ['Could not find a FUNDED DEALS header row. Add a header row with Business Name, Lender, Product, Funded or Draw Amount, and Date.'], missingRequired: header.missingRequired };
   const idx = headerIndex(grid[headerAt]!);
   const col = (r: string[], letter: string) => { const i = idx.get(letter); return i === undefined ? undefined : (r[i] ?? '').trim(); };
   const rows: SheetRow[] = [];
@@ -134,7 +193,9 @@ export function readFundedDealsTable(grid: string[][]): SheetRead {
     const business = col(r, 'D') ?? '';
     const amount = num(col(r, 'G'));
     const first = (r[0] ?? '').trim();
-    if (!business || amount === null || /^▼|^▶|grand tot|^total|total$/i.test(first) || /^▼|^▶/.test(business) || /^\d+ units$/i.test(business)) { skipped++; continue; }
+    // Banners, blanks and totals are intentionally skippable. Every other line is
+    // retained, even when a required cell is blank, so preview can block the import.
+    if ((!r.some((c) => c.trim()) || /^▼|^▶|grand tot|^total|total$/i.test(first) || /^▼|^▶/.test(business) || /^\d+ units$/i.test(business))) { skipped++; continue; }
     rows.push({
       line: n + 1,
       id: (col(r, 'A') ?? '').toUpperCase(),
@@ -143,7 +204,7 @@ export function readFundedDealsTable(grid: string[][]): SheetRead {
       business,
       lender: col(r, 'E') ?? '',
       product: col(r, 'F') ?? '',
-      amount,
+      amount: amount ?? 0,
       factor: num(col(r, 'H')),
       termDays: num(col(r, 'I')),
       frequency: col(r, 'K') || 'Daily',
@@ -171,5 +232,5 @@ export function readFundedDealsTable(grid: string[][]): SheetRead {
       leadSource: col(r, 'AU') ?? '',
     });
   }
-  return { rows, skipped, problems: [] };
+  return { rows, skipped, problems: header.missingRequired.length ? [`Missing required column${header.missingRequired.length === 1 ? '' : 's'}: ${header.missingRequired.join(', ')}. Add ${header.missingRequired.join(', ')} to the header row and preview again.`] : [], missingRequired: header.missingRequired };
 }

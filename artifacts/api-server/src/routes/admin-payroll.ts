@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { HttpError, currentUser, requireRole } from '../auth/middleware.js';
 import { annualCsv, annualReport, payableFor, payrollRepDetail, payrollReps, preview, runCsv, runSummary } from '../payroll-views.js';
 import type { Repo } from '../repo.js';
-import { advanceRun, createRun, deleteRun, paySelected, reopenRun, voidPayout } from '../services/payroll.js';
+import { advanceRun, archiveRun, createRun, deleteRun, paySelected, reopenRun, voidPayout } from '../services/payroll.js';
 import { notifyRunApproved, type NotifyDeps } from '../services/notify.js';
 
 /** Payroll: runs, per-rep payable lines, netting preview, pay + record, CSV. Admin only. */
@@ -30,6 +30,9 @@ export function adminPayrollRouter(repo: Repo, notify?: Omit<NotifyDeps, 'repo'>
 
   r.post('/payroll/runs/:id/reopen', async (req, res) => {
     res.json(await reopenRun(repo, String(req.params.id), currentUser(req)!.repId));
+  });
+  r.post('/payroll/runs/:id/archive', async (req, res) => {
+    res.json(await archiveRun(repo, String(req.params.id), currentUser(req)!.repId));
   });
   r.delete('/payroll/runs/:id', async (req, res) => {
     res.json(await deleteRun(repo, String(req.params.id), currentUser(req)!.repId));

@@ -213,8 +213,28 @@ export function dbRepo(db: Database): Repo {
     async updateDeal(id: string, patch: DealPatch) {
       await db.update(commissionDeals).set({ ...patch, updatedAt: sql`now()` }).where(eq(commissionDeals.id, id));
     },
+    async updateDealLocked(id, patch, validate) {
+      await db.transaction(async (tx) => {
+        const rows = await tx.select().from(commissionDeals).where(eq(commissionDeals.id, id)).for('update');
+        if (!rows[0]) throw new Error(`No deal ${id}`);
+        const draws = await tx.select().from(commissionDealDraws).where(eq(commissionDealDraws.dealId, id)).for('update');
+        const lines = await tx.select().from(commissionPayoutLines).where(eq(commissionPayoutLines.dealId, id));
+        validate(toDeal(rows[0], draws), lines.map(toPayoutLine));
+        await tx.update(commissionDeals).set({ ...patch, updatedAt: sql`now()` }).where(eq(commissionDeals.id, id));
+      });
+    },
     async insertDraw(dealId: string, draw: DealDraw) {
       await db.insert(commissionDealDraws).values({ dealId, ...draw });
+    },
+    async insertDrawLocked(dealId, build) {
+      return db.transaction(async (tx) => {
+        const rows = await tx.select().from(commissionDeals).where(eq(commissionDeals.id, dealId)).for('update');
+        if (!rows[0]) throw new Error(`No deal ${dealId}`);
+        const draws = await tx.select().from(commissionDealDraws).where(eq(commissionDealDraws.dealId, dealId)).for('update');
+        const draw = build(toDeal(rows[0], draws));
+        await tx.insert(commissionDealDraws).values({ dealId, ...draw });
+        return draw;
+      });
     },
     async updateDraw(dealId: string, ref: string, patch: { collected: number | null; schedule: WeeklySchedule | null }) {
       await db.update(commissionDealDraws).set(patch).where(sql`${commissionDealDraws.dealId} = ${dealId} and ${commissionDealDraws.ref} = ${ref}`);
@@ -222,6 +242,18 @@ export function dbRepo(db: Database): Repo {
     async replaceDraw(dealId: string, ref: string, draw: DealDraw) {
       const { ref: _r, ...rest } = draw;
       await db.update(commissionDealDraws).set(rest).where(sql`${commissionDealDraws.dealId} = ${dealId} and ${commissionDealDraws.ref} = ${ref}`);
+    },
+    async replaceDrawLocked(dealId, ref, build) {
+      return db.transaction(async (tx) => {
+        const rows = await tx.select().from(commissionDeals).where(eq(commissionDeals.id, dealId)).for('update');
+        if (!rows[0]) throw new Error(`No deal ${dealId}`);
+        const draws = await tx.select().from(commissionDealDraws).where(eq(commissionDealDraws.dealId, dealId)).for('update');
+        const lines = await tx.select().from(commissionPayoutLines).where(eq(commissionPayoutLines.dealId, dealId));
+        const draw = build(toDeal(rows[0], draws), lines.map(toPayoutLine));
+        const { ref: _ref, ...rest } = draw;
+        await tx.update(commissionDealDraws).set(rest).where(sql`${commissionDealDraws.dealId} = ${dealId} and ${commissionDealDraws.ref} = ${ref}`);
+        return draw;
+      });
     },
     async updateClawback(id: string, patch: Partial<Pick<Clawback, 'amount' | 'date' | 'reason'>>) {
       await db.update(commissionClawbacks).set(patch).where(eq(commissionClawbacks.id, id));
@@ -256,7 +288,7 @@ export function dbRepo(db: Database): Repo {
       await db.delete(commissionTeams).where(eq(commissionTeams.id, id));
     },
     async insertRep(rep: Rep) {
-      await db.insert(commissionReps).values({ id: rep.id, name: rep.name, email: rep.email, role: rep.role, teamId: rep.teamId, openerRate: rep.openerRate, closerRate: rep.closerRate, overrideRate: rep.overrideRate, active: rep.active, superAdmin: !!rep.superAdmin, perms: rep.perms ?? null });
+      await db.insert(commissionReps).values({ id: rep.id, name: rep.name, email: rep.email, role: rep.role, teamId: rep.teamId, openerRate: rep.openerRate, closerRate: rep.closerRate, overrideRate: rep.overrideRate, commissionEligible: rep.commissionEligible !== false, active: rep.active, superAdmin: !!rep.superAdmin, perms: rep.perms ?? null });
     },
     async updateRep(id: string, patch: Partial<Omit<Rep, 'id'>>) {
       await db.update(commissionReps).set({ ...patch, updatedAt: sql`now()` }).where(eq(commissionReps.id, id));
@@ -337,14 +369,82 @@ export function dbRepo(db: Database): Repo {
         })
         .where(eq(runsTable.id, id));
     },
+    async transitionRun(id, from, patch) {
+      const rows = await db
+        .update(runsTable)
+        .set({
+          ...(patch.status ? { status: patch.status } : {}),
+          ...(patch.label ? { label: patch.label } : {}),
+          ...(patch.approvedAt !== undefined ? { approvedAt: patch.approvedAt ? new Date(patch.approvedAt) : null } : {}),
+          ...(patch.paidAt !== undefined ? { paidAt: patch.paidAt ? new Date(patch.paidAt) : null } : {}),
+        })
+        .where(and(eq(runsTable.id, id), sql`${runsTable.status} in (${sql.join(from.map((s) => sql`${s}`), sql`, `)})`))
+        .returning({ id: runsTable.id });
+      return rows.length === 1;
+    },
     async commitPayout(c: PayoutCommit) {
       await db.transaction(async (tx) => {
+        // Deal economics edits lock the same parent first. Lock every affected
+        // deal in a stable order before ledger insertion to avoid deadlocks and
+        // make payout-vs-edit serialization explicit.
+        for (const id of [...new Set(c.lines.map((line) => line.dealId))].sort()) {
+          await tx.select({ id: commissionDeals.id }).from(commissionDeals).where(eq(commissionDeals.id, id)).for('update');
+        }
         for (const l of c.lines) {
           await tx.insert(commissionPayoutLines).values({ key: l.key, dealId: l.dealId, segmentKey: l.segmentKey, role: l.role, repId: l.repId, amount: l.amount, runId: l.runId, clawbackId: l.clawbackId, paidAt: l.paidAt, voids: l.voids ?? null });
         }
         for (const u of c.clawbackUpdates) await tx.update(commissionClawbacks).set({ recovered: u.recovered, status: u.status }).where(eq(commissionClawbacks.id, u.id));
         for (const id of c.dealsFullyPaid) await tx.update(commissionDeals).set({ repPaid: c.paidAt, updatedAt: sql`now()` }).where(sql`${commissionDeals.id} = ${id} and ${commissionDeals.repPaid} is null`);
         for (const id of c.dealsUnstamped ?? []) await tx.update(commissionDeals).set({ repPaid: null, updatedAt: sql`now()` }).where(eq(commissionDeals.id, id));
+      });
+    },
+    async commitPayoutForOpenRun(runId, c, validateDeals) {
+      return db.transaction(async (tx) => {
+        // A no-op conditional update locks this run until its ledger writes
+        // finish. Archive uses its own conditional update, so either archive
+        // wins and no rows are added, or payout wins before archival.
+        const claimed = await tx
+          .update(runsTable)
+          .set({ status: sql`${runsTable.status}` })
+          .where(and(eq(runsTable.id, runId), sql`${runsTable.status} in ('draft', 'approved')`))
+          .returning({ id: runsTable.id });
+        if (claimed.length !== 1) return false;
+        const currentDeals: Deal[] = [];
+        for (const id of [...new Set(c.lines.map((line) => line.dealId))].sort()) {
+          const rows = await tx.select().from(commissionDeals).where(eq(commissionDeals.id, id)).for('update');
+          if (!rows[0]) return false;
+          const draws = await tx.select().from(commissionDealDraws).where(eq(commissionDealDraws.dealId, id)).for('update');
+          currentDeals.push(toDeal(rows[0], draws));
+        }
+        // The payout was planned before this transaction. Re-check the exact
+        // deal economics after taking the same locks used by monetary edits.
+        if (validateDeals && !validateDeals(currentDeals)) return false;
+        for (const l of c.lines) {
+          await tx.insert(commissionPayoutLines).values({ key: l.key, dealId: l.dealId, segmentKey: l.segmentKey, role: l.role, repId: l.repId, amount: l.amount, runId: l.runId, clawbackId: l.clawbackId, paidAt: l.paidAt, voids: l.voids ?? null });
+        }
+        for (const u of c.clawbackUpdates) await tx.update(commissionClawbacks).set({ recovered: u.recovered, status: u.status }).where(eq(commissionClawbacks.id, u.id));
+        for (const id of c.dealsFullyPaid) await tx.update(commissionDeals).set({ repPaid: c.paidAt, updatedAt: sql`now()` }).where(sql`${commissionDeals.id} = ${id} and ${commissionDeals.repPaid} is null`);
+        for (const id of c.dealsUnstamped ?? []) await tx.update(commissionDeals).set({ repPaid: null, updatedAt: sql`now()` }).where(eq(commissionDeals.id, id));
+        return true;
+      });
+    },
+    async commitPayoutForUnarchivedRun(runId, c) {
+      return db.transaction(async (tx) => {
+        // This conditional update takes the same row lock used by archive.
+        // Paid runs remain eligible for append-only Void corrections.
+        const claimed = await tx
+          .update(runsTable)
+          .set({ status: sql`${runsTable.status}` })
+          .where(and(eq(runsTable.id, runId), sql`${runsTable.status} <> 'archived'`))
+          .returning({ id: runsTable.id });
+        if (claimed.length !== 1) return false;
+        for (const l of c.lines) {
+          await tx.insert(commissionPayoutLines).values({ key: l.key, dealId: l.dealId, segmentKey: l.segmentKey, role: l.role, repId: l.repId, amount: l.amount, runId: l.runId, clawbackId: l.clawbackId, paidAt: l.paidAt, voids: l.voids ?? null });
+        }
+        for (const u of c.clawbackUpdates) await tx.update(commissionClawbacks).set({ recovered: u.recovered, status: u.status }).where(eq(commissionClawbacks.id, u.id));
+        for (const id of c.dealsFullyPaid) await tx.update(commissionDeals).set({ repPaid: c.paidAt, updatedAt: sql`now()` }).where(sql`${commissionDeals.id} = ${id} and ${commissionDeals.repPaid} is null`);
+        for (const id of c.dealsUnstamped ?? []) await tx.update(commissionDeals).set({ repPaid: null, updatedAt: sql`now()` }).where(eq(commissionDeals.id, id));
+        return true;
       });
     },
     async writeAudit(entry: AuditEntry) {

@@ -35,7 +35,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
     const amount = sch?.planned?.amount ?? base?.amount ?? existing.funded;
     const pctStr = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(Math.round(v * 10000) / 100));
     return {
-      business: existing.business, crmId: existing.crmId ?? '', merchantContact: existing.merchantContact, merchantEmail: existing.merchantEmail, merchantPhone: existing.merchantPhone, fundedDate: existing.date, lender: existing.lender, product: existing.product, parentId: existing.parentId ?? '', renewedFromId: existing.renewedFromId ?? '',
+      business: existing.business, crmId: existing.crmId ?? '', merchantContact: existing.merchantContact, merchantEmail: existing.merchantEmail, merchantPhone: existing.merchantPhone, leadSource: existing.leadSource ?? '', notes: existing.notes ?? '', fundedDate: existing.date, lender: existing.lender, product: existing.product, parentId: existing.parentId ?? '', renewedFromId: existing.renewedFromId ?? '',
       amount: String(amount), termDays: existing.termDays === null ? '' : String(existing.termDays), factor: existing.factor === null ? '' : String(existing.factor), apr: existing.apr === null ? '' : String(existing.apr), frequency: existing.frequency, commRate: pctStr(existing.commRate), psfPct: pctStr(existing.psfPct), psfMode: '%', psfDollars: '', originationFee: String(existing.originationFee),
       referralPartner: existing.referralPartner ?? 'None', referralRate: pctStr(existing.referralRate), creditLine: existing.creditLine === null ? '' : String(existing.creditLine), lineRate: existing.lineRate ? pctStr(existing.lineRate) : '', drawInitialPct: pctStr(existing.commRate), drawSubsequentPct: pctStr(existing.drawSubsequentPct),
       openerId: existing.roles.find((r) => r.role === 'Opener')?.repId ?? '', openerRate: pctStr(existing.roles.find((r) => r.role === 'Opener')?.rate), closerId: existing.roles.find((r) => r.role === 'Closer')?.repId ?? '', closerRate: pctStr(existing.roles.find((r) => r.role === 'Closer')?.rate), overrideId: existing.roles.find((r) => r.role === 'Override')?.repId ?? '', overrideRate: pctStr(existing.roles.find((r) => r.role === 'Override')?.rate),
@@ -43,7 +43,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
     };
   };
   const [f, setF] = useState<F>(seed() ?? {
-    business: '', crmId: '', merchantContact: '', merchantEmail: '', merchantPhone: '', fundedDate: todayIso(), lender: '', product: first?.name ?? 'MCA', parentId: '', renewedFromId: '',
+    business: '', crmId: '', merchantContact: '', merchantEmail: '', merchantPhone: '', leadSource: 'Direct', notes: '', fundedDate: todayIso(), lender: '', product: first?.name ?? 'MCA', parentId: '', renewedFromId: '',
     amount: '', termDays: '120', factor: '1.35', apr: '', frequency: 'Daily', commRate: String((first?.comm ?? 0.12) * 100), psfPct: '0', psfMode: '%', psfDollars: '', originationFee: '0',
     referralPartner: 'None', referralRate: '0', creditLine: '', lineRate: '', drawInitialPct: '', drawSubsequentPct: '',
     openerId: '', openerRate: '', closerId: '', closerRate: '', overrideId: '', overrideRate: '',
@@ -141,12 +141,11 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
     setBusy(true);
     try {
       const saved = await post<AdminDealDetail>(editing ? `/api/admin/deals/${existing!.id}/terms` : '/api/admin/deals', {
-        business: f.business, crmId: f.crmId || null, merchantContact: f.merchantContact, merchantEmail: f.merchantEmail, merchantPhone: f.merchantPhone, fundedDate: f.fundedDate, lender: f.lender, product: f.product,
+        business: f.business, crmId: f.crmId || null, merchantContact: f.merchantContact, merchantEmail: f.merchantEmail, merchantPhone: f.merchantPhone, leadSource: f.leadSource || null, notes: f.notes || null, fundedDate: f.fundedDate, lender: f.lender, product: f.product,
         parentId: f.parentId || null, renewedFromId: editing ? undefined : f.renewedFromId || null, amount: num(f.amount), termDays: rule?.term ? num(f.termDays) || null : null, factor: rule?.factor ? num(f.factor) || null : null, apr: rule && !rule.factor ? num(f.apr) || null : null,
         frequency: f.frequency, commRate: num(f.commRate), psfPct: m.psfRate * 100, originationFee: num(f.originationFee), referralPartner: f.referralPartner === 'None' ? null : f.referralPartner,
         creditLine: rule?.multiDraw ? num(f.creditLine) || null : null, lineRate: rule?.multiDraw ? num(f.lineRate) : null, drawInitialPct: rule?.multiDraw ? num(f.drawInitialPct) : null, drawSubsequentPct: rule?.multiDraw ? num(f.drawSubsequentPct) : null,
         openerId: f.openerId || null, openerRate: num(f.openerRate), closerId: f.closerId || null, closerRate: num(f.closerRate), overrideId: f.overrideId || null, overrideRate: num(f.overrideRate),
-        leadSource: priorDeals.length ? 'Existing client' : 'Direct',
         commIncrements: f.payout === 'upfront' ? 0 : incremental ? num(f.commIncrements) || null : null,
         commUpfrontPct: incremental ? num(f.commUpfrontPct) : null,
         commRemainder: incremental ? (f.commRemainder as 'spread' | 'at-end') : null,
@@ -188,6 +187,8 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
         <Field label="Merchant email" hint={client ? 'Existing client — profile pulled in below.' : 'Type the email first: an existing client\u2019s profile fills in automatically.'}>
           <input type="email" value={f.merchantEmail} onChange={set('merchantEmail')} placeholder="owner@business.com" />
         </Field>
+        <Field label="Lead source"><input value={f.leadSource} onChange={set('leadSource')} placeholder="Direct, referral, existing client…" /></Field>
+        <Field label="Imported notes"><input value={f.notes} onChange={set('notes')} placeholder="Legacy CRM/import note" /></Field>
         {client && (
           <div className="client" data-testid="client-profile">
             <div className="head">

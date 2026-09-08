@@ -26,6 +26,13 @@ export interface NewDrawInput {
 export function newDraw(deal: Deal, input: NewDrawInput): DealDraw {
   const rate = input.commRate ?? deal.drawSubsequentPct ?? 0;
   if (!(input.amount > 0)) throw new Error('Enter a draw amount');
+  if (deal.creditLine !== null && deal.creditLine !== undefined) {
+    const used = deal.funded + deal.draws.reduce((sum, draw) => sum + draw.amount, 0);
+    const remaining = deal.creditLine - used;
+    if (input.amount > remaining + 0.005) {
+      throw new Error(`Draw of ${input.amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} exceeds remaining credit-line availability of ${Math.max(0, remaining).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}`);
+    }
+  }
   if (!(rate > 0)) throw new Error(`${deal.id} has no subsequent draw rate`);
   const n = (deal.draws?.length ?? 0) + 1;
   const calc = commissionFor({

@@ -248,10 +248,24 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
       if (i < 0) throw new Error(`No deal ${id}`);
       data.deals[i] = { ...data.deals[i]!, ...patch };
     },
+    async updateDealLocked(id, patch, validate) {
+      const d = data.deals.find((x) => x.id === id);
+      if (!d) throw new Error(`No deal ${id}`);
+      // Memory writes run synchronously between awaits, matching the locked DB critical section.
+      validate(d, data.lines.filter((line) => line.dealId === id));
+      Object.assign(d, patch);
+    },
     async insertDraw(dealId, draw: DealDraw) {
       const d = data.deals.find((x) => x.id === dealId);
       if (!d) throw new Error(`No deal ${dealId}`);
       d.draws = [...d.draws, draw];
+    },
+    async insertDrawLocked(dealId, build) {
+      const d = data.deals.find((x) => x.id === dealId);
+      if (!d) throw new Error(`No deal ${dealId}`);
+      const draw = build(d);
+      d.draws = [...d.draws, draw];
+      return draw;
     },
     async updateDraw(dealId, ref, patch: { collected: number | null; schedule: WeeklySchedule | null }) {
       const d = data.deals.find((x) => x.id === dealId);
@@ -262,6 +276,13 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
       const d = data.deals.find((x) => x.id === dealId);
       if (!d) throw new Error(`No deal ${dealId}`);
       d.draws = d.draws.map((x) => (x.ref === ref ? { ...draw, ref } : x));
+    },
+    async replaceDrawLocked(dealId, ref, build) {
+      const d = data.deals.find((x) => x.id === dealId);
+      if (!d) throw new Error(`No deal ${dealId}`);
+      const draw = build(d, data.lines.filter((line) => line.dealId === dealId));
+      d.draws = d.draws.map((x) => (x.ref === ref ? { ...draw, ref } : x));
+      return draw;
     },
     async deleteDraw(dealId, ref) {
       const d = data.deals.find((x) => x.id === dealId);
@@ -278,6 +299,12 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
       const i = data.runs.findIndex((r) => r.id === id);
       if (i < 0) throw new Error(`No run ${id}`);
       data.runs[i] = { ...data.runs[i]!, ...(patch.status ? { status: patch.status } : {}), ...(patch.label ? { label: patch.label } : {}) };
+    },
+    async transitionRun(id, from, patch) {
+      const i = data.runs.findIndex((r) => r.id === id && from.includes(r.status));
+      if (i < 0) return false;
+      data.runs[i] = { ...data.runs[i]!, ...(patch.status ? { status: patch.status } : {}), ...(patch.label ? { label: patch.label } : {}) };
+      return true;
     },
     async putSetting(key, value) {
       (data.settings as unknown as Record<string, unknown>)[key] = value;
@@ -317,6 +344,52 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
         const i = data.deals.findIndex((d) => d.id === id);
         if (i >= 0) data.deals[i] = { ...data.deals[i]!, repPaid: null };
       }
+    },
+    async commitPayoutForOpenRun(runId, c, validateDeals) {
+      // This check and append have no await between them: the memory repo models
+      // the same conditional claim that the SQL implementation locks in one tx.
+      if (!data.runs.some((r) => r.id === runId && (r.status === 'draft' || r.status === 'approved'))) return false;
+      const currentDeals = [...new Set(c.lines.map((line) => line.dealId))]
+        .sort()
+        .map((id) => data.deals.find((deal) => deal.id === id))
+        .filter((deal): deal is Deal => !!deal);
+      if (currentDeals.length !== new Set(c.lines.map((line) => line.dealId)).size) return false;
+      if (validateDeals && !validateDeals(currentDeals)) return false;
+      for (const l of c.lines) if (data.lines.some((x) => x.key === l.key)) throw new Error(`Ledger key ${l.key} already exists`);
+      data.lines.push(...c.lines);
+      for (const u of c.clawbackUpdates) {
+        const i = data.clawbacks.findIndex((x) => x.id === u.id);
+        if (i >= 0) data.clawbacks[i] = { ...data.clawbacks[i]!, recovered: u.recovered, status: u.status };
+      }
+      for (const id of c.dealsFullyPaid) {
+        const i = data.deals.findIndex((d) => d.id === id);
+        if (i >= 0 && !data.deals[i]!.repPaid) data.deals[i] = { ...data.deals[i]!, repPaid: c.paidAt };
+      }
+      for (const id of c.dealsUnstamped ?? []) {
+        const i = data.deals.findIndex((d) => d.id === id);
+        if (i >= 0) data.deals[i] = { ...data.deals[i]!, repPaid: null };
+      }
+      return true;
+    },
+    async commitPayoutForUnarchivedRun(runId, c) {
+      // Kept separate from the open-run path because paid runs intentionally
+      // support Void corrections, while archived runs are immutable.
+      if (!data.runs.some((r) => r.id === runId && r.status !== 'archived')) return false;
+      for (const l of c.lines) if (data.lines.some((x) => x.key === l.key)) throw new Error(`Ledger key ${l.key} already exists`);
+      data.lines.push(...c.lines);
+      for (const u of c.clawbackUpdates) {
+        const i = data.clawbacks.findIndex((x) => x.id === u.id);
+        if (i >= 0) data.clawbacks[i] = { ...data.clawbacks[i]!, recovered: u.recovered, status: u.status };
+      }
+      for (const id of c.dealsFullyPaid) {
+        const i = data.deals.findIndex((d) => d.id === id);
+        if (i >= 0 && !data.deals[i]!.repPaid) data.deals[i] = { ...data.deals[i]!, repPaid: c.paidAt };
+      }
+      for (const id of c.dealsUnstamped ?? []) {
+        const i = data.deals.findIndex((d) => d.id === id);
+        if (i >= 0) data.deals[i] = { ...data.deals[i]!, repPaid: null };
+      }
+      return true;
     },
   };
 }

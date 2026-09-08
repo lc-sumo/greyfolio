@@ -22,10 +22,13 @@ export function Payroll() {
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
 
   const runs = overview.data?.runs ?? [];
+  const visibleRuns = showArchived ? runs : runs.filter((r) => r.status !== 'archived');
   const reps = overview.data?.reps ?? [];
-  const activeRun = runs.find((r) => r.id === runId) ?? runs.find((r) => r.status !== 'paid') ?? runs[0] ?? null;
+  const activeRun = runs.find((r) => r.id === runId) ?? visibleRuns.find((r) => r.status !== 'paid') ?? visibleRuns[0] ?? null;
+  const runClosed = activeRun?.status === 'paid' || activeRun?.status === 'archived';
   const payRepId = repId ?? reps.find((r) => r.owed > 0)?.id ?? reps[0]?.id ?? null;
   useEffect(() => { if (!repId && payRepId) setRepId(payRepId); }, [payRepId, repId]);
 
@@ -140,7 +143,7 @@ export function Payroll() {
     }
   }
   async function removeRun(r: { id: string; label: string }) {
-    if (!window.confirm(`Close out ${r.label}? Only an empty draft can be removed.`)) return;
+    if (!window.confirm(`Delete empty draft ${r.label}? This is only available before any payout is recorded.`)) return;
     try {
       await post(`/api/admin/payroll/runs/${r.id}`, {}, 'DELETE');
       await qc.invalidateQueries();
@@ -148,6 +151,17 @@ export function Payroll() {
       notify(`${r.label} removed`);
     } catch (e) {
       notify(e instanceof Error ? e.message : 'Could not remove the run');
+    }
+  }
+  async function archiveRun(r: { id: string; label: string; status: string; lineCount: number }) {
+    if (!window.confirm(`Close ${r.label}? It will leave the active payroll workflow but remain available in Closed runs for audit. ${r.lineCount ? 'Its ledger rows will be retained and cannot be deleted.' : ''}`)) return;
+    try {
+      await post(`/api/admin/payroll/runs/${r.id}/archive`, {});
+      await qc.invalidateQueries();
+      if (runId === r.id || activeRun?.id === r.id) setRunId(null);
+      notify(`${r.label} archived — no accounting history was deleted`);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Could not close the run');
     }
   }
   async function newRun(period?: { start: string; end: string }) {
@@ -175,14 +189,16 @@ export function Payroll() {
           <div className="rail">
             <Card title="Runs" extra={settings.data?.payroll.cycle}>
               <div className="runs">
-                {runs.map((r) => (
+                {visibleRuns.map((r) => (
                   <button key={r.id} className={`run ${activeRun?.id === r.id ? 'on' : ''}`} onClick={() => { setRunId(r.id); setSelected({}); }}>
                     <span className="ellipsis"><b>{r.label}</b><span className="subtle">{r.lineCount ? `${compact(r.paidGross)} · ${r.repCount} rep${r.repCount === 1 ? '' : 's'}` : 'nothing paid yet'}</span></span>
-                    <Pill tone={toneFor(r.status)}>{r.status === 'paid' ? 'Paid' : r.status === 'approved' ? 'Approved' : 'Draft'}</Pill>
+                    <Pill tone={toneFor(r.status)}>{r.status === 'paid' ? 'Paid' : r.status === 'approved' ? 'Approved' : r.status === 'archived' ? 'Archived' : 'Draft'}</Pill>
                     {r.status === 'draft' && r.lineCount === 0 && <span className="linkish" role="button" style={{ color: 'var(--ink-subtle)', padding: '0 4px' }} title="Remove this empty draft run" onClick={(e) => { e.stopPropagation(); void removeRun(r); }}>✕</span>}
                   </button>
                 ))}
+                {!visibleRuns.length && <div className="muted" style={{ padding: '8px 2px' }}>No active runs.</div>}
               </div>
+              {runs.some((r) => r.status === 'archived') && <button className="linkish" style={{ marginTop: 8 }} onClick={() => setShowArchived((v) => !v)}>{showArchived ? 'Hide closed runs' : `Show closed runs (${runs.filter((r) => r.status === 'archived').length})`}</button>}
               <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
                 <button className="btn" style={{ flex: 1 }} onClick={() => void newRun()}>+ Open next run</button>
                 <button className="btn" title="Open a run for dates of your choosing" onClick={() => setCustomPeriod(customPeriod ? null : { start: '', end: '' })}>…</button>
@@ -221,9 +237,10 @@ export function Payroll() {
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button className="btn" onClick={() => void exportCsv()}>Export CSV</button>
-                      <button className="btn primary" disabled={activeRun.status === 'paid'} onClick={() => void advance()}>{activeRun.status === 'draft' ? 'Approve run' : activeRun.status === 'approved' ? 'Mark as paid' : 'Locked'}</button>
+                       <button className="btn primary" disabled={runClosed} onClick={() => void advance()}>{activeRun.status === 'draft' ? 'Approve run' : activeRun.status === 'approved' ? 'Mark as paid' : 'Locked'}</button>
                       {activeRun.status === 'approved' && <button className="btn" onClick={() => void reopen()} title="Approved too soon? Back to draft">Reopen</button>}
-                      {activeRun.status === 'draft' && activeRun.lineCount === 0 && <button className="btn" style={{ color: 'var(--red)' }} onClick={() => void removeRun(activeRun)} title="Nothing paid in this run — remove it">Close out</button>}
+                       {(activeRun.status === 'draft' || activeRun.status === 'approved') && <button className="btn" style={{ color: 'var(--red)' }} onClick={() => void archiveRun(activeRun)} title="Close this run while preserving its audit history">Close run</button>}
+                      {activeRun.status === 'draft' && activeRun.lineCount === 0 && <button className="btn" style={{ color: 'var(--red)' }} onClick={() => void removeRun(activeRun)} title="Permanently remove this empty draft">Delete empty draft</button>}
                     </div>
                   </div>
                   <div className="strip sunk">
@@ -237,7 +254,7 @@ export function Payroll() {
                 <Card title="Select deals to pay" extra={d ? `${d.lines.length} outstanding line${d.lines.length === 1 ? '' : 's'} for ${d.rep.name}` : ''}>
                   <div className="toolbar" style={{ marginBottom: 12 }}>
                     <input className="search" placeholder="Search deal ID, business, merchant contact, email or phone" value={search} onChange={(e) => setSearch(e.target.value)} style={{ minWidth: 340 }} />
-                    <button className="btn" disabled={!shown.length} onClick={() => setSelected((s) => { const n = { ...s }; shown.forEach((l) => { const keys = l.collectedKeys.length ? l.collectedKeys : l.uncollectedKeys; if (allShown) rowKeys(l).forEach((k) => delete n[k]); else keys.forEach((k) => { n[k] = true; }); }); return n; })}>{allShown ? 'Clear selection' : 'Select all collected'}</button>
+                    <button className="btn" disabled={!shown.length || runClosed} onClick={() => setSelected((s) => { const n = { ...s }; shown.forEach((l) => { const keys = l.collectedKeys.length ? l.collectedKeys : l.uncollectedKeys; if (allShown) rowKeys(l).forEach((k) => delete n[k]); else keys.forEach((k) => { n[k] = true; }); }); return n; })}>{allShown ? 'Clear selection' : 'Select all collected'}</button>
                     <span className="count">{selLines.length} of {d?.lines.length ?? 0} lines · {selectedKeys.length} unit{selectedKeys.length === 1 ? '' : 's'}</span>
                   </div>
                   {!d ? <Loading error={detail.error} /> : shown.length === 0 ? (
@@ -282,13 +299,13 @@ export function Payroll() {
                     <div><span className="label">Gross</span><b>{money(selGross)}</b></div>
                     <div><span className="label">Clawbacks netted</span><b style={{ color: withheld ? 'var(--red-bright)' : undefined }}>{withheld ? money(-withheld) : '$0'}</b></div>
                     <div><span className="label">Net to pay</span><b style={{ color: 'var(--teal-bright)' }}>{money(selGross - withheld)}</b></div>
-                    </div><button className="btn primary big" disabled={busy || !selLines.length || activeRun.status === 'paid'} onClick={() => void pay()}>{busy ? 'Recording…' : 'Pay selected & record'}</button>
+                    </div><button className="btn primary big" disabled={busy || !selLines.length || runClosed} onClick={() => void pay()}>{busy ? 'Recording…' : 'Pay selected & record'}</button>
                   </div>
                   {uncollected.length > 0 && <div className="band amber">{uncollected.length} selected deal line(s) sit on commission the lender has not paid yet ({uncollected.slice(0, 4).join(', ')}{uncollected.length > 4 ? '…' : ''}). Paying now advances the rep against uncollected commission.</div>}
                   {d && d.outstandingClawback > 0 && <div className="band red">Outstanding clawback balance for {d.rep.name}: <b>{money(d.outstandingClawback)}</b> across {d.clawbacks.length} deal(s){withheld ? <> — <b>{money(withheld)}</b> recovers on this payout, leaving {money(d.outstandingClawback - withheld)}.</> : '. It nets against the next payout that has gross to withhold from.'}</div>}
                 </Card>
 
-                <Card title="Paid in this run" extra={d && d.paidInRun.length ? <>{d.paidSummary.lineCount} deal line(s) · cash {money(d.paidSummary.cash)}{d.paidSummary.voided ? ` · ${money(d.paidSummary.voided)} voided` : ''} {d.paidInRun.some((p) => !p.voided && p.role !== 'Void') && <button className="btn" style={{ marginLeft: 10, height: 28, padding: '0 10px', color: 'var(--red)' }} onClick={() => void voidRows()}>Void everything in this run for {d.rep.name}</button>}</> : ''}>
+                <Card title="Paid in this run" extra={d && d.paidInRun.length ? <>{d.paidSummary.lineCount} deal line(s) · cash {money(d.paidSummary.cash)}{d.paidSummary.voided ? ` · ${money(d.paidSummary.voided)} voided` : ''} {activeRun.status !== 'archived' && d.paidInRun.some((p) => !p.voided && p.role !== 'Void') && <button className="btn" style={{ marginLeft: 10, height: 28, padding: '0 10px', color: 'var(--red)' }} onClick={() => void voidRows()}>Void everything in this run for {d.rep.name}</button>}</> : ''}>
                   {!d || d.paidInRun.length === 0 ? <div className="muted">Nothing recorded for {d?.rep.name ?? 'this rep'} in {activeRun.label} yet.</div> : (
                     <>
                       <div className="scroller">
@@ -301,7 +318,7 @@ export function Payroll() {
                               <div className="td contact-cell"><Contact name={p.merchantContact} email={p.merchantEmail} phone={p.merchantPhone} /></div>
                               <div className={`td ${p.role === 'Void' ? 'warn' : p.amount < 0 ? 'neg' : ''}`}>{p.role === 'Void' ? <>Void <span className="subtle">· reverses {p.voids?.startsWith('cbrec') ? 'clawback recovery' : p.unitLabel ?? 'payout'}</span></> : <>{p.role}{p.segmentKey && p.segmentKey !== 'base' ? ` · ${p.segmentKey}` : ''}{p.unitLabel ? <span className="subtle"> · {p.unitLabel}</span> : ''}{p.voided && <span className="subtle"> · voided</span>}</>}</div>
                               <div className={`td r num ${p.role === 'Void' ? 'warn' : p.amount < 0 ? 'neg' : 'pos'}`}>{money(p.amount)}</div>
-                              <div className="td num">{day(p.paidAt)}{!p.voided && p.role !== 'Void' && p.amount > 0 && <button className="linkish" style={{ marginLeft: 8, color: 'var(--red)', fontSize: 12.5 }} title="Reverse this payout line; it becomes payable again" onClick={() => void voidRows([p.key])}>void</button>}</div>
+                              <div className="td num">{day(p.paidAt)}{activeRun.status !== 'archived' && !p.voided && p.role !== 'Void' && p.amount > 0 && <button className="linkish" style={{ marginLeft: 8, color: 'var(--red)', fontSize: 12.5 }} title="Reverse this payout line; it becomes payable again" onClick={() => void voidRows([p.key])}>void</button>}</div>
                             </div>
                           ))}
                           <div className="tr total"><div className="td" style={{ gridColumn: '1 / 5' }}>Gross {money(d.paidSummary.gross)}{d.paidSummary.recovered ? ` − clawback recovered ${money(d.paidSummary.recovered)}` : ''} = cash paid {money(d.paidSummary.cash)}</div><div className="td r num">{money(d.paidSummary.cash)}</div><div className="td" /></div>

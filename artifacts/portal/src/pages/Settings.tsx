@@ -15,7 +15,7 @@ const TABS: Array<{ key: TabKey; label: string; hint: string }> = [
   { key: 'partners', label: 'Referral partners', hint: 'Fee % of gross commission and an optional monthly cap. Blank cap = uncapped.' },
   { key: 'products', label: 'Product rules', hint: 'The product decides which fields the new-deal form shows and how commission is based.' },
   { key: 'teams', label: 'Teams', hint: 'A team has a leader who earns the override on the team’s deals. Set the leader here.' },
-  { key: 'reps', label: 'Reps', hint: 'Rates default onto new deals and can be overridden per deal. Deactivating never changes history.' },
+  { key: 'reps', label: 'Users', hint: 'Give people portal access and choose whether they can participate in commissions. Deactivating never changes history.' },
   { key: 'crm', label: 'CRM & thresholds', hint: 'CRM deep link template and the day counts that drive at-risk, Prospecting and renewals.' },
   { key: 'playbooks', label: 'Playbooks', hint: 'If/then rules on the renewal engine: when a deal reaches a paid-in mark, a stage, an unused line or a maturity date, open a task for the rep, email them, email you, or set a status. Dry-run any rule to see exactly which deals it would touch today.' },
   { key: 'import', label: 'Import from sheet', hint: 'Bring the FUNDED DEALS tab in from a CSV export. Preview first; nothing is written until the file is clean.' },
@@ -258,6 +258,7 @@ function TeamsTab({ teams, reps, usage, run }: { teams: Team[]; reps: RosterRep[
   const [newTeam, setNewTeam] = useState({ name: '', leaderRepId: '', overrideRate: '5' });
   const d = (t: Team) => drafts[t.id] ?? { name: t.name, leaderRepId: t.leaderRepId ?? '', overrideRate: pctIn(t.overrideRate) };
   const byTeam = (id: string) => reps.filter((r) => r.teamId === id);
+  const commissionUsers = reps.filter((r) => r.active && r.commissionEligible !== false);
   const cols = 'minmax(180px,1.2fr) minmax(180px,1fr) 100px 90px 170px';
   return (
     <>
@@ -285,7 +286,7 @@ function TeamsTab({ teams, reps, usage, run }: { teams: Team[]; reps: RosterRep[
               <input value={v.name} onChange={(e) => setDrafts({ ...drafts, [t.id]: { ...v, name: e.target.value } })} />
               <select value={v.leaderRepId} onChange={(e) => setDrafts({ ...drafts, [t.id]: { ...v, leaderRepId: e.target.value } })}>
                 <option value="">— none —</option>
-                {reps.filter((r) => r.active).map((r) => <option key={r.id} value={r.id}>{r.name}{r.teamId && r.teamId !== t.id ? ` (${teams.find((x) => x.id === r.teamId)?.name ?? 'other team'})` : ''}</option>)}
+                {commissionUsers.map((r) => <option key={r.id} value={r.id}>{r.name}{r.teamId && r.teamId !== t.id ? ` (${teams.find((x) => x.id === r.teamId)?.name ?? 'other team'})` : ''}</option>)}
               </select>
               <input inputMode="decimal" value={v.overrideRate} onChange={(e) => setDrafts({ ...drafts, [t.id]: { ...v, overrideRate: e.target.value } })} />
               <span className="num subtle">{usage[t.id] ?? 0}</span>
@@ -298,7 +299,7 @@ function TeamsTab({ teams, reps, usage, run }: { teams: Team[]; reps: RosterRep[
         })}
         <div className="toolbar" style={{ marginTop: 12 }}>
           <input className="search" placeholder="New team name" value={newTeam.name} onChange={(e) => setNewTeam({ ...newTeam, name: e.target.value })} />
-          <select className="filter" value={newTeam.leaderRepId} onChange={(e) => setNewTeam({ ...newTeam, leaderRepId: e.target.value })}><option value="">Leader — none yet</option>{reps.filter((r) => r.active).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
+          <select className="filter" value={newTeam.leaderRepId} onChange={(e) => setNewTeam({ ...newTeam, leaderRepId: e.target.value })}><option value="">Leader — none yet</option>{commissionUsers.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
           <input className="search" style={{ minWidth: 110 }} inputMode="decimal" placeholder="Override %" value={newTeam.overrideRate} onChange={(e) => setNewTeam({ ...newTeam, overrideRate: e.target.value })} />
           <button className="btn primary" disabled={!newTeam.name.trim()} onClick={() => run(`${newTeam.name} created`, async () => { await post('/api/admin/teams', { name: newTeam.name, leaderRepId: newTeam.leaderRepId || null, overrideRate: Number(newTeam.overrideRate) }); setNewTeam({ name: '', leaderRepId: '', overrideRate: '5' }); })}>+ Add team</button>
         </div>
@@ -308,7 +309,7 @@ function TeamsTab({ teams, reps, usage, run }: { teams: Team[]; reps: RosterRep[
 }
 
 /* ---------- Reps ---------- */
-type RepDraft = { name: string; email: string; teamId: string; openerRate: string; closerRate: string; overrideRate: string; role: string };
+type RepDraft = { name: string; email: string; teamId: string; openerRate: string; closerRate: string; overrideRate: string; role: string; commissionEligible: boolean };
 
 function RepEditor({ v, teams, onChange }: { v: RepDraft; teams: Team[]; onChange: (v: RepDraft) => void }) {
   return (
@@ -324,19 +325,19 @@ function RepEditor({ v, teams, onChange }: { v: RepDraft; teams: Team[]; onChang
 }
 
 function RepsTab({ reps, teams, run, onViewAs, isSuper, permissions }: { reps: RosterRep[]; teams: Team[]; run: Run; onViewAs: (id: string) => void; isSuper: boolean; permissions: SettingsData['permissions'] }) {
-  const toDraft = (r: RosterRep): RepDraft => ({ name: r.name, email: r.email, teamId: r.teamId ?? '', openerRate: pctIn(r.openerRate), closerRate: pctIn(r.closerRate), overrideRate: pctIn(r.overrideRate), role: r.role });
+  const toDraft = (r: RosterRep): RepDraft => ({ name: r.name, email: r.email, teamId: r.teamId ?? '', openerRate: pctIn(r.openerRate), closerRate: pctIn(r.closerRate), overrideRate: pctIn(r.overrideRate), role: r.role, commissionEligible: r.commissionEligible !== false });
   const [drafts, setDrafts] = useState<Record<string, RepDraft>>({});
   const [adding, setAdding] = useState<RepDraft | null>(null);
-  const cols = 'minmax(150px,1.1fr) minmax(190px,1.2fr) 150px 70px 70px 70px 100px 100px 130px 90px 110px 100px 380px 230px';
+  const cols = 'minmax(150px,1.1fr) minmax(190px,1.2fr) 150px 70px 70px 70px 100px 100px 130px 115px 90px 110px 100px 380px 230px';
   const [pw, setPw] = useState<{ id: string; value: string } | null>(null);
   const [filesFor, setFilesFor] = useState<RosterRep | null>(null);
   const label = (role: string) => (role === 'admin' ? 'Master' : role === 'manager' ? 'Team lead' : 'Rep');
-  const body = (v: RepDraft) => ({ name: v.name, email: v.email, teamId: v.teamId || null, openerRate: Number(v.openerRate), closerRate: Number(v.closerRate), overrideRate: v.overrideRate.trim() === '' ? null : Number(v.overrideRate), role: v.role });
+  const body = (v: RepDraft) => ({ name: v.name, email: v.email, teamId: v.teamId || null, openerRate: Number(v.openerRate), closerRate: Number(v.closerRate), overrideRate: v.overrideRate.trim() === '' ? null : Number(v.overrideRate), role: v.role, commissionEligible: v.commissionEligible });
   return (
-    <Card title="Reps" extra={`${reps.length} · ${reps.filter((r) => r.active).length} active`}>
+    <Card title="Users" extra={`${reps.length} · ${reps.filter((r) => r.active).length} active · ${reps.filter((r) => r.commissionEligible !== false).length} commission participants`}>
       <div className="scroller">
         <div style={{ minWidth: 2050 }}>
-          <Head cols={cols}><span>Name</span><span>Email</span><span>Team</span><span>Opener %</span><span>Closer %</span><span>Override %</span><span>Earned</span><span>Owed</span><span>Access</span><span>Active</span><span title="Owner tier: creates and changes admins, changes security. Only a super admin can grant it.">Super admin</span><span title="May this rep email merchants from a deal? The portal-wide switch is under Portal › Permissions.">Merchant email</span><span>Sign-in</span><span /></Head>
+          <Head cols={cols}><span>Name</span><span>Email</span><span>Team</span><span>Opener %</span><span>Closer %</span><span>Override %</span><span>Earned</span><span>Owed</span><span>Access</span><span>Commission</span><span>Active</span><span title="Owner tier: creates and changes admins, changes security. Only a super admin can grant it.">Super admin</span><span title="May this rep email merchants from a deal? The portal-wide switch is under Portal › Permissions.">Merchant email</span><span>Sign-in</span><span /></Head>
           {reps.map((r) => {
             const v = drafts[r.id] ?? toDraft(r);
             const dirty = !!drafts[r.id];
@@ -346,6 +347,7 @@ function RepsTab({ reps, teams, run, onViewAs, isSuper, permissions }: { reps: R
                 <span className="num">{compact(r.earned)}</span>
                 <span className={`num ${r.owed ? 'warn' : ''}`}>{compact(r.owed)}</span>
                 <select value={v.role} disabled={!isSuper && (r.role === 'admin' || !!r.superAdmin)} title={!isSuper && (r.role === 'admin' || r.superAdmin) ? 'Only a super admin can change an admin' : ''} onChange={(e) => setDrafts({ ...drafts, [r.id]: { ...v, role: e.target.value } })}><option value="rep">Rep</option><option value="manager">Team lead</option><option value="admin" disabled={!isSuper}>Master</option></select>
+                <button type="button" className={`tog ${v.commissionEligible ? 'on' : ''}`} aria-pressed={v.commissionEligible} aria-label={`${r.name} commission participation: ${v.commissionEligible ? 'on' : 'off'}`} title={v.commissionEligible ? 'ON — can be assigned to new deal commission roles' : 'OFF — portal access only; kept on historical deals'} onClick={() => setDrafts({ ...drafts, [r.id]: { ...v, commissionEligible: !v.commissionEligible } })}><i /></button>
                 <button type="button" className={`tog ${r.active ? 'on' : ''}`} aria-pressed={r.active} disabled={!isSuper && (r.role === 'admin' || !!r.superAdmin)} title={!isSuper && (r.role === 'admin' || r.superAdmin) ? 'Only a super admin can change an admin' : r.active ? 'Deactivate — history stays' : 'Reactivate'} onClick={() => run(`${r.name} ${r.active ? 'deactivated' : 'reactivated'}`, () => post(`/api/admin/reps/${r.id}`, { active: !r.active }, 'PATCH'))}><i /></button>
                 <span>{isSuper ? <button type="button" className={`tog ${r.superAdmin ? 'on' : ''}`} aria-pressed={!!r.superAdmin} disabled={r.role !== 'admin'} title={r.role !== 'admin' ? 'Give Master access first' : r.superAdmin ? 'Remove super admin' : 'Make super admin'} onClick={() => run(`${r.name} — super admin ${r.superAdmin ? 'removed' : 'granted'}`, () => post(`/api/admin/reps/${r.id}`, { superAdmin: !r.superAdmin }, 'PATCH'))}><i /></button> : r.superAdmin ? <Pill tone="teal">yes</Pill> : <span className="subtle">—</span>}</span>
                 <span>{r.role === 'rep' || r.role === 'manager' ? <button type="button" className={`tog ${permissions.merchantEmail && r.perms?.merchantEmail !== false ? 'on' : ''}`} aria-pressed={permissions.merchantEmail && r.perms?.merchantEmail !== false} disabled={!permissions.merchantEmail} title={!permissions.merchantEmail ? 'Turned off for everyone under Portal › Permissions' : r.perms?.merchantEmail === false ? 'Allow this rep to email merchants' : 'Stop this rep emailing merchants'} onClick={() => run(`${r.name} — merchant email ${r.perms?.merchantEmail === false ? 'allowed' : 'blocked'}`, () => post(`/api/admin/reps/${r.id}`, { perms: { merchantEmail: r.perms?.merchantEmail === false ? true : false } }, 'PATCH'))}><i /></button> : <span className="subtle">—</span>}</span>
@@ -378,7 +380,8 @@ function RepsTab({ reps, teams, run, onViewAs, isSuper, permissions }: { reps: R
             <Row cols={cols}>
               <RepEditor v={adding} teams={teams} onChange={setAdding} />
               <span /><span />
-              <select value={adding.role} onChange={(e) => setAdding({ ...adding, role: e.target.value })}><option value="rep">Rep</option><option value="manager">Team lead</option><option value="admin" disabled={!isSuper}>Master{isSuper ? '' : ' (super admin only)'}</option></select>
+              <select value={adding.role} onChange={(e) => setAdding({ ...adding, role: e.target.value, commissionEligible: e.target.value === 'admin' ? false : adding.commissionEligible })}><option value="rep">Rep</option><option value="manager">Team lead</option><option value="admin" disabled={!isSuper}>Master{isSuper ? '' : ' (super admin only)'}</option></select>
+              <button type="button" className={`tog ${adding.commissionEligible ? 'on' : ''}`} aria-pressed={adding.commissionEligible} aria-label={`New user commission participation: ${adding.commissionEligible ? 'on' : 'off'}`} title={adding.commissionEligible ? 'ON — can be assigned to new deal commission roles' : 'OFF — portal access only'} onClick={() => setAdding({ ...adding, commissionEligible: !adding.commissionEligible })}><i /></button>
               <Pill tone="teal">new</Pill><span /><span />
               <span className="subtle" style={{ fontSize: 13 }}>set a password after adding</span>
               <span style={{ display: 'flex', gap: 6 }}>
@@ -390,8 +393,8 @@ function RepsTab({ reps, teams, run, onViewAs, isSuper, permissions }: { reps: R
         </div>
       </div>
       <div className="toolbar" style={{ marginTop: 12 }}>
-        <button className="btn" disabled={!!adding} onClick={() => setAdding({ name: '', email: '', teamId: '', openerRate: '20', closerRate: '20', overrideRate: '', role: 'rep' })}>+ Add rep</button>
-        <span className="count">Access: Rep sees their own portal · Team lead can View as their team · Master runs everything · Super admin alone creates or changes admins and security. Sign-in: SSO when configured, or the email + password you set here (reps can change theirs from the sidebar).</span>
+        <button className="btn" disabled={!!adding} onClick={() => setAdding({ name: '', email: '', teamId: '', openerRate: '20', closerRate: '20', overrideRate: '', role: 'rep', commissionEligible: true })}>+ Add user</button>
+        <span className="count">Access: Rep sees their own portal · Team lead can View as their team · Master runs everything · Super admin alone creates or changes admins and security. Commission OFF means portal-only: never selectable on a new deal, while historical commission remains intact. Sign-in: SSO when configured, or the email + password you set here.</span>
       </div>
       {filesFor && (
         <Drawer title={`${filesFor.name} · files`} sub="W-9, agreements. Reps can add their own from Pay history; only you can remove one." onClose={() => setFilesFor(null)}>
@@ -446,7 +449,7 @@ function tempPassword(): string {
 /* ---------- Import from sheet ---------- */
 interface ImportRow { line: number; id: string; action: 'deal' | 'draw' | 'skip' | 'update'; changes?: string[]; parentId: string | null; business: string; lender: string; product: string; amount: number; date: string; opener: string | null; closer: string | null; override: string | null; commissionStatus: string; repPaid: string | null; clawback: number | null; problems: string[]; warnings: string[] }
 interface MissingRefs { lenders: string[]; products: string[]; partners: string[]; reps: string[] }
-interface ImportPreview { rows: ImportRow[]; skipped: number; skippedExisting: number; updated: number; problems: string[]; missing: MissingRefs; summary: { deals: number; draws: number; funded: number; withPayouts: number; warnings: number; clawbacks: number; problems: number } }
+interface ImportPreview { rows: ImportRow[]; skipped: number; skippedExisting: number; updated: number; problems: string[]; missingRequired: string[]; sheetName?: string; matchingSheets?: string[]; missing: MissingRefs; summary: { deals: number; draws: number; funded: number; withPayouts: number; warnings: number; clawbacks: number; problems: number } }
 function ImportTab() {
   const { notify } = useSession();
   const qc = useQueryClient();
@@ -463,11 +466,12 @@ function ImportTab() {
   async function file(f: File | undefined) {
     if (!f) return;
     setPreview(null); setDone(null); setImportError('');
-    if (/\.xlsx?$/i.test(f.name)) {
-      // The workbook itself (Google Sheets → File → Download → Microsoft Excel). The server picks the FUNDED DEALS tab.
+    if (/\.xlsx$/i.test(f.name)) {
+      // The workbook itself (Google Sheets → File → Download → Microsoft Excel).
       const data = await new Promise<string>((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(String(r.result)); r.onerror = () => reject(new Error('Could not read the file')); r.readAsDataURL(f); });
       setXlsx({ name: f.name, data }); setCsv('');
-    } else { setXlsx(null); setCsv(await f.text()); }
+    } else if (/\.csv$/i.test(f.name) || f.type === 'text/csv') { setXlsx(null); setCsv(await f.text()); }
+    else setImportError('Use a CSV export or an .xlsx workbook. Legacy .xls files are not supported.');
   }
   async function run() {
     setBusy(true); setImportError('');
@@ -495,8 +499,9 @@ function ImportTab() {
   return (
     <Card title="Import the FUNDED DEALS tab" extra="upload the Google Sheet itself (File → Download → Microsoft Excel) or a CSV of the FUNDED DEALS tab · anything the sheet mentions that Settings does not know is listed for you to add">
       <div style={{ display: 'grid', gap: 10 }}>
+        <div className="note" style={{ background: 'var(--amber-light)', borderColor: 'var(--amber-light-3)', color: 'var(--amber-deep)' }}><b>Required columns:</b> Business Name, Lender, Product, Funded or Draw Amount, and Date. Every deal row must have all five fields; month banners and totals are skipped. Use CSV or <b>.xlsx</b> (not legacy .xls).</div>
         <div className="toolbar">
-          <input type="file" accept=".xlsx,.xls,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(e) => void file(e.target.files?.[0])} />
+          <input type="file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(e) => void file(e.target.files?.[0])} />
           <span className="count">{xlsx ? `${xlsx.name} loaded` : csv ? `${csv.length.toLocaleString()} characters loaded` : 'or paste the CSV below'}</span>
           <label className="subtle" style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }} title="Re-exporting the whole sheet? Deals and draws the portal already holds are left alone; only new rows come in."><input type="checkbox" className="big" checked={skipExisting} onChange={(e) => { setSkipExisting(e.target.checked); if (!e.target.checked) setUpdateExisting(false); setPreview(null); setImportError(''); }} /> skip rows already in the portal</label>
           {skipExisting && <label className="subtle" style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }} title="For rows already in the portal: take the sheet's Deal Status (Refinanced, Default, Slow Pay, Paid In Full) and Lender Paid Date. Money and the ledger are never touched."><input type="checkbox" className="big" checked={updateExisting} onChange={(e) => { setUpdateExisting(e.target.checked); setPreview(null); }} /> refresh status &amp; lender-paid on existing rows</label>}
@@ -515,6 +520,8 @@ function ImportTab() {
             </div>
             {preview.summary.problems > 0 && <div className="note" role="alert" style={{ background: 'var(--amber-light)', borderColor: 'var(--amber-light-3)', color: 'var(--amber-deep)' }}><b>Preview completed, but nothing has been imported yet.</b> Resolve the {preview.summary.problems} problem{preview.summary.problems === 1 ? '' : 's'} listed below, then preview again. Existing deals are skipped automatically.</div>}
             {!preview.summary.problems && preview.summary.deals + preview.summary.draws === 0 && <div className="note">Preview completed. Every row is already in the portal, so there is nothing new to import.</div>}
+            {preview.sheetName && <div className="note"><b>Workbook sheet used: {preview.sheetName}.</b>{(preview.matchingSheets?.length ?? 0) > 1 ? ` Other matching sheets: ${preview.matchingSheets!.filter((name) => name !== preview.sheetName).join(', ')}.` : ''}</div>}
+            {preview.missingRequired.length > 0 && <div className="note" role="alert" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}><b>Add these required column{preview.missingRequired.length === 1 ? '' : 's'} to the header row:</b> {preview.missingRequired.join(', ')}. Then export and preview again.</div>}
             {preview.problems.map((p, i) => <div key={i} className="note" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>{p}</div>)}
             <MissingRefsNotice missing={preview.missing} onAdded={() => void run()} />
             <div className="toolbar">

@@ -171,8 +171,8 @@ export function Payroll() {
   return (
     <Shell eyebrow="Admin" title="Run payroll">
       {!overview.data ? <Loading error={overview.error} /> : (
-        <div className="payroll">
-          <div className="pay-left">
+        <div className="cols">
+          <div className="rail">
             <Card title="Runs" extra={settings.data?.payroll.cycle}>
               <div className="runs">
                 {runs.map((r) => (
@@ -202,22 +202,22 @@ export function Payroll() {
                   <button key={r.id} className={`run ${payRepId === r.id ? 'on' : ''}`} onClick={() => { setRepId(r.id); setSelected({}); }}>
                     <span className="avatar sm">{initials(r.name)}</span>
                     <span className="ellipsis"><b>{r.name}{!r.active && <span className="subtle"> (inactive)</span>}</b><span className="subtle">{r.lineCount ? `${r.lineCount} deal line${r.lineCount === 1 ? '' : 's'}` : 'nothing owed'}</span></span>
-                    <span className="num" style={{ color: r.owed ? 'var(--amber)' : 'var(--ink-subtle)' }}>{r.owed ? money(r.owed) : '—'}</span>
+                    <span className="num" style={{ color: r.owed ? 'var(--amber-deep)' : 'var(--ink-subtle)', fontWeight: 700 }}>{r.owed ? money(r.owed) : '—'}</span>
                   </button>
                 ))}
               </div>
             </Card>
           </div>
 
-          <div className="pay-right">
+          <div className="content">
             {!activeRun ? <Card><div className="empty">No payroll runs yet — open the next run to start.</div></Card> : (
               <>
                 <Card>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                     <div>
-                      <div className="label">{activeRun.label}</div>
-                      <h2 style={{ margin: '4px 0 0', fontSize: 23, letterSpacing: '-.035em' }}>{d?.rep.name ?? '—'}</h2>
-                      <div className="muted">pays {fullDay(activeRun.end)} · {activeRun.status}</div>
+                      <div className="label">{activeRun.label} · {activeRun.status}</div>
+                      <h2 style={{ margin: '5px 0 0', fontSize: 20, letterSpacing: '-.03em' }}>{d?.rep.name ?? '—'}</h2>
+                      <div className="muted" style={{ fontSize: 12, marginTop: 3 }}>pays {fullDay(activeRun.end)}</div>
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button className="btn" onClick={() => void exportCsv()}>Export CSV</button>
@@ -226,7 +226,7 @@ export function Payroll() {
                       {activeRun.status === 'draft' && activeRun.lineCount === 0 && <button className="btn" style={{ color: 'var(--red)' }} onClick={() => void removeRun(activeRun)} title="Nothing paid in this run — remove it">Close out</button>}
                     </div>
                   </div>
-                  <div className="grid-auto" style={{ marginTop: 16 }}>
+                  <div className="strip sunk">
                     <div><div className="label">Paid in this run</div><div className="metric">{money(activeRun.paidGross)}</div><div className="sub">{activeRun.lineCount} line{activeRun.lineCount === 1 ? '' : 's'} · {activeRun.repCount} rep{activeRun.repCount === 1 ? '' : 's'}</div></div>
                     <div><div className="label">Clawback recovered</div><div className={`metric ${activeRun.recovered ? 'neg' : ''}`}>{money(activeRun.recovered)}</div><div className="sub">netted from payouts</div></div>
                     <div><div className="label">Cash paid</div><div className="metric pos">{money(activeRun.cash)}</div><div className="sub">gross − recovered</div></div>
@@ -277,15 +277,15 @@ export function Payroll() {
                       </div>
                     </div>
                   )}
-                  <div className="payfoot">
+                  <div className="payfoot"><div className="figs">
                     <div><span className="label">Selected</span><b>{selLines.length} of {d?.lines.length ?? 0}</b></div>
                     <div><span className="label">Gross</span><b>{money(selGross)}</b></div>
                     <div><span className="label">Clawbacks netted</span><b style={{ color: withheld ? 'var(--red-bright)' : undefined }}>{withheld ? money(-withheld) : '$0'}</b></div>
                     <div><span className="label">Net to pay</span><b style={{ color: 'var(--teal-bright)' }}>{money(selGross - withheld)}</b></div>
-                    <button className="btn primary big" disabled={busy || !selLines.length || activeRun.status === 'paid'} onClick={() => void pay()}>{busy ? 'Recording…' : 'Pay selected & record'}</button>
+                    </div><button className="btn primary big" disabled={busy || !selLines.length || activeRun.status === 'paid'} onClick={() => void pay()}>{busy ? 'Recording…' : 'Pay selected & record'}</button>
                   </div>
-                  {uncollected.length > 0 && <div className="note" style={{ marginTop: 10, background: 'var(--amber-light)', borderColor: 'var(--amber-light-3)', color: 'var(--amber-deep)' }}>{uncollected.length} selected deal line(s) sit on commission the lender has not paid yet ({uncollected.slice(0, 4).join(', ')}{uncollected.length > 4 ? '…' : ''}). Paying now advances the rep against uncollected commission.</div>}
-                  {d && d.outstandingClawback > 0 && <div className="note" style={{ marginTop: 10, background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>Outstanding clawback balance for {d.rep.name}: <b>{money(d.outstandingClawback)}</b> across {d.clawbacks.length} deal(s){withheld ? <> — <b>{money(withheld)}</b> recovers on this payout, leaving {money(d.outstandingClawback - withheld)}.</> : '. It nets against the next payout that has gross to withhold from.'}</div>}
+                  {uncollected.length > 0 && <div className="band amber">{uncollected.length} selected deal line(s) sit on commission the lender has not paid yet ({uncollected.slice(0, 4).join(', ')}{uncollected.length > 4 ? '…' : ''}). Paying now advances the rep against uncollected commission.</div>}
+                  {d && d.outstandingClawback > 0 && <div className="band red">Outstanding clawback balance for {d.rep.name}: <b>{money(d.outstandingClawback)}</b> across {d.clawbacks.length} deal(s){withheld ? <> — <b>{money(withheld)}</b> recovers on this payout, leaving {money(d.outstandingClawback - withheld)}.</> : '. It nets against the next payout that has gross to withhold from.'}</div>}
                 </Card>
 
                 <Card title="Paid in this run" extra={d && d.paidInRun.length ? <>{d.paidSummary.lineCount} deal line(s) · cash {money(d.paidSummary.cash)}{d.paidSummary.voided ? ` · ${money(d.paidSummary.voided)} voided` : ''} {d.paidInRun.some((p) => !p.voided && p.role !== 'Void') && <button className="btn" style={{ marginLeft: 10, height: 28, padding: '0 10px', color: 'var(--red)' }} onClick={() => void voidRows()}>Void everything in this run for {d.rep.name}</button>}</> : ''}>

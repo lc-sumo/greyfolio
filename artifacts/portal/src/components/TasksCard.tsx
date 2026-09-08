@@ -34,9 +34,9 @@ export function TasksCard({ onOpenDeal }: { onOpenDeal: (dealId: string) => void
   return (
     <Card title="My calls" extra={<span style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>{t.tasks.length ? `${t.tasks.length} open${overdue ? ` · ${overdue} overdue` : ''} · log what happened and the reminder stops` : 'nothing waiting on you'}{!viewAs && <CalendarFeed />}</span>}>
       {t.tasks.length === 0 ? <div className="muted">Renewal and draw reminders land here as soon as a deal qualifies. Add your own from any deal.</div> : (
-        <div className="pl">
+        <div className="pl bleed">
           {t.tasks.map((x) => (
-            <div className="row" key={x.id} style={{ gridTemplateColumns: 'minmax(0,1fr) auto', alignItems: 'start' }}>
+            <div className={`row sev-${x.overdue ? 'red' : 'amber'}`} key={x.id} style={{ gridTemplateColumns: 'minmax(0,1fr) auto', alignItems: 'start' }}>
               <span>
                 <b className="click" style={{ cursor: 'pointer' }} onClick={() => onOpenDeal(x.dealId)}>{x.title}</b>
                 <div className="subtle" style={{ fontSize: 13 }}>{x.business} · {x.lender}{x.merchantContact ? ` · ${x.merchantContact}` : ''}{x.merchantPhone ? ` · ${x.merchantPhone}` : ''}{x.playbookName ? ` · ${x.playbookName}` : ''}</div>
@@ -52,7 +52,7 @@ export function TasksCard({ onOpenDeal }: { onOpenDeal: (dealId: string) => void
               </span>
               <span style={{ display: 'grid', gap: 6, justifyItems: 'end' }}>
                 <Pill tone={x.overdue ? 'red' : 'grey'}>{x.overdue ? `due ${day(x.dueDate)}` : `by ${day(x.dueDate)}`}</Pill>
-                <select value="" style={{ height: 30 }} onChange={(e) => { if (e.target.value) { setNoteFor({ task: x, outcome: e.target.value }); setNote(''); } }}>
+                <select value="" className="mini" onChange={(e) => { if (e.target.value) { setNoteFor({ task: x, outcome: e.target.value }); setNote(''); } }}>
                   <option value="">Log outcome…</option>
                   {t.outcomes.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>

@@ -93,7 +93,8 @@ describe('running playbooks', () => {
     await admin.patch(`/api/admin/tasks/${t.id}`).send({ outcome: 'no_answer', note: 'left voicemail' });
     const after = (await repo.listTasks()).find((x) => x.id === t.id)!;
     expect(after.status).toBe('open');
-    expect(after.dueDate).toBe('2026-09-08');
+    // logOutcome pushes the due date two days out from the server's real today, not the run's evaluation day.
+    expect(after.dueDate).toBe(new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10));
     expect((await repo.listNotes(t.dealId))[0]!.body).toMatch(/^\[No answer, try again\] left voicemail/);
     await admin.patch(`/api/admin/tasks/${t.id}`).send({ outcome: 'funded', note: 'renewed at 60k' });
     expect((await repo.listTasks()).find((x) => x.id === t.id)!.status).toBe('done');

@@ -24,23 +24,40 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
 
   return (
     <div className="shell">
-      <header className="topbar">
+      <aside className="sidebar">
         <div className="brand">
-          <img src="/greystone-wordmark.png" alt={auth?.branding?.company ?? 'Greystone Merchant Partners'} />
+          <img src="/greystone-icon-white.png" alt="" />
+          <div>
+            <b>{auth?.branding?.company?.split(' ')[0] ?? 'Greystone'}</b>
+            <span>{auth?.branding?.portal ?? 'Commission portal'}</span>
+          </div>
         </div>
-        <nav className="nav" aria-label="Primary navigation">
+        <nav className="nav">
           {repMode ? (
             <>
-              <NavLink to="/">My dashboard</NavLink><NavLink to="/deals">My deals</NavLink><NavLink to="/renewals">Renewals</NavLink><NavLink to="/clawbacks">Clawbacks</NavLink><NavLink to="/payments">Pay history</NavLink>
+              <div className="nav-group label" style={{ color: 'var(--navy-text-3)' }}>{viewAs && viewAs !== user.repId ? 'Rep portal (view as)' : 'My portal'}</div>
+              <NavLink to="/">My dashboard</NavLink>
+              <NavLink to="/deals">My deals</NavLink>
+              <NavLink to="/renewals">Renewals</NavLink>
+              <NavLink to="/clawbacks">Clawbacks</NavLink>
+              <NavLink to="/payments">Pay history</NavLink>
             </>
           ) : (
             <>
+              <div className="nav-group label" style={{ color: 'var(--navy-text-3)' }}>Admin</div>
               {user.role === 'admin' ? <NavLink to="/">Funding overview</NavLink> : <NavLink to="/">Rep roster</NavLink>}
-              {user.role === 'admin' && <><NavLink to="/deals">Master deals</NavLink><NavLink to="/merchants">Merchants</NavLink><NavLink to="/payroll">Run payroll</NavLink><NavLink to="/renewals">Renewals</NavLink><NavLink to="/books">Books</NavLink><NavLink to="/roster">Rep roster</NavLink><NavLink to="/settings">Settings</NavLink><NavLink to="/audit">Audit log</NavLink></>}
+              {user.role === 'admin' && <NavLink to="/deals">Master deals</NavLink>}
+              {user.role === 'admin' && <NavLink to="/merchants">Merchants</NavLink>}
+              {user.role === 'admin' && <NavLink to="/payroll">Run payroll</NavLink>}
+              {user.role === 'admin' && <NavLink to="/renewals">Renewals</NavLink>}
+              {user.role === 'admin' && <NavLink to="/books">Books</NavLink>}
+              {user.role === 'admin' && <NavLink to="/roster">Rep roster</NavLink>}
+              {user.role === 'admin' && <NavLink to="/settings">Settings</NavLink>}
+              {user.role === 'admin' && <NavLink to="/audit">Audit log</NavLink>}
             </>
           )}
         </nav>
-        <div className="topright">
+        <div className="sidebar-foot">
           {canViewAs && (
             <label className="viewas">
               <span className="label">View as</span>
@@ -52,24 +69,18 @@ export function Shell({ eyebrow, title, showPeriod, children }: { eyebrow: strin
               </select>
             </label>
           )}
-          <details className="account-menu">
-            <summary>
-              <div className="avatar">{initials(user.name)}</div>
-              <div className="who">
-                <div className="ellipsis">
-                  <b className="ellipsis">{user.name}</b>
-                  <span>{auth?.superAdmin ? 'Super admin' : user.role === 'admin' ? 'Master' : user.role === 'manager' ? 'Team lead' : 'Rep'}</span>
-                </div>
-              </div>
-            </summary>
-            <div className="account-popover">
-              {(!viewAs || viewAs === user.repId) && <ChangePassword />}
-              {(!viewAs || viewAs === user.repId) && <TwoFactor />}
-              <button className="linkish" onClick={() => void logout()}>Sign out</button>
+          <div className="who">
+            <div className="avatar">{initials(user.name)}</div>
+            <div className="ellipsis">
+              <b className="ellipsis">{user.name}</b>
+              <span>{auth?.superAdmin ? 'Super admin' : user.role === 'admin' ? 'Master' : user.role === 'manager' ? 'Team lead' : 'Rep'}</span>
             </div>
-          </details>
+          </div>
+          {(!viewAs || viewAs === user.repId) && <ChangePassword />}
+          {(!viewAs || viewAs === user.repId) && <TwoFactor />}
+          <button className="linkish" onClick={() => void logout()}>Sign out</button>
         </div>
-      </header>
+      </aside>
       <div className="main">
         <header className="header">
           <div>
@@ -120,7 +131,7 @@ export function TwoFactor({ forced = false }: { forced?: boolean } = {}) {
     <div className="pwform">
       {enabled ? (
         <>
-          <div style={{ fontSize: 13, color: 'var(--ink-muted)' }}>Two-factor is <b style={{ color: 'var(--ink)' }}>on</b>. Enter a current code to turn it off.</div>
+          <div style={{ fontSize: 13, color: 'var(--navy-text-3)' }}>Two-factor is <b style={{ color: '#fff' }}>on</b>. Enter a current code to turn it off.</div>
           <Devices />
           <input inputMode="numeric" placeholder="Code from your app" value={code} onChange={(e) => setCode(e.target.value)} />
           <div style={{ display: 'flex', gap: 6 }}>
@@ -130,9 +141,9 @@ export function TwoFactor({ forced = false }: { forced?: boolean } = {}) {
         </>
       ) : setup ? (
         <>
-          <div style={{ fontSize: 13, color: 'var(--ink-muted)' }}>In Google Authenticator, 1Password or Authy, add an account with this key, then enter the code it shows.</div>
-          <a href={setup.otpauth} style={{ color: 'var(--link)', fontSize: 13, fontWeight: 600 }}>Open in authenticator app ↗</a>
-          <code style={{ fontSize: 12.5, wordBreak: 'break-all', color: 'var(--ink)', background: 'var(--sunken)', padding: '6px 8px', borderRadius: 2, userSelect: 'all' }}>{setup.secret.replace(/(.{4})/g, '$1 ').trim()}</code>
+          <div style={{ fontSize: 13, color: 'var(--navy-text-3)' }}>In Google Authenticator, 1Password or Authy, add an account with this key, then enter the code it shows.</div>
+          <a href={setup.otpauth} style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>Open in authenticator app ↗</a>
+          <code style={{ fontSize: 12.5, wordBreak: 'break-all', color: '#fff', background: 'var(--navy-raised)', padding: '6px 8px', borderRadius: 6, userSelect: 'all' }}>{setup.secret.replace(/(.{4})/g, '$1 ').trim()}</code>
           <input inputMode="numeric" placeholder="6-digit code" value={code} onChange={(e) => setCode(e.target.value)} autoFocus />
           <div style={{ display: 'flex', gap: 6 }}>
             <button className="btn primary" style={{ height: 30, padding: '0 10px' }} disabled={busy || code.replace(/\s/g, '').length !== 6} onClick={() => go(() => post('/api/me/totp/enable', { code }).then(() => { setSetup(null); }), 'Two-factor is on — you will be asked for a code at sign-in')}>Verify & turn on</button>
@@ -141,7 +152,7 @@ export function TwoFactor({ forced = false }: { forced?: boolean } = {}) {
         </>
       ) : (
         <>
-          <div style={{ fontSize: 13, color: 'var(--ink-muted)' }}>Add a second step at sign-in: a code from an authenticator app on your phone.</div>
+          <div style={{ fontSize: 13, color: 'var(--navy-text-3)' }}>Add a second step at sign-in: a code from an authenticator app on your phone.</div>
           <div style={{ display: 'flex', gap: 6 }}>
             <button className="btn primary" style={{ height: 30, padding: '0 10px' }} disabled={busy} onClick={async () => { setBusy(true); try { setSetup(await post('/api/me/totp/setup', {})); } catch (x) { notify(x instanceof Error ? x.message : 'Could not start'); } finally { setBusy(false); } }}>Set up</button>
             <button type="button" className="btn" style={{ height: 30, padding: '0 10px' }} onClick={() => setOpen(false)}>Close</button>
@@ -163,11 +174,11 @@ function Devices() {
     try { await post(id ? `/api/me/devices/${id}` : '/api/me/devices', {}, 'DELETE'); await qc.invalidateQueries({ queryKey: ['me-devices'] }); notify(id ? 'Device forgotten — it will ask for a code next time' : 'Every device forgotten'); } catch (e) { notify(e instanceof Error ? e.message : 'Could not forget'); }
   };
   return (
-    <div style={{ fontSize: 12.5, color: 'var(--ink-muted)', display: 'grid', gap: 4, margin: '4px 0 6px' }}>
+    <div style={{ fontSize: 12.5, color: 'var(--navy-text-3)', display: 'grid', gap: 4, margin: '4px 0 6px' }}>
       <div style={{ color: 'var(--navy-text-2)', fontWeight: 600 }}>Remembered devices{list.length ? ` · ${list.length}` : ''}</div>
       {list.length === 0 ? <div>None — every sign-in asks for a code.</div> : list.map((d) => (
         <div key={d.id} style={{ display: 'flex', gap: 6, alignItems: 'baseline', justifyContent: 'space-between' }}>
-          <span><b style={{ color: 'var(--ink)', fontWeight: 600 }}>{d.label}</b>{d.current ? ' (this one)' : ''}<div>{d.location ?? d.ip ?? '—'} · used {ago(d.lastUsedAt)} · until {new Date(d.expiresAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div></span>
+          <span><b style={{ color: '#fff', fontWeight: 600 }}>{d.label}</b>{d.current ? ' (this one)' : ''}<div>{d.location ?? d.ip ?? '—'} · used {ago(d.lastUsedAt)} · until {new Date(d.expiresAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div></span>
           <button type="button" className="linkish" style={{ padding: 0 }} onClick={() => void forget(d.id)}>forget</button>
         </div>
       ))}
@@ -206,8 +217,8 @@ export function EnrollGate() {
         <div className="steps"><div><b>Two-factor</b><span>This portal requires an authenticator app for admin accounts. Set yours up to continue.</span></div></div>
       </div>
       <div className="right">
-        <form onSubmit={(e) => e.preventDefault()} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 3, padding: 20, boxShadow: '4px 4px 0 var(--sunken-2)' }}>
-          <h2 style={{ color: 'var(--ink)' }}>Set up two-factor sign-in</h2>
+        <form onSubmit={(e) => e.preventDefault()} style={{ background: 'var(--navy)', borderRadius: 12, padding: 20 }}>
+          <h2 style={{ color: '#fff' }}>Set up two-factor sign-in</h2>
           <TwoFactor forced />
           <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
             <button type="button" className="btn primary" onClick={() => void refresh()}>I have turned it on</button>

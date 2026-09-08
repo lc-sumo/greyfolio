@@ -52,9 +52,9 @@ export function Settings() {
       <div className="settings-deck">
         <aside className="settings-index">
           <div>
-            <div className="settings-kicker">Settings / modules</div>
-            <h2>Control deck</h2>
-            <p>Configure the operating surfaces that keep commissions moving.</p>
+            <div className="settings-kicker">Admin</div>
+            <h2>Settings</h2>
+            <p>Lenders, partners, products, teams, reps, playbooks and the portal itself.</p>
           </div>
           <nav aria-label="Settings sections">
             {TABS.map((t) => (
@@ -63,16 +63,16 @@ export function Settings() {
               </button>
             ))}
           </nav>
-          <div className="settings-index-foot"><b>Workspace view</b>Admin — master controls</div>
+          <div className="settings-index-foot"><b>Scope</b>Every change applies portal-wide and is audit-logged.</div>
         </aside>
         <main className="settings-stage">
           <div className="settings-head">
             <div>
-              <div className="settings-kicker">Global scope</div>
+              <div className="settings-kicker">Section</div>
               <h2>{current.label}</h2>
               <p>{current.hint}</p>
             </div>
-            <span>Configuration</span>
+            <span>Settings</span>
           </div>
           {err && <div className="note" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>{err}</div>}
           <div className="settings-content">

@@ -1,56 +1,13 @@
-/** Light / dark / system theme, remembered per browser. Applied to <html data-theme> before React renders. */
-export type Theme = 'light' | 'dark' | 'auto';
-const KEY = 'gs-theme';
-
-export function readTheme(): Theme {
-  try {
-    const v = localStorage.getItem(KEY);
-    return v === 'light' || v === 'dark' ? v : 'auto';
-  } catch {
-    return 'auto';
-  }
-}
-
-export function applyTheme(t: Theme): void {
+/** The portal has one look: the light Greystone restyle (cream ground, chrome sidebar, teal primary). No dark mode, no palette picker. */
+export function applyTheme(): void {
   const root = document.documentElement;
-  // Greystone's approved production surface is always the light Graphite deck.
-  // Keep the API for callers, but never allow OS or persisted dark mode to alter it.
   root.dataset.theme = 'light';
+  delete root.dataset.palette;
   try {
-    localStorage.setItem(KEY, 'light');
-  } catch {
-    /* private mode: the choice just does not persist */
-  }
-}
-
-applyTheme(readTheme());
-
-/** Colour palette, remembered per browser. Graphite (white, light grey, near-black sidebar) is the default. */
-export type Palette = 'greystone' | 'sand' | 'slate' | 'forest' | 'graphite' | 'midnight';
-export const PALETTES: Array<{ id: Palette; label: string; swatch: [string, string, string] }> = [
-  { id: 'greystone', label: 'Greystone', swatch: ['#f3efe8', '#17362b', '#8fc3a8'] },
-  { id: 'sand', label: 'Sand', swatch: ['#f1ece1', '#242931', '#2b6b64'] },
-  { id: 'slate', label: 'Slate', swatch: ['#eef1f5', '#1c2230', '#3b5bdb'] },
-  { id: 'forest', label: 'Forest', swatch: ['#f2f1ea', '#16302a', '#2f7d5a'] },
-  { id: 'graphite', label: 'Graphite', swatch: ['#f4f4f4', '#202124', '#1a73e8'] },
-  { id: 'midnight', label: 'Midnight', swatch: ['#f5f7fb', '#0b1f3a', '#0f6fb8'] },
-];
-const PKEY = 'gs-palette';
-export const DEFAULT_PALETTE: Palette = 'graphite';
-/** The palette picker is gone: every visitor gets Graphite. Stored choices from before are ignored. */
-export function readPalette(): Palette {
-  return DEFAULT_PALETTE;
-}
-export function applyPalette(p: Palette): void {
-  const root = document.documentElement;
-  // The stylesheet's bare tokens are the Greystone look; every other palette is a data attribute.
-  if (p === 'greystone') delete root.dataset.palette;
-  else root.dataset.palette = p;
-  try {
-    if (p === DEFAULT_PALETTE) localStorage.removeItem(PKEY);
-    else localStorage.setItem(PKEY, p);
+    localStorage.removeItem('gs-theme');
+    localStorage.removeItem('gs-palette');
   } catch {
     /* private mode */
   }
 }
-applyPalette(readPalette());
+applyTheme();

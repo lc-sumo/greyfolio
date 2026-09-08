@@ -376,11 +376,26 @@ export async function savePortal(repo: Repo, input: Record<string, unknown>, act
 }
 
 export async function saveNotifications(repo: Repo, input: Record<string, unknown>, actorRepId: string): Promise<Settings['notifications']> {
-  const hour = Number(input.digestHourUtc ?? NOTIFICATION_DEFAULTS.digestHourUtc);
+  const known = new Set(['statements', 'payoutRecorded', 'clawbacks', 'renewalDigest', 'digestHourUtc', 'repQuestions', 'playbookRepEmail', 'playbookAdminEmail', 'playbookHourUtc']);
+  for (const key of Object.keys(input)) if (!known.has(key)) throw new HttpError(400, `Unknown notification setting: ${key}`);
+  const current = (await repo.getSettings()).notifications;
+  const bool = (key: keyof Settings['notifications']) => {
+    if (input[key] === undefined) return current[key] as boolean;
+    if (typeof input[key] !== 'boolean') throw new HttpError(400, `${key} must be true or false`);
+    return input[key] as boolean;
+  };
+  if (input.digestHourUtc !== undefined && typeof input.digestHourUtc !== 'number') throw new HttpError(400, 'Digest hour must be a whole UTC hour');
+  const hour = input.digestHourUtc === undefined ? current.digestHourUtc : input.digestHourUtc;
   if (!Number.isInteger(hour) || hour < 0 || hour > 23) throw new HttpError(400, 'Digest hour must be 0–23 (UTC)');
-  const pbHour = Number(input.playbookHourUtc ?? NOTIFICATION_DEFAULTS.playbookHourUtc);
+  if (input.playbookHourUtc !== undefined && typeof input.playbookHourUtc !== 'number') throw new HttpError(400, 'Playbook hour must be a whole UTC hour');
+  const pbHour = input.playbookHourUtc === undefined ? current.playbookHourUtc : input.playbookHourUtc;
   if (!Number.isInteger(pbHour) || pbHour < 0 || pbHour > 23) throw new HttpError(400, 'Playbook hour must be 0–23 (UTC)');
-  const n: Settings['notifications'] = { statements: input.statements !== false, clawbacks: input.clawbacks !== false, renewalDigest: input.renewalDigest !== false, repQuestions: input.repQuestions !== false, digestHourUtc: hour, playbookHourUtc: pbHour };
+  const n: Settings['notifications'] = {
+    statements: bool('statements'), payoutRecorded: bool('payoutRecorded'),
+    clawbacks: bool('clawbacks'), renewalDigest: bool('renewalDigest'),
+    repQuestions: bool('repQuestions'), playbookRepEmail: bool('playbookRepEmail'),
+    playbookAdminEmail: bool('playbookAdminEmail'), digestHourUtc: hour, playbookHourUtc: pbHour,
+  };
   await repo.putSetting('notifications', n);
   await audit(repo, actorRepId, 'settings.update', '/api/admin/settings/notifications', n);
   return n;

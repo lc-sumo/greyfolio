@@ -204,6 +204,12 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
     async getSetting<T>(key: string): Promise<T | null> {
       return ((data.settings as unknown as Record<string, unknown>)[key] as T) ?? null;
     },
+    async claimSettingOnce(key: string, value: unknown = true): Promise<boolean> {
+      const settings = data.settings as unknown as Record<string, unknown>;
+      if (Object.prototype.hasOwnProperty.call(settings, key)) return false;
+      settings[key] = value;
+      return true;
+    },
     async getSettings() {
       const s = data.settings;
       return { ...s, portal: { ...PORTAL_DEFAULTS, ...(s.portal ?? {}) }, notifications: { ...NOTIFICATION_DEFAULTS, ...(s.notifications ?? {}) }, security: { ...SECURITY_DEFAULTS, ...(s.security ?? {}) }, templates: { ...TEMPLATE_DEFAULTS, ...(s.templates ?? {}) }, permissions: { ...PERMISSION_DEFAULTS, ...(s.permissions ?? {}) } };

@@ -176,6 +176,13 @@ export function dbRepo(db: Database): Repo {
       const rows = await db.select().from(commissionSettings).where(eq(commissionSettings.key, key)).limit(1);
       return rows[0] ? (rows[0].value as T) : null;
     },
+    async claimSettingOnce(key: string, value: unknown = true): Promise<boolean> {
+      const rows = await db.insert(commissionSettings)
+        .values({ key, value: value as never })
+        .onConflictDoNothing({ target: commissionSettings.key })
+        .returning({ key: commissionSettings.key });
+      return rows.length === 1;
+    },
     async getSettings(): Promise<Settings> {
       const rows = await db.select().from(commissionSettings);
       const map = Object.fromEntries(rows.map((r) => [r.key, r.value])) as Partial<Settings>;

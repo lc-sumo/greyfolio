@@ -158,12 +158,13 @@ export async function runPlaybooks(deps: PlaybookDeps, today: string, actorRepId
     if (r.ok) emails++;
   };
   for (const [repId, items] of repMail) {
+    if (!settings.notifications.playbookRepEmail) continue;
     const rep = reps.find((r) => r.id === repId)!;
     const subject = items.length === 1 ? items[0]!.subject : `${items.length} deals need a call — ${today}`;
     const text = [`Hi ${rep.name.split(' ')[0]},`, '', ...items.flatMap((i) => [i.body, '', `— ${i.playbook}`, '', '· · ·', '']), `Your tasks: ${deps.origin}/`, '', `— ${appName}`].join('\n');
     await send(rep.email, { to: rep.email, subject, text }, 'playbook', rep.id);
   }
-  if (adminMail.length && admins.length) {
+  if (settings.notifications.playbookAdminEmail && adminMail.length && admins.length) {
     const subject = adminMail.length === 1 ? adminMail[0]!.subject : `${adminMail.length} playbook alerts — ${today}`;
     const text = [...adminMail.flatMap((i) => [`[${i.playbook} · rep ${i.rep}]`, i.body, '']), `Books: ${deps.origin}/books`, '', `— ${appName}`].join('\n');
     await send(admins.map((a) => a.email), { to: admins.map((a) => a.email), subject, text }, 'playbook admins', null);

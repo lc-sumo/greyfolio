@@ -30,7 +30,19 @@ export interface Settings {
   /** Names shown in the sidebar, sign-in screen and emails. */
   portal: { company: string; portal: string; supportEmail: string };
   /** Which automatic emails go out, and when the renewal digest lands (UTC hour). */
-  notifications: { statements: boolean; clawbacks: boolean; renewalDigest: boolean; digestHourUtc: number; repQuestions: boolean; playbookHourUtc: number };
+  notifications: {
+    /** Statements sent after a payroll run is approved. */
+    statements: boolean;
+    /** A receipt sent after a rep's selected payout is committed. */
+    payoutRecorded: boolean;
+    clawbacks: boolean;
+    renewalDigest: boolean;
+    digestHourUtc: number;
+    repQuestions: boolean;
+    playbookRepEmail: boolean;
+    playbookAdminEmail: boolean;
+    playbookHourUtc: number;
+  };
   security: {
     requireTotpForAdmins: boolean;
     /** Minutes of inactivity before a session is signed out; 0 = never. */
@@ -46,7 +58,11 @@ export interface Settings {
 export const PERMISSION_DEFAULTS: Settings['permissions'] = { merchantEmail: true, contactEdit: true };
 
 export const PORTAL_DEFAULTS: Settings['portal'] = { company: 'Greystone Merchant Partners', portal: 'Commission portal', supportEmail: '' };
-export const NOTIFICATION_DEFAULTS: Settings['notifications'] = { statements: true, clawbacks: true, renewalDigest: true, digestHourUtc: 13, repQuestions: true, playbookHourUtc: 12 };
+export const NOTIFICATION_DEFAULTS: Settings['notifications'] = {
+  statements: true, payoutRecorded: true, clawbacks: true, renewalDigest: true,
+  digestHourUtc: 13, repQuestions: true, playbookRepEmail: true,
+  playbookAdminEmail: true, playbookHourUtc: 12,
+};
 export const SECURITY_DEFAULTS: Settings['security'] = { requireTotpForAdmins: false, idleMinutes: 120, totpRememberDays: 7 };
 export { TEMPLATE_DEFAULTS } from './services/playbooks.js';
 
@@ -100,6 +116,8 @@ export interface Repo {
   listRuns(): Promise<PayrollRun[]>;
   loadContext(): Promise<LedgerContext>;
   getSetting<T>(key: string): Promise<T | null>;
+  /** Atomically create a setting only when its key does not already exist. */
+  claimSettingOnce(key: string, value?: unknown): Promise<boolean>;
   getSettings(): Promise<Settings>;
   writeAudit(entry: AuditEntry): Promise<void>;
   listAudit(limit?: number, offset?: number): Promise<AuditEntry[]>;

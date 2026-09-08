@@ -9,6 +9,7 @@ import { clawbackSlices, type Clawback, type Rep } from '@greystone/commission';
 import { adminRenewals } from '../admin-views.js';
 import type { Repo } from '../repo.js';
 import { repStatements } from '../scope.js';
+import type { PayoutPlan } from '@greystone/commission';
 import type { Mail, Mailer } from './mail.js';
 
 export interface NotifyDeps {
@@ -22,7 +23,7 @@ export interface NotifyDeps {
 const money = (n: number) => `$${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /** Settings override the boot-time defaults: the portal's name in emails, and which emails are on at all. */
-async function tuned(deps: NotifyDeps): Promise<{ deps: NotifyDeps; on: NotifyDeps extends never ? never : { statements: boolean; clawbacks: boolean; renewalDigest: boolean; repQuestions: boolean; digestHourUtc: number } }> {
+async function tuned(deps: NotifyDeps): Promise<{ deps: NotifyDeps; on: NotifyDeps extends never ? never : { statements: boolean; payoutRecorded: boolean; clawbacks: boolean; renewalDigest: boolean; repQuestions: boolean; digestHourUtc: number } }> {
   const s = await deps.repo.getSettings();
   const name = s.portal.company && s.portal.portal ? `${s.portal.company} ${s.portal.portal}` : deps.appName;
   return { deps: { ...deps, appName: name }, on: s.notifications };
@@ -30,9 +31,16 @@ async function tuned(deps: NotifyDeps): Promise<{ deps: NotifyDeps; on: NotifyDe
 
 async function deliver(deps: NotifyDeps, actorRepId: string, targetRepId: string | null, mail: Mail, why: string): Promise<boolean> {
   if (!deps.mailer.live && deps.mailer.kind !== 'log') return false;
-  const r = await deps.mailer.send(mail);
-  await deps.repo.writeAudit({ actorRepId, action: 'mail.sent', targetRepId, path: null, detail: { to: mail.to, subject: mail.subject, why, ok: r.ok, ...(r.error ? { error: r.error } : {}), ...(r.id ? { id: r.id } : {}) } });
-  return r.ok;
+  try {
+    const r = await deps.mailer.send(mail);
+    await deps.repo.writeAudit({ actorRepId, action: 'mail.sent', targetRepId, path: null, detail: { to: mail.to, subject: mail.subject, why, ok: r.ok, ...(r.error ? { error: r.error } : {}), ...(r.id ? { id: r.id } : {}) } });
+    return r.ok;
+  } catch (error) {
+    // Sending is never part of the business transaction. Preserve a useful
+    // audit event even when a provider throws rather than returning `{ ok }`.
+    await deps.repo.writeAudit({ actorRepId, action: 'mail.sent', targetRepId, path: null, detail: { to: mail.to, subject: mail.subject, why, ok: false, error: error instanceof Error ? error.message : String(error) } });
+    return false;
+  }
 }
 
 /** Statement summary for one rep in one run. */
@@ -71,6 +79,51 @@ export async function notifyRunApproved(deps0: NotifyDeps, runId: string, actorR
     if (await deliver(deps, actorRepId, rep.id, statementMail(deps, rep, s), `statement ${run.id}`)) sent++;
   }
   return { sent, reps: count };
+}
+
+/**
+ * Receipt for one committed selected payout. This is deliberately called only
+ * after the ledger transaction succeeds. Its key is the immutable run/rep/
+ * ledger-row identity, so a retried handler cannot send the same receipt.
+ */
+export async function notifyPayoutRecorded(deps0: NotifyDeps, runId: string, plan: PayoutPlan, actorRepId: string): Promise<{ sent: boolean; duplicate: boolean }> {
+  const { deps, on } = await tuned(deps0);
+  if (!on.payoutRecorded) return { sent: false, duplicate: false };
+  const identity = [runId, plan.repId, ...[...plan.lines, ...plan.recoveries].map((line) => line.key).sort()].join('|');
+  const key = `notify.payoutRecorded:${identity}`;
+  // Atomically claim the committed event before delivery. A provider failure
+  // remains audited and never rolls back the payout, but is intentionally not
+  // retried automatically: retries must not produce concurrent duplicates.
+  if (!await deps.repo.claimSettingOnce(key, true)) return { sent: false, duplicate: true };
+  const [reps, runs, ctx] = await Promise.all([deps.repo.listReps(), deps.repo.listRuns(), deps.repo.loadContext()]);
+  const rep = reps.find((r) => r.id === plan.repId);
+  const run = runs.find((r) => r.id === runId);
+  if (!rep || !rep.active || !run) return { sent: false, duplicate: false };
+  const deals = new Map(ctx.deals.map((deal) => [deal.id, deal]));
+  const selectedCounts = new Map<string, number>();
+  for (const line of plan.lines) selectedCounts.set(line.dealId, (selectedCounts.get(line.dealId) ?? 0) + 1);
+  const selected = [...selectedCounts]
+    .map(([id, count]) => ({ deal: deals.get(id), count }))
+    .filter((row): row is { deal: NonNullable<typeof row.deal>; count: number } => !!row.deal)
+    .map(({ deal, count }) => `• ${deal.business} — ${deal.lender} (${count} selected line${count === 1 ? '' : 's'})`)
+    .join('\n');
+  const text = [
+    `Hi ${rep.name.split(' ')[0]},`,
+    '',
+    `Your selected payout has been recorded for ${run.label}.`,
+    '',
+    'Selected deals/lines:',
+    selected || `• ${plan.lines.length} commission line${plan.lines.length === 1 ? '' : 's'}`,
+    '',
+    `Gross commission:  ${money(plan.gross)}`,
+    `Clawback withheld: ${money(plan.withheld)}`,
+    `Net paid:          ${money(plan.net)}`,
+    '',
+    `See every line: ${deps.origin}/payments`,
+    '',
+    `— ${deps.appName}`,
+  ].join('\n');
+  return { sent: await deliver(deps, actorRepId, rep.id, { to: rep.email, subject: `Payout recorded — ${run.label}`, text }, `payout recorded ${identity}`), duplicate: false };
 }
 
 /** A clawback was recorded: each rep who earned on the deal hears what their slice is and how it will be netted. */

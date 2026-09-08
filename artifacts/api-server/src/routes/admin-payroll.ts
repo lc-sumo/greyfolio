@@ -3,7 +3,7 @@ import { HttpError, currentUser, requireRole } from '../auth/middleware.js';
 import { annualCsv, annualReport, payableFor, payrollRepDetail, payrollReps, preview, runCsv, runSummary } from '../payroll-views.js';
 import type { Repo } from '../repo.js';
 import { advanceRun, archiveRun, createRun, deleteRun, paySelected, reopenRun, voidPayout } from '../services/payroll.js';
-import { notifyRunApproved, type NotifyDeps } from '../services/notify.js';
+import { notifyPayoutRecorded, notifyRunApproved, type NotifyDeps } from '../services/notify.js';
 
 /** Payroll: runs, per-rep payable lines, netting preview, pay + record, CSV. Admin only. */
 export function adminPayrollRouter(repo: Repo, notify?: Omit<NotifyDeps, 'repo'>): Router {
@@ -50,8 +50,12 @@ export function adminPayrollRouter(repo: Repo, notify?: Omit<NotifyDeps, 'repo'>
   });
 
   r.post('/payroll/runs/:id/pay', async (req, res) => {
-    const plan = await paySelected(repo, { runId: String(req.params.id), repId: String(req.body?.repId ?? ''), selectedKeys: Array.isArray(req.body?.selectedKeys) ? req.body.selectedKeys.map(String) : [] }, currentUser(req)!.repId);
-    res.status(201).json({ repId: plan.repId, runId: plan.runId, gross: plan.gross, withheld: plan.withheld, net: plan.net, lines: plan.lines.length, recoveries: plan.recoveries.length, dealsFullyPaid: plan.dealsFullyPaid, uncollectedDealIds: plan.uncollectedDealIds });
+    const actor = currentUser(req)!.repId;
+    const plan = await paySelected(repo, { runId: String(req.params.id), repId: String(req.body?.repId ?? ''), selectedKeys: Array.isArray(req.body?.selectedKeys) ? req.body.selectedKeys.map(String) : [] }, actor);
+    // Payout is committed before this best-effort send; a mail failure is
+    // audit-logged by notifyPayoutRecorded and can never roll it back.
+    const mailed = notify ? await notifyPayoutRecorded({ repo, ...notify }, plan.runId, plan, actor) : null;
+    res.status(201).json({ repId: plan.repId, runId: plan.runId, gross: plan.gross, withheld: plan.withheld, net: plan.net, lines: plan.lines.length, recoveries: plan.recoveries.length, dealsFullyPaid: plan.dealsFullyPaid, uncollectedDealIds: plan.uncollectedDealIds, payoutNoticeSent: mailed?.sent ?? false });
   });
 
   r.post('/payroll/runs/:id/void', async (req, res) => {

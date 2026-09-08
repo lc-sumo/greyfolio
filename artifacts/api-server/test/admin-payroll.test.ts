@@ -4,21 +4,24 @@ import { createApp } from '../src/app.js';
 import { configFromEnv } from '../src/config.js';
 import { paySelected, nextPeriod } from '../src/services/payroll.js';
 import { updateTerms } from '../src/services/deals.js';
-import { repLedger } from '@greystone/commission';
+import { planPayout, repLedger, scheduleFor, type PayoutPlan } from '@greystone/commission';
 import { clawbacks, deals, lines, memoryRepo } from './memory-repo.js';
+import { memoryMailer, type Mailer } from '../src/services/mail.js';
+import { notifyPayoutRecorded } from '../src/services/notify.js';
+import { payableUnitsFor } from '../src/payroll-views.js';
 
 const config = configFromEnv({ AUTH_MODE: 'dev', SESSION_SECRET: 'test-secret', PORT: '0' });
 const today = new Date().toISOString().slice(0, 10);
 
-async function harness() {
+async function harness(mailer: Mailer = memoryMailer()) {
   const repo = memoryRepo();
-  const app = createApp(config, repo);
+  const app = createApp(config, repo, { mailer });
   const as = async (email: string) => {
     const agent = request.agent(app);
     await agent.get('/auth/dev-login').query({ email });
     return agent;
   };
-  return { repo, admin: await as('leor@greystoneus.com'), rep: await as('julian.ribak@greystoneus.com'), mgr: await as('raymond.amato@greystoneus.com') };
+  return { repo, mailer: mailer as ReturnType<typeof memoryMailer>, admin: await as('leor@greystoneus.com'), rep: await as('julian.ribak@greystoneus.com'), mgr: await as('raymond.amato@greystoneus.com') };
 }
 
 describe('nextPeriod', () => {
@@ -78,7 +81,7 @@ describe('runs', () => {
   });
 
   it('archives draft or approved excess runs without deleting ledger history, while paid runs stay locked', async () => {
-    const { admin, repo } = await harness();
+    const { admin, repo, mailer } = await harness();
     // A run with payout rows must never be hard-deleted, but can leave the active workflow.
     await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: ['F2|Opener|base'] });
     expect((await admin.delete('/api/admin/payroll/runs/run-4')).status).toBe(400);
@@ -109,7 +112,7 @@ describe('runs', () => {
   });
 
   it('conditionally refuses a payout commit after a run is archived', async () => {
-    const { admin, repo } = await harness();
+    const { admin, repo, mailer } = await harness();
     const created = await admin.post('/api/admin/payroll/runs').send({ start: '2026-10-01', end: '2026-10-15' });
     await admin.post(`/api/admin/payroll/runs/${created.body.id}/archive`);
     // Models the final, transactional state check after a payout was planned:
@@ -159,10 +162,26 @@ describe('per-rep payroll detail', () => {
     const res = await admin.get('/api/admin/payroll/runs/run-3/reps/rep-julian-ribak');
     expect(res.body.rep).toMatchObject({ id: 'rep-julian-ribak', name: 'Julian Ribak' });
     expect(res.body.lines).toEqual([expect.objectContaining({ key: 'F2|Opener|base', segmentLabel: 'Initial', business: 'F2 Business', role: 'Opener', rate: 0.35, amount: 700, lenderPaidLabel: 'Not collected', collected: false, collectedKeys: [], uncollectedKeys: ['F2|Opener|base'], uncollectedAmount: 700, units: null })]);
+    expect(res.body.payableUnits).toEqual([expect.objectContaining({ key: 'F2|Opener|base', dealId: 'F2', business: 'F2 Business', role: 'Opener', segmentLabel: 'Initial', amount: 700, collected: false, unit: null })]);
     expect(res.body.clawbacks).toEqual([{ id: 'cb-1', dealId: 'F1', business: 'F1 Business', date: '2026-08-15', remaining: 250 }]);
     expect(res.body.outstandingClawback).toBe(250);
     expect(res.body.paidInRun.map((p: { role: string; amount: number }) => [p.role, p.amount])).toEqual([['Opener', 350], ['Clawback recovery', -100]]);
     expect(res.body.paidSummary).toEqual({ gross: 350, recovered: 100, cash: 250, lineCount: 1, voided: 0 });
+  });
+  it('returns the domain-priced payable units for uneven schedules after earlier increments were paid', () => {
+    const schedule = scheduleFor({ name: 'ROWAN', terms: 'weekly', weeks: 3 }, '2026-07-12', { amounts: [2_000, 7_000, 9_000] })!;
+    const deal = { ...deals[1]!, id: 'F9', business: 'Uneven Business', commSchedule: { ...schedule, received: 2 } };
+    // Increment 1 was committed earlier. The detail must expose only the true remaining
+    // domain records, rather than divide the grouped balance into synthetic unit amounts.
+    const context = { deals: [deal], lines: [{ ...lines[0]!, key: 'F9|Opener|base|u1', dealId: 'F9', amount: 70 }], clawbacks: [] };
+    const units = payableUnitsFor(context, 'rep-julian-ribak');
+    expect(units.map((unit) => [unit.key, unit.collected, unit.segmentLabel, unit.unit?.n, unit.unit?.label])).toEqual([
+      ['F9|Opener|base|u2', true, 'Initial · Increment 2', 2, 'Increment 2'],
+      ['F9|Opener|base|u3', false, 'Initial · Increment 3', 3, 'Increment 3'],
+    ]);
+    const plan = planPayout(context, { repId: 'rep-julian-ribak', selectedKeys: units.map((unit) => unit.key), runId: 'run-4', paidAt: '2026-09-02' });
+    expect(units.map((unit) => [unit.key, unit.amount])).toEqual(plan.lines.map((line) => [line.key, line.amount]));
+    expect(plan.gross).toBe(units.reduce((total, unit) => total + unit.amount, 0));
   });
   it('previews netting before commit', async () => {
     const { admin } = await harness();
@@ -173,13 +192,20 @@ describe('per-rep payroll detail', () => {
 
 describe('POST pay', () => {
   it('writes ledger rows and a recovery row, rolls up the clawback, stamps repPaid, and pins the rep', async () => {
-    const { admin, repo } = await harness();
+    const { admin, repo, mailer } = await harness();
     const res = await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: ['F2|Opener|base'] });
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({ repId: 'rep-julian-ribak', runId: 'run-4', gross: 700, withheld: 250, net: 450, lines: 1, recoveries: 1, dealsFullyPaid: [], uncollectedDealIds: ['F2'] });
     expect(repo.data.lines.filter((l) => l.runId === 'run-4').map((l) => [l.role, l.amount, l.clawbackId])).toEqual([['Opener', 700, null], ['Clawback recovery', -250, 'cb-1']]);
     expect(repo.data.clawbacks[0]).toMatchObject({ recovered: 350, status: 'open' }); // Zach and Raymond still owe theirs
-    expect(repo.audit.at(-1)).toMatchObject({ action: 'payroll.pay', targetRepId: 'rep-julian-ribak' });
+    expect(repo.audit.some((entry) => entry.action === 'payroll.pay' && entry.targetRepId === 'rep-julian-ribak')).toBe(true);
+    expect(repo.audit.some((entry) => entry.action === 'mail.sent' && entry.detail?.why === 'payout recorded run-4|rep-julian-ribak|F2|Opener|base|cbrec|cb-1|run-4|rep-julian-ribak')).toBe(true);
+    const receipt = mailer.sent.find((mail) => /^Payout recorded — /.test(mail.subject));
+    expect(receipt).toMatchObject({ to: 'julian.ribak@greystoneus.com' });
+    expect(receipt?.text).toMatch(/F2 Business — MBC \(1 selected line\)/);
+    expect(receipt?.text).toMatch(/Gross commission: +\$700\.00/);
+    expect(receipt?.text).toMatch(/Clawback withheld: +\$250\.00/);
+    expect(receipt?.text).toMatch(/Net paid: +\$450\.00/);
     // Wallet agrees with the ledger the run just wrote.
     const wallet = await admin.get('/api/me/wallet').set('X-View-As', 'rep-julian-ribak');
     expect(wallet.body).toMatchObject({ earned: 1_050, paid: 1_050, cash: 700, held: 0, recovered: 350, owed: 0 });
@@ -238,6 +264,43 @@ describe('POST pay', () => {
       status: 400,
       message: expect.stringMatching(/payouts in the ledger.*void them before changing its terms/i),
     });
+  });
+  it('does not send a payout receipt when payoutRecorded is off', async () => {
+    const { admin, mailer } = await harness();
+    await admin.put('/api/admin/settings/notifications').send({ payoutRecorded: false });
+    const paid = await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: ['F2|Opener|base'] });
+    expect(paid.status).toBe(201);
+    expect(mailer.sent.filter((mail) => /^Payout recorded — /.test(mail.subject))).toHaveLength(0);
+  });
+  it('never sends for a refused stale payout, and a mail provider failure leaves a committed payout successful', async () => {
+    const failingMailer: Mailer = {
+      kind: 'memory', live: true,
+      send: async () => { throw new Error('provider unavailable'); },
+    };
+    const { admin, repo } = await harness(failingMailer);
+    const paid = await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: ['F2|Opener|base'] });
+    expect(paid.status).toBe(201);
+    expect(repo.data.lines.filter((line) => line.runId === 'run-4')).toHaveLength(2);
+    expect(repo.audit.some((entry) => entry.action === 'mail.sent' && entry.detail?.ok === false && entry.detail?.error === 'provider unavailable')).toBe(true);
+    const retry = await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: ['F2|Opener|base'] });
+    expect(retry.status).toBe(400);
+    expect(repo.audit.filter((entry) => entry.action === 'mail.sent')).toHaveLength(1);
+  });
+  it('atomically claims a payout receipt so concurrent retries send exactly once', async () => {
+    const { repo, mailer } = await harness();
+    const plan: PayoutPlan = {
+      runId: 'run-4', repId: 'rep-julian-ribak',
+      lines: [{ key: 'F2|Opener|base', dealId: 'F2', segmentKey: 'base', role: 'Opener', repId: 'rep-julian-ribak', amount: 700, runId: 'run-4', clawbackId: null, paidAt: today }],
+      recoveries: [], clawbackUpdates: [], gross: 700, withheld: 0, net: 700, dealsFullyPaid: [], uncollectedDealIds: [],
+    };
+    const deps = { repo, mailer, origin: 'https://portal.test', appName: 'Test' };
+    const result = await Promise.all([
+      notifyPayoutRecorded(deps, 'run-4', plan, 'rep-leor'),
+      notifyPayoutRecorded(deps, 'run-4', plan, 'rep-leor'),
+    ]);
+    expect(result.filter((item) => item.sent)).toHaveLength(1);
+    expect(result.filter((item) => item.duplicate)).toHaveLength(1);
+    expect(mailer.sent.filter((mail) => /^Payout recorded — /.test(mail.subject))).toHaveLength(1);
   });
 });
 

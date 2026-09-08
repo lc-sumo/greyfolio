@@ -150,16 +150,19 @@ describe('statements and digests', () => {
   it('emails each paid rep their statement when a run is approved', async () => {
     const { admin, mailer } = await harness();
     await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: ['F2|Opener|base'] });
+    // The payout receipt belongs to the committed payment event, not approval.
+    mailer.sent.length = 0;
     const approved = await admin.post('/api/admin/payroll/runs/run-4/advance');
     expect(approved.body).toMatchObject({ status: 'approved', statements: 1, notified: 1 });
-    expect(mailer.sent).toHaveLength(1);
-    expect(mailer.sent[0]).toMatchObject({ to: 'julian.ribak@greystoneus.com' });
-    expect(mailer.sent[0]!.subject).toMatch(/^Statement ready — Sep 1 – Sep 15, 2026/);
+    const statements = mailer.sent.filter((mail) => /^Statement ready — /.test(mail.subject));
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).toMatchObject({ to: 'julian.ribak@greystoneus.com' });
+    expect(statements[0]!.subject).toMatch(/^Statement ready — Sep 1 – Sep 15, 2026/);
     // Gross 700 less the 250 still owed on cb-1 (Julian's 350 share, 100 already recovered).
-    expect(mailer.sent[0]!.text).toMatch(/Gross commission: +\$700\.00/);
-    expect(mailer.sent[0]!.text).toMatch(/Clawbacks netted: +-\$250\.00/);
-    expect(mailer.sent[0]!.text).toMatch(/Net to you: +\$450\.00/);
-    expect(mailer.sent[0]!.text).toMatch(/https:\/\/portal\.test\/payments/);
+    expect(statements[0]!.text).toMatch(/Gross commission: +\$700\.00/);
+    expect(statements[0]!.text).toMatch(/Clawbacks netted: +-\$250\.00/);
+    expect(statements[0]!.text).toMatch(/Net to you: +\$450\.00/);
+    expect(statements[0]!.text).toMatch(/https:\/\/portal\.test\/payments/);
     const paid = await admin.post('/api/admin/payroll/runs/run-4/advance');
     expect(paid.body).toMatchObject({ status: 'paid', notified: 0 });
     expect(mailer.sent).toHaveLength(1);

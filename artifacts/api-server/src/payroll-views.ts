@@ -1,5 +1,5 @@
 /** Admin payroll projections. Never served to reps. */
-import { clawbackQueue, collectionLabel, paidFigures, standingLines, payableLines, payoutPreview, repLedger, sum, type LedgerContext, type PayrollRun, type Rep, unitsPaid, voidedKeys } from '@greystone/commission';
+import { clawbackQueue, collectionLabel, paidFigures, standingLines, payableLines, payoutPreview, repLedger, sum, type LedgerContext, type PayrollRun, type Rep, type RepLine, unitsPaid, voidedKeys } from '@greystone/commission';
 
 export interface RunSummary extends PayrollRun {
   /** Σ positive rows in this run. */
@@ -64,6 +64,38 @@ export interface PayableLineView {
   units: { paid: number; total: number; collected: number } | null;
 }
 
+/** Exact domain payout units. `key` and `amount` are the values planPayout will commit. */
+export interface PayableUnitView {
+  key: string;
+  dealId: string;
+  business: string;
+  role: string;
+  segmentKey: string;
+  segmentLabel: string;
+  amount: number;
+  collected: boolean;
+  /** Null means this is the domain's whole-segment payout, not an incremental receipt. */
+  unit: NonNullable<RepLine['unit']> | null;
+}
+
+/** Ungrouped domain records for an exact selectedKeys review. */
+export function payableUnitsFor(ctx: LedgerContext, repId: string, today = new Date().toISOString().slice(0, 10)): PayableUnitView[] {
+  const byId = new Map(ctx.deals.map((d) => [d.id, d]));
+  return payableLines(ctx.deals, ctx.lines, repId, today)
+    .map((line) => ({
+      key: line.key,
+      dealId: line.dealId,
+      business: byId.get(line.dealId)!.business,
+      role: line.role,
+      segmentKey: line.segmentKey,
+      segmentLabel: line.segmentLabel,
+      amount: line.amount,
+      collected: line.collected,
+      unit: line.unit ?? null,
+    }))
+    .sort((a, b) => a.dealId.localeCompare(b.dealId, undefined, { numeric: true }) || a.role.localeCompare(b.role) || a.segmentKey.localeCompare(b.segmentKey) || a.key.localeCompare(b.key));
+}
+
 export function payableFor(ctx: LedgerContext, repId: string, today = new Date().toISOString().slice(0, 10)): PayableLineView[] {
   const byId = new Map(ctx.deals.map((d) => [d.id, d]));
   const groups = new Map<string, ReturnType<typeof payableLines>>();
@@ -108,6 +140,7 @@ export function payableFor(ctx: LedgerContext, repId: string, today = new Date()
 export interface PayrollRepDetail {
   rep: { id: string; name: string; active: boolean };
   lines: PayableLineView[];
+  payableUnits: PayableUnitView[];
   clawbacks: Array<{ id: string; dealId: string; business: string; date: string; remaining: number }>;
   outstandingClawback: number;
   paidInRun: Array<{ key: string; dealId: string; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string; role: string; voided: boolean; voids: string | null; segmentKey: string | null; unitLabel: string | null; amount: number; paidAt: string }>;
@@ -122,6 +155,7 @@ export function payrollRepDetail(ctx: LedgerContext, rep: Rep, runId: string): P
   return {
     rep: { id: rep.id, name: rep.name, active: rep.active },
     lines: payableFor(ctx, rep.id),
+    payableUnits: payableUnitsFor(ctx, rep.id),
     clawbacks: queue.map((q) => ({ id: q.clawback.id, dealId: q.clawback.dealId, business: byId.get(q.clawback.dealId)?.business ?? q.clawback.dealId, date: q.clawback.date, remaining: q.remaining })),
     outstandingClawback: sum(queue.map((q) => q.remaining)),
     paidInRun: paid

@@ -701,11 +701,14 @@ function PortalTab({ settings, run }: { settings: SettingsData; run: Run }) {
         </div>
         <button className="btn primary" style={{ marginTop: 12 }} onClick={() => void run('Names saved', () => post('/api/admin/settings/portal', b, 'PUT'))}>Save names</button>
       </Card>
-      <Card title="Automatic emails" extra="each one is logged in the Audit log as mail.sent">
-        <Toggle on={n.statements} onChange={(v) => setN({ ...n, statements: v })} label="Statements when a run is approved" hint="Every rep with lines in the run gets their summary and a link to Pay history." />
+      <Card title="Notifications" extra="each automatic delivery is logged in the Audit log as mail.sent">
+        <Toggle on={n.statements} onChange={(v) => setN({ ...n, statements: v })} label="Run-approved statements" hint="When a payroll run is approved, every rep with lines gets their statement and a link to Pay history." />
+        <Toggle on={n.payoutRecorded} onChange={(v) => setN({ ...n, payoutRecorded: v })} label="Payout recorded receipt" hint="After a selected payout commits, the paid rep gets the selected deals, gross, clawback withheld, and net." />
         <Toggle on={n.clawbacks} onChange={(v) => setN({ ...n, clawbacks: v })} label="Clawback notices" hint="Each rep with a slice hears the amount and that it nets against their next payout." />
         <Toggle on={n.repQuestions} onChange={(v) => setN({ ...n, repQuestions: v })} label="Rep questions to admins" hint="When a rep asks about a deal from their drawer, admins get the note by email too." />
         <Toggle on={n.renewalDigest} onChange={(v) => setN({ ...n, renewalDigest: v })} label="Daily renewal digest" hint="Refi-ready and Prospecting deals, to every admin, once a day." />
+        <Toggle on={n.playbookRepEmail} onChange={(v) => setN({ ...n, playbookRepEmail: v })} label="Playbook emails to reps" hint="Allows playbook Email rep actions; tasks and other playbook actions still run." />
+        <Toggle on={n.playbookAdminEmail} onChange={(v) => setN({ ...n, playbookAdminEmail: v })} label="Playbook emails to admins" hint="Allows playbook Email admins actions; tasks and other playbook actions still run." />
         <label className="field" style={{ marginTop: 6 }}><span className="label">Digest goes out at</span>
           <select value={n.digestHourUtc} onChange={(e) => setN({ ...n, digestHourUtc: Number(e.target.value) })} disabled={!n.renewalDigest}>{hours.map((h) => <option key={h} value={h}>{localOf(h)} your time · {h}:00 UTC</option>)}</select>
         </label>
@@ -713,8 +716,9 @@ function PortalTab({ settings, run }: { settings: SettingsData; run: Run }) {
           <select value={n.playbookHourUtc} onChange={(e) => setN({ ...n, playbookHourUtc: Number(e.target.value) })}>{hours.map((h) => <option key={h} value={h}>{localOf(h)} your time · {h}:00 UTC</option>)}</select>
           <span className="subtle" style={{ fontSize: 13 }}>Rules under Settings › Playbooks fire once a day after this hour; rep emails roll up into one message.</span>
         </label>
-        <button className="btn primary" style={{ marginTop: 12 }} onClick={() => void run('Email settings saved', () => post('/api/admin/settings/notifications', n, 'PUT'))}>Save emails</button>
+        <button className="btn primary" style={{ marginTop: 12 }} onClick={() => void run('Notification settings saved', () => post('/api/admin/settings/notifications', n, 'PUT'))}>Save notifications</button>
         <div className="subtle" style={{ fontSize: 13, marginTop: 10 }}>The sending address and provider key live in the host's Secrets (MAIL_PROVIDER, MAIL_API_KEY, MAIL_FROM) — those never change from here.</div>
+        <div className="subtle" style={{ fontSize: 13, marginTop: 6 }}>Security, invitation, and password-reset emails are always enabled so people can access and secure their accounts.</div>
       </Card>
       <Card title="Permissions" extra="what reps may do from their portal">
         <Toggle on={perm.merchantEmail} onChange={(v) => setPerm({ ...perm, merchantEmail: v })} label="Reps can email merchants from a deal" hint="Off hides the button for everyone. On, you can still block individual reps under Reps › Merchant email. Emails go out under the rep's name from the templates under Playbooks." />

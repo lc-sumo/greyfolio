@@ -80,7 +80,7 @@ export interface Settings {
   lists: { frequencies: string[]; commissionStatuses: string[]; dealStatuses: string[] };
   crm: { urlTemplate: string }; payroll: { cycle: string };
   portal: Branding;
-  notifications: { statements: boolean; clawbacks: boolean; renewalDigest: boolean; digestHourUtc: number; repQuestions: boolean; playbookHourUtc: number };
+  notifications: { statements: boolean; payoutRecorded: boolean; clawbacks: boolean; renewalDigest: boolean; digestHourUtc: number; repQuestions: boolean; playbookRepEmail: boolean; playbookAdminEmail: boolean; playbookHourUtc: number };
   security: { requireTotpForAdmins: boolean; idleMinutes: number; totpRememberDays: number };
   templates: { merchant: MerchantTemplate[] };
   permissions: { merchantEmail: boolean; contactEdit: boolean };
@@ -124,6 +124,8 @@ export interface PayableLineView { key: string; dealId: string; segmentKey: stri
 export interface PayrollRepDetail {
   rep: { id: string; name: string; active: boolean };
   lines: PayableLineView[];
+  /** Exact domain payout records keyed exactly as the server accepts selectedKeys. */
+  payableUnits: Array<{ key: string; dealId: string; business: string; role: string; segmentKey: string; segmentLabel: string; amount: number; collected: boolean; unit: { n: number; kind: 'upfront' | 'increment' | 'remainder'; label: string; expected: string | null } | null }>;
   clawbacks: Array<{ id: string; dealId: string; business: string; date: string; remaining: number }>;
   outstandingClawback: number;
   paidInRun: Array<{ key: string; dealId: string; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string; role: string; voided: boolean; voids: string | null; segmentKey: string | null; unitLabel: string | null; amount: number; paidAt: string }>;

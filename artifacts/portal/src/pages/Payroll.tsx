@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { AdminDealDrawer } from '../components/AdminDealDrawer';
 import { Shell } from '../components/Shell';
 import { Card, Contact, Loading, Pill, toneFor } from '../components/ui';
@@ -16,7 +16,7 @@ export function Payroll() {
   const overview = useQuery({ queryKey: ['payroll'], queryFn: () => api<PayrollOverview>('/api/admin/payroll') });
   const settings = useQuery({ queryKey: ['settings'], queryFn: () => api<Settings>('/api/admin/settings') });
   const [runId, setRunId] = useState<string | null>(null);
-  /** Pinned on commit — never re-derived from "whoever is owed most" after a payment. */
+  /** A payout always starts with an intentional rep choice. */
   const [repId, setRepId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, true>>({});
   const [search, setSearch] = useState('');
@@ -27,26 +27,23 @@ export function Payroll() {
   const runs = overview.data?.runs ?? [];
   const visibleRuns = showArchived ? runs : runs.filter((r) => r.status !== 'archived');
   const reps = overview.data?.reps ?? [];
+  const selectedRep = reps.find((r) => r.id === repId) ?? null;
   const activeRun = runs.find((r) => r.id === runId) ?? visibleRuns.find((r) => r.status !== 'paid') ?? visibleRuns[0] ?? null;
   const runClosed = activeRun?.status === 'paid' || activeRun?.status === 'archived';
-  const payRepId = repId ?? reps.find((r) => r.owed > 0)?.id ?? reps[0]?.id ?? null;
-  useEffect(() => { if (!repId && payRepId) setRepId(payRepId); }, [payRepId, repId]);
 
   const detail = useQuery({
-    queryKey: ['payroll-rep', activeRun?.id, payRepId],
-    queryFn: () => api<PayrollRepDetail>(`/api/admin/payroll/runs/${activeRun!.id}/reps/${payRepId}`),
-    enabled: !!activeRun && !!payRepId,
+    queryKey: ['payroll-rep', activeRun?.id, repId],
+    queryFn: () => api<PayrollRepDetail>(`/api/admin/payroll/runs/${activeRun!.id}/reps/${repId}`),
+    enabled: !!activeRun && !!repId,
   });
-  const d = detail.data;
+  // Never expose a prior rep's payable data while the workflow has no explicit choice.
+  const d = repId && detail.data?.rep.id === repId ? detail.data : undefined;
   const q = search.trim().toLowerCase();
   const shown = useMemo(() => (d?.lines ?? []).filter((l) => !q || `${l.dealId} ${l.business} ${l.merchantContact} ${l.merchantEmail} ${l.merchantPhone} ${l.lender}`.toLowerCase().includes(q)), [d, q]);
-  // Selection is by ledger unit key. A row's checkbox selects its collected units; the "+ uncollected" toggle adds the rest.
+  // Selection is by the exact domain payout key. Grouped rows are browsing controls only.
   const amountOf = useMemo(() => {
     const m = new Map<string, number>();
-    for (const l of d?.lines ?? []) {
-      for (const k of l.collectedKeys) m.set(k, l.collectedKeys.length ? l.collectedAmount / l.collectedKeys.length : 0);
-      for (const k of l.uncollectedKeys) m.set(k, l.uncollectedKeys.length ? l.uncollectedAmount / l.uncollectedKeys.length : 0);
-    }
+    for (const unit of d?.payableUnits ?? []) m.set(unit.key, unit.amount);
     return m;
   }, [d]);
   const selectedKeys = Object.keys(selected).filter((k) => amountOf.has(k));
@@ -55,6 +52,11 @@ export function Payroll() {
   const selLines = (d?.lines ?? []).filter(rowSelected);
   const selGross = Math.round(selectedKeys.reduce((s, k) => s + (amountOf.get(k) ?? 0), 0) * 100) / 100;
   const withheld = Math.min(d?.outstandingClawback ?? 0, selGross);
+  // These are API-provided domain records, the same records planPayout maps to committed lines.
+  const selectedUnits = useMemo(() => (d?.payableUnits ?? []).filter((unit) => selected[unit.key]), [d, selected]);
+  const selectedDealCount = new Set(selectedUnits.map((unit) => unit.dealId)).size;
+  const unitDescription = (unit: PayrollRepDetail['payableUnits'][number]) => unit.unit ? `${unit.segmentLabel} · ${unit.unit.label} (increment ${unit.unit.n})` : `${unit.segmentLabel} · whole segment`;
+  const unitBreakdown = selectedUnits.map((unit) => `${unit.dealId} · ${unit.role} · ${unitDescription(unit)} [${unit.key}] ${money(unit.amount)}`).join('\n');
   const uncollected = [...new Set((d?.lines ?? []).filter((l) => l.uncollectedKeys.some((k) => selected[k])).map((l) => l.dealId))];
   const allShown = shown.length > 0 && shown.every((l) => (l.collectedKeys.length ? l.collectedKeys : l.uncollectedKeys).every((k) => selected[k]));
   const toggleRow = (l: PayableLineView) => setSelected((s) => { const n = { ...s }; const keys = l.collectedKeys.length ? l.collectedKeys : l.uncollectedKeys; const on = keys.every((k) => n[k]); for (const k of rowKeys(l)) delete n[k]; if (!on) for (const k of keys) n[k] = true; return n; });
@@ -90,12 +92,12 @@ export function Payroll() {
   );
 
   async function voidRows(keys?: string[]) {
-    if (!activeRun || !payRepId) return;
+    if (!activeRun || !repId) return;
     const what = keys ? 'this payout line' : `everything paid to ${d?.rep.name} in ${activeRun.label}`;
     if (!window.confirm(`Void ${what}? Nothing is deleted: reversing rows are added, the lines become payable again, and any clawback withheld goes back on the clawback.`)) return;
     setBusy(true);
     try {
-      const r = await post<{ rows: number; reversed: number; recoveriesReturned: number }>(`/api/admin/payroll/runs/${activeRun.id}/void`, { repId: payRepId, keys });
+      const r = await post<{ rows: number; reversed: number; recoveriesReturned: number }>(`/api/admin/payroll/runs/${activeRun.id}/void`, { repId, keys });
       await qc.invalidateQueries();
       notify(`Voided ${r.rows} row(s) — ${money(r.reversed)} reversed${r.recoveriesReturned ? `, ${money(r.recoveriesReturned)} back on clawback` : ''}`);
     } catch (e) {
@@ -106,11 +108,13 @@ export function Payroll() {
   }
 
   async function pay() {
-    if (!activeRun || !payRepId || !selectedKeys.length) { notify('Select at least one deal line to pay'); return; }
+    if (!activeRun || !repId) { notify('Choose a rep before recording a payout'); return; }
+    if (!selectedKeys.length) { notify('Select at least one ledger unit to pay'); return; }
+    if (!window.confirm(`Record payout for ${d?.rep.name ?? 'this rep'}: ${selectedDealCount} selected deal${selectedDealCount === 1 ? '' : 's'} / ${selectedUnits.length} ledger unit${selectedUnits.length === 1 ? '' : 's'}.\n\n${unitBreakdown}\n\nGross ${money(selGross)}\nClawback withholding ${money(withheld)}\nNet ${money(selGross - withheld)}\n\nRecord this payout?`)) return;
     setBusy(true);
     try {
-      const r = await post<PayResult>(`/api/admin/payroll/runs/${activeRun.id}/pay`, { repId: payRepId, selectedKeys });
-      setRepId(r.repId); // pin
+      const r = await post<PayResult>(`/api/admin/payroll/runs/${activeRun.id}/pay`, { repId, selectedKeys });
+      setRepId(r.repId);
       setSelected({});
       await qc.invalidateQueries();
       notify(`Paid ${money(r.net)} to ${d?.rep.name} across ${r.lines} deal line(s)${r.recoveries ? ` — ${money(r.withheld)} clawback recovered` : ''} — statement updated`);
@@ -147,7 +151,7 @@ export function Payroll() {
     try {
       await post(`/api/admin/payroll/runs/${r.id}`, {}, 'DELETE');
       await qc.invalidateQueries();
-      if (runId === r.id) setRunId(null);
+      if (runId === r.id || activeRun?.id === r.id) { setRunId(null); setRepId(null); setSelected({}); }
       notify(`${r.label} removed`);
     } catch (e) {
       notify(e instanceof Error ? e.message : 'Could not remove the run');
@@ -158,7 +162,7 @@ export function Payroll() {
     try {
       await post(`/api/admin/payroll/runs/${r.id}/archive`, {});
       await qc.invalidateQueries();
-      if (runId === r.id || activeRun?.id === r.id) setRunId(null);
+      if (runId === r.id || activeRun?.id === r.id) { setRunId(null); setRepId(null); setSelected({}); }
       notify(`${r.label} archived — no accounting history was deleted`);
     } catch (e) {
       notify(e instanceof Error ? e.message : 'Could not close the run');
@@ -166,6 +170,8 @@ export function Payroll() {
   }
   async function newRun(period?: { start: string; end: string }) {
     try {
+      setRepId(null);
+      setSelected({});
       const r = await post<{ id: string; label: string }>('/api/admin/payroll/runs', period ?? {});
       setCustomPeriod(null);
       await qc.invalidateQueries();
@@ -177,7 +183,7 @@ export function Payroll() {
   }
   async function exportCsv() {
     if (!activeRun) return;
-    const path = `/api/admin/payroll/runs/${activeRun.id}/export.csv${payRepId ? `?rep=${payRepId}` : ''}`;
+    const path = `/api/admin/payroll/runs/${activeRun.id}/export.csv${repId ? `?rep=${repId}` : ''}`;
     if (DEMO) { notify('CSV export runs against the real API — the preview has no downloads'); return; }
     window.open(path, '_blank');
   }
@@ -190,7 +196,7 @@ export function Payroll() {
             <Card title="Runs" extra={settings.data?.payroll.cycle}>
               <div className="runs">
                 {visibleRuns.map((r) => (
-                  <button key={r.id} className={`run ${activeRun?.id === r.id ? 'on' : ''}`} onClick={() => { setRunId(r.id); setSelected({}); }}>
+                  <button key={r.id} className={`run ${activeRun?.id === r.id ? 'on' : ''}`} onClick={() => { setRunId(r.id); setRepId(null); setSelected({}); }}>
                     <span className="ellipsis"><b>{r.label}</b><span className="subtle">{r.lineCount ? `${compact(r.paidGross)} · ${r.repCount} rep${r.repCount === 1 ? '' : 's'}` : 'nothing paid yet'}</span></span>
                     <Pill tone={toneFor(r.status)}>{r.status === 'paid' ? 'Paid' : r.status === 'approved' ? 'Approved' : r.status === 'archived' ? 'Archived' : 'Draft'}</Pill>
                     {r.status === 'draft' && r.lineCount === 0 && <span className="linkish" role="button" style={{ color: 'var(--ink-subtle)', padding: '0 4px' }} title="Remove this empty draft run" onClick={(e) => { e.stopPropagation(); void removeRun(r); }}>✕</span>}
@@ -215,7 +221,7 @@ export function Payroll() {
             <Card title="Reps" extra="sorted by amount owed">
               <div className="runs">
                 {reps.map((r) => (
-                  <button key={r.id} className={`run ${payRepId === r.id ? 'on' : ''}`} onClick={() => { setRepId(r.id); setSelected({}); }}>
+                  <button key={r.id} className={`run ${repId === r.id ? 'on' : ''}`} aria-pressed={repId === r.id} onClick={() => { setRepId(r.id); setSelected({}); }}>
                     <span className="avatar sm">{initials(r.name)}</span>
                     <span className="ellipsis"><b>{r.name}{!r.active && <span className="subtle"> (inactive)</span>}</b><span className="subtle">{r.lineCount ? `${r.lineCount} deal line${r.lineCount === 1 ? '' : 's'}` : 'nothing owed'}</span></span>
                     <span className="num" style={{ color: r.owed ? 'var(--amber-deep)' : 'var(--ink-subtle)', fontWeight: 700 }}>{r.owed ? money(r.owed) : '—'}</span>
@@ -232,7 +238,7 @@ export function Payroll() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                     <div>
                       <div className="label">{activeRun.label} · {activeRun.status}</div>
-                      <h2 style={{ margin: '5px 0 0', fontSize: 20, letterSpacing: '-.03em' }}>{d?.rep.name ?? '—'}</h2>
+                       <h2 style={{ margin: '5px 0 0', fontSize: 20, letterSpacing: '-.03em' }}>{d?.rep.name ?? 'Choose a rep to begin'}</h2>
                       <div className="muted" style={{ fontSize: 12, marginTop: 3 }}>pays {fullDay(activeRun.end)}</div>
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
@@ -243,6 +249,14 @@ export function Payroll() {
                       {activeRun.status === 'draft' && activeRun.lineCount === 0 && <button className="btn" style={{ color: 'var(--red)' }} onClick={() => void removeRun(activeRun)} title="Permanently remove this empty draft">Delete empty draft</button>}
                     </div>
                   </div>
+                  <div className="toolbar" style={{ marginTop: 16 }}>
+                    <label htmlFor="payroll-rep" style={{ fontWeight: 700 }}>Rep to pay</label>
+                    <select id="payroll-rep" className="search" value={repId ?? ''} onChange={(e) => { setRepId(e.target.value || null); setSelected({}); }} style={{ minWidth: 300 }}>
+                      <option value="">Choose a rep…</option>
+                      {reps.map((r) => <option key={r.id} value={r.id}>{r.name}{!r.active ? ' (inactive)' : ''} — owed {money(r.owed)}</option>)}
+                    </select>
+                    {selectedRep && <span className="count">Amount owed: {money(selectedRep.owed)} · selected in the rep rail</span>}
+                  </div>
                   <div className="strip sunk">
                     <div><div className="label">Paid in this run</div><div className="metric">{money(activeRun.paidGross)}</div><div className="sub">{activeRun.lineCount} line{activeRun.lineCount === 1 ? '' : 's'} · {activeRun.repCount} rep{activeRun.repCount === 1 ? '' : 's'}</div></div>
                     <div><div className="label">Clawback recovered</div><div className={`metric ${activeRun.recovered ? 'neg' : ''}`}>{money(activeRun.recovered)}</div><div className="sub">netted from payouts</div></div>
@@ -252,7 +266,7 @@ export function Payroll() {
                 </Card>
 
                 <Card title="Select deals to pay" extra={d ? `${d.lines.length} outstanding line${d.lines.length === 1 ? '' : 's'} for ${d.rep.name}` : ''}>
-                  <div className="toolbar" style={{ marginBottom: 12 }}>
+                  {!repId ? <div className="empty">Choose a rep above or from the rep rail before viewing payable details.</div> : <><div className="toolbar" style={{ marginBottom: 12 }}>
                     <input className="search" placeholder="Search deal ID, business, merchant contact, email or phone" value={search} onChange={(e) => setSearch(e.target.value)} style={{ minWidth: 340 }} />
                     <button className="btn" disabled={!shown.length || runClosed} onClick={() => setSelected((s) => { const n = { ...s }; shown.forEach((l) => { const keys = l.collectedKeys.length ? l.collectedKeys : l.uncollectedKeys; if (allShown) rowKeys(l).forEach((k) => delete n[k]); else keys.forEach((k) => { n[k] = true; }); }); return n; })}>{allShown ? 'Clear selection' : 'Select all collected'}</button>
                     <span className="count">{selLines.length} of {d?.lines.length ?? 0} lines · {selectedKeys.length} unit{selectedKeys.length === 1 ? '' : 's'}</span>
@@ -294,19 +308,34 @@ export function Payroll() {
                       </div>
                     </div>
                   )}
+                  {selectedUnits.length > 0 && <div className="band" style={{ marginTop: 14 }}>
+                    <div className="label" style={{ marginBottom: 8 }}>Pre-payout manifest · {selectedDealCount} selected deal{selectedDealCount === 1 ? '' : 's'} · {selectedUnits.length} exact ledger unit{selectedUnits.length === 1 ? '' : 's'}</div>
+                    <div className="pl">
+                      {selectedUnits.map((unit) => (
+                        <div className="row" key={unit.key} style={{ alignItems: 'start', gap: 8 }}>
+                          <span className="ellipsis"><b>{unit.dealId}</b> · {unit.business}<span className="subtle"> · {unit.role} · {unitDescription(unit)} · {unit.collected ? 'Collected' : 'Uncollected advance'} · key {unit.key}</span></span>
+                          <span className="num">{money(unit.amount)}</span>
+                          <span style={{ display: 'flex', gap: 8, justifySelf: 'end' }}>
+                            <button className="linkish" style={{ color: 'var(--red)' }} aria-label={`Remove ledger unit ${unit.key} from payout`} onClick={() => setSelected((s) => { const next = { ...s }; delete next[unit.key]; return next; })}>Remove unit</button>
+                            <button className="linkish" style={{ color: 'var(--red)' }} aria-label={`Remove all selected units for deal ${unit.dealId}`} onClick={() => setSelected((s) => { const next = { ...s }; for (const key of (d?.lines ?? []).filter((candidate) => candidate.dealId === unit.dealId).flatMap(rowKeys)) delete next[key]; return next; })}>Remove deal</button>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>}
                   <div className="payfoot"><div className="figs">
                     <div><span className="label">Selected</span><b>{selLines.length} of {d?.lines.length ?? 0}</b></div>
                     <div><span className="label">Gross</span><b>{money(selGross)}</b></div>
                     <div><span className="label">Clawbacks netted</span><b style={{ color: withheld ? 'var(--red-bright)' : undefined }}>{withheld ? money(-withheld) : '$0'}</b></div>
                     <div><span className="label">Net to pay</span><b style={{ color: 'var(--teal-bright)' }}>{money(selGross - withheld)}</b></div>
-                    </div><button className="btn primary big" disabled={busy || !selLines.length || runClosed} onClick={() => void pay()}>{busy ? 'Recording…' : 'Pay selected & record'}</button>
+                    </div><button className="btn primary big" disabled={busy || !repId || !selectedKeys.length || runClosed} onClick={() => void pay()}>{busy ? 'Recording…' : 'Pay selected & record'}</button>
                   </div>
                   {uncollected.length > 0 && <div className="band amber">{uncollected.length} selected deal line(s) sit on commission the lender has not paid yet ({uncollected.slice(0, 4).join(', ')}{uncollected.length > 4 ? '…' : ''}). Paying now advances the rep against uncollected commission.</div>}
                   {d && d.outstandingClawback > 0 && <div className="band red">Outstanding clawback balance for {d.rep.name}: <b>{money(d.outstandingClawback)}</b> across {d.clawbacks.length} deal(s){withheld ? <> — <b>{money(withheld)}</b> recovers on this payout, leaving {money(d.outstandingClawback - withheld)}.</> : '. It nets against the next payout that has gross to withhold from.'}</div>}
-                </Card>
+                </>}</Card>
 
                 <Card title="Paid in this run" extra={d && d.paidInRun.length ? <>{d.paidSummary.lineCount} deal line(s) · cash {money(d.paidSummary.cash)}{d.paidSummary.voided ? ` · ${money(d.paidSummary.voided)} voided` : ''} {activeRun.status !== 'archived' && d.paidInRun.some((p) => !p.voided && p.role !== 'Void') && <button className="btn" style={{ marginLeft: 10, height: 28, padding: '0 10px', color: 'var(--red)' }} onClick={() => void voidRows()}>Void everything in this run for {d.rep.name}</button>}</> : ''}>
-                  {!d || d.paidInRun.length === 0 ? <div className="muted">Nothing recorded for {d?.rep.name ?? 'this rep'} in {activeRun.label} yet.</div> : (
+                  {!repId ? <div className="muted">Choose a rep to view payouts recorded in this run.</div> : !d || d.paidInRun.length === 0 ? <div className="muted">Nothing recorded for {d?.rep.name ?? 'this rep'} in {activeRun.label} yet.</div> : (
                     <>
                       <div className="scroller">
                         <div className="table" style={{ ['--cols' as string]: '90px minmax(170px,1.2fr) minmax(150px,1fr) 170px 120px minmax(0,1fr)', minWidth: 800 }}>

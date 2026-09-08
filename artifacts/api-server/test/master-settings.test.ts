@@ -68,13 +68,18 @@ describe('Settings › Portal', () => {
   it('turns emails off per kind, and the senders honour it', async () => {
     const { admin, repo, mailer } = await harness();
     expect((await admin.put('/api/admin/settings/notifications').send({ digestHourUtc: 25 })).status).toBe(400);
-    const r = await admin.put('/api/admin/settings/notifications').send({ statements: true, clawbacks: false, renewalDigest: false, repQuestions: true, digestHourUtc: 9 });
-    expect(r.body.notifications).toEqual({ statements: true, clawbacks: false, renewalDigest: false, repQuestions: true, digestHourUtc: 9, playbookHourUtc: 12 });
+    const r = await admin.put('/api/admin/settings/notifications').send({ statements: true, payoutRecorded: false, clawbacks: false, renewalDigest: false, repQuestions: true, playbookRepEmail: false, playbookAdminEmail: true, digestHourUtc: 9 });
+    expect(r.body.notifications).toEqual({ statements: true, payoutRecorded: false, clawbacks: false, renewalDigest: false, repQuestions: true, playbookRepEmail: false, playbookAdminEmail: true, digestHourUtc: 9, playbookHourUtc: 12 });
+    expect((await admin.put('/api/admin/settings/notifications').send({ unknown: true })).status).toBe(400);
+    expect((await admin.put('/api/admin/settings/notifications').send({ payoutRecorded: 'false' })).status).toBe(400);
     const cb = await admin.post('/api/admin/deals/F2/clawbacks').send({ amount: 500, date: '2026-08-01', reason: 'Merchant defaulted' });
     expect(cb.status).toBe(201);
     expect(cb.body.notified).toBe(0);
     expect(mailer.sent).toHaveLength(0);
     expect(await renewalDigest({ repo, mailer, origin: 'https://portal.test', appName: 'Test' }, '2026-09-03')).toEqual({ sent: 0, deals: 0 });
+    // PATCH-like PUTs retain switches and hours omitted by this controller.
+    const partial = await admin.put('/api/admin/settings/notifications').send({ renewalDigest: true });
+    expect(partial.body.notifications).toMatchObject({ payoutRecorded: false, clawbacks: false, renewalDigest: true, playbookRepEmail: false, playbookAdminEmail: true, digestHourUtc: 9, playbookHourUtc: 12 });
     // Names from Settings › Portal sign the emails that are still on.
     await admin.put('/api/admin/settings/portal').send({ company: 'Greystone', portal: 'Rep portal' });
     await admin.put('/api/admin/settings/notifications').send({ renewalDigest: true, digestHourUtc: 9 });

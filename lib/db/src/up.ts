@@ -70,6 +70,7 @@ const FINGERPRINTS: Record<string, Fingerprint> = {
     { kind: 'view', name: 'commission_operational_deals' },
   ] },
   '0018_reconciliation_statements': { table: 'commission_reconciliations', column: 'opening_balance' },
+  '0019_clawback_forgiveness': { table: 'commission_clawbacks', column: 'forgiven_at' },
 };
 
 interface JournalEntry { idx: number; when: number; tag: string }

@@ -62,6 +62,35 @@ describe('planPayout', () => {
     expect(state.clawbacks[0]?.recovered).toBe(350);
   });
 
+  it('recovers a post-payout lender-only liability from next earnings without altering PSF payout history', () => {
+    const lenderAndPsf = makeDeal({
+      id: 'L-PSF', funded: 10_000, commRate: 0.08, psfPct: 0.02, commCollected: 1_000,
+      closerId: null, overrideId: null, openerRate: 0.35,
+    });
+    const future = makeDeal({
+      id: 'NEXT', funded: 10_000, commRate: 0.1, commCollected: 1_000,
+      closerId: null, overrideId: null, openerRate: 0.35,
+    });
+    const original = line('L-PSF|Opener|base', 'rep-07', 350);
+    const cb = makeClawback('cb-lender-only', 'L-PSF', 800);
+    const before = ctx([lenderAndPsf], [original], [cb]);
+    // Original $350 was paid on gross (including PSF) and remains immutable;
+    // new clawback debt is only 35% of $800 lender commission.
+    expect(repLedger(before, 'rep-07')).toMatchObject({ paid: 350, held: 280, balance: -280, payable: 0 });
+    expect(before.lines).toEqual([original]);
+
+    // Once a new collected $350 earning arrives, the canonical balance can
+    // release only $70 cash and must recover the $280 lender-only liability.
+    const withFutureEarning = { ...before, deals: [...before.deals, future] };
+    expect(repLedger(withFutureEarning, 'rep-07')).toMatchObject({ balance: 70, payable: 70 });
+    const plan = planPayout(withFutureEarning, { repId: 'rep-07', selectedKeys: ['NEXT|Opener|base'], runId: 'run-4', paidAt: '2026-09-02' });
+    expect(plan).toMatchObject({ gross: 350, withheld: 280, net: 70 });
+    expect(plan.recoveries).toEqual([expect.objectContaining({ clawbackId: 'cb-lender-only', amount: -280 })]);
+    const after = applyPayout(withFutureEarning, plan);
+    expect(after.lines.find((row) => row.key === original.key)).toEqual(original);
+    expect(repLedger(after, 'rep-07')).toMatchObject({ held: 0, balance: 0, payable: 0 });
+  });
+
   it('uses append-only keys for sequential partial recoveries in the same run', () => {
     const liability = makeDeal({ id: 'L', commCollected: 0, closerId: null, overrideId: null, openerRate: 1 });
     const p1 = makeDeal({ id: 'P1', funded: 6_000, commCollected: 600, closerId: null, overrideId: null, openerRate: 1 });
@@ -141,5 +170,22 @@ describe('planPayout', () => {
     const c = ctx([F1, F2], [], [cb]);
     expect(payoutPreview(c, 'rep-07', ['F2|Opener|base'])).toEqual({ gross: 700, withheld: 0, net: 700, outstandingClawback: 350 });
     expect(payoutPreview(c, 'rep-07', [])).toEqual({ gross: 0, withheld: 0, net: 0, outstandingClawback: 350 });
+  });
+
+  it('never charges a retained forgiven clawback against future collected earnings', () => {
+    const forgiven = makeClawback('cb-forgiven', 'F1', 1_000, { forgivenAt: '2026-08-30' });
+    const c = ctx([{ ...F1, commCollected: 0 }, F2], [], [forgiven]);
+    const preview = payoutPreview(c, 'rep-07', ['F2|Opener|base']);
+    const plan = planPayout(c, { repId: 'rep-07', selectedKeys: ['F2|Opener|base'], runId: 'run-4', paidAt: '2026-09-02' });
+
+    expect(preview).toEqual({ gross: 700, withheld: 0, net: 700, outstandingClawback: 0 });
+    expect(plan).toMatchObject({ gross: preview.gross, withheld: preview.withheld, net: preview.net });
+    expect(plan.recoveries).toEqual([]);
+    expect(plan.clawbackUpdates).toEqual([]);
+
+    const after = applyPayout(c, plan);
+    expect(after.lines.some((row) => row.clawbackId === forgiven.id)).toBe(false);
+    expect(repLedger(c, 'rep-07')).toMatchObject({ held: 0, balance: 700, payable: 700 });
+    expect(repLedger(after, 'rep-07')).toMatchObject({ held: 0, balance: 0, payable: 0 });
   });
 });

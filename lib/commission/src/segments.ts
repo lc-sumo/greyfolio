@@ -65,6 +65,35 @@ export function totalGross(deal: Deal): number {
   return sum(segments(deal).map((s) => s.gross));
 }
 
+/**
+ * Lender-paid commission available to be clawed back.
+ *
+ * Gross intentionally remains the portal's full revenue/payout measure, and
+ * includes the merchant-paid PSF.  A clawback is not a reversal of that
+ * merchant fee: it is limited to the lender-paid portion.  Draws carry no PSF
+ * by construction.  For the base segment, commission and PSF are priced from
+ * the same basis, so their locked rates let us deterministically split the
+ * already-scaled segment gross.  Using `segments()` here is important: stopped
+ * incremental schedules use exactly the same disbursement scaling and cent
+ * rounding as `totalGross`.
+ */
+export function lenderClawbackBase(deal: Deal): number {
+  const variableRate = Math.max(0, deal.commRate) + Math.max(0, deal.psfPct);
+  const psfShare = variableRate > 0 ? Math.max(0, deal.psfPct) / variableRate : 0;
+  // Line and origination fees are fixed gross components, not part of the
+  // rate-priced commission/PSF pool. Calculate PSF from that pool before
+  // applying an incremental schedule's effective gross ratio.
+  const fixedBaseFees = Math.max(0, deal.originationFee) + Math.max(0, deal.lineFee ?? 0);
+  const plannedPsf = cents(Math.max(0, deal.gross - fixedBaseFees) * psfShare);
+  return cents(sum(segments(deal).map((seg) => {
+    // PSF is an initial-deal charge only; LOC draws never carry it.
+    const psf = seg.sk === 'base' && deal.gross > 0
+      ? cents(plannedPsf * (seg.gross / deal.gross))
+      : 0;
+    return cents(Math.max(0, seg.gross - psf));
+  })));
+}
+
 /** Net commission across every segment — the base for every rep share. */
 export function totalNet(deal: Deal): number {
   return sum(segments(deal).map((s) => s.net));

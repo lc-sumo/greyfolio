@@ -299,6 +299,8 @@ export interface Clawback {
   recovered: number;
   reason: string;
   status: 'open' | 'recovered';
+  /** Tombstone retained for recovery and accounting history; absent on legacy in-memory fixtures means active. */
+  forgivenAt?: string | null;
 }
 
 export interface PayrollRun {

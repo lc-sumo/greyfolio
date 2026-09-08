@@ -96,7 +96,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button className="btn" onClick={() => setEditing(true)} title="Correct amount, lender, product, dates, rates — the deal re-prices">Edit terms</button>
             <button className="btn" style={{ color: 'var(--red)' }} onClick={() => void remove()} title="Only a deal nothing was paid on can be deleted">Delete deal</button>
-            <RecordClawback dealId={d.id} gross={d.gross} onDone={(label) => run(label, async () => {})} />
+            <RecordClawback dealId={d.id} lenderClawbackBase={d.lenderClawbackBase} onDone={(label) => run(label, async () => {})} />
             <button className="btn" onClick={() => setContact((v) => !v)} title="Fix the business name, contact, email or phone — allowed on paid deals">Edit contact</button>
           </div>
           {contact && <ContactEditor deal={d} onDone={(label) => { setContact(false); void run(label, async () => {}); }} onCancel={() => setContact(false)} />}
@@ -240,7 +240,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
           )}
 
           <section className="card">
-            <h3>Splits <small>editing an existing deal may reference inactive reps</small></h3>
+            <h3>Splits <small>{d.splitsLocked ? 'locked · void payout history to edit economics' : 'editing an existing deal may reference inactive reps'}</small></h3>
             <div className="form">
               {(['opener', 'closer', 'override'] as const).map((role, i) => (
                 <div className="split-row" key={role}>
@@ -255,7 +255,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
                 </div>
               ))}
             </div>
-            <button className="btn primary" style={{ marginTop: 10 }} disabled={opts.length === 0} title={opts.length === 0 ? 'Loading reps…' : undefined} onClick={() => run(`${d.id} — splits saved`, () => post(`/api/admin/deals/${id}/splits`, { openerId: splits.openerId || null, openerRate: Number(splits.openerRate), closerId: splits.closerId || null, closerRate: Number(splits.closerRate), overrideId: splits.overrideId || null, overrideRate: Number(splits.overrideRate) }, 'PATCH'))}>Save splits</button>
+            <button className="btn primary" style={{ marginTop: 10 }} disabled={opts.length === 0 || d.splitsLocked} title={d.splitsLocked ? 'Void standing commission payouts before changing role assignments or rates' : opts.length === 0 ? 'Loading reps…' : undefined} onClick={() => run(`${d.id} — splits saved`, () => post(`/api/admin/deals/${id}/splits`, { openerId: splits.openerId || null, openerRate: Number(splits.openerRate), closerId: splits.closerId || null, closerRate: Number(splits.closerRate), overrideId: splits.overrideId || null, overrideRate: Number(splits.overrideRate) }, 'PATCH'))}>Save splits</button>
           </section>
 
           <section className="card">

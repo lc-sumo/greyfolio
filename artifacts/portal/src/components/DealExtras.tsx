@@ -6,7 +6,7 @@ import { fullDay, money } from '../lib/format';
 import { useSession } from '../lib/session';
 
 /** Admin drawer add-ons: record a clawback, keep a note history, attach files. */
-export function RecordClawback({ dealId, gross, onDone }: { dealId: string; gross: number; onDone: (label: string) => void }) {
+export function RecordClawback({ dealId, lenderClawbackBase, onDone }: { dealId: string; lenderClawbackBase: number; onDone: (label: string) => void }) {
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
@@ -16,10 +16,10 @@ export function RecordClawback({ dealId, gross, onDone }: { dealId: string; gros
   if (!open) return <button className="btn" style={{ color: 'var(--red)' }} onClick={() => setOpen(true)} title="The lender clawed back commission — each rep's slice nets against their next payout">Record clawback</button>;
   return (
     <section className="card" style={{ borderColor: 'var(--red-light-2)' }}>
-      <h3>Record a clawback <small>on gross commission of {money(gross)}; reps repay pro-rata, once</small></h3>
+      <h3>Record a clawback <small>lender-paid commission available: {money(lenderClawbackBase)} · merchant PSF excluded</small></h3>
       <div className="form">
         <div className="split-row">
-          <label className="field"><span className="label">Amount clawed back $</span><input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus /></label>
+          <label className="field"><span className="label">Lender clawback amount $</span><input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus /></label>
           <label className="field"><span className="label">Date</span><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
           <label className="field"><span className="label">Reason</span><input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Merchant defaulted inside the window" /></label>
         </div>

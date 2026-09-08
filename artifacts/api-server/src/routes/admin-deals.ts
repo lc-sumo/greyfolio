@@ -102,10 +102,12 @@ export function adminDealsRouter(repo: Repo, notify?: Omit<NotifyDeps, 'repo'>):
     await deleteDeal(repo, String(req.params.id), currentUser(req)!.repId);
     res.status(204).end();
   });
-  r.patch('/deals/:id/splits', async (req, res) => {
+  const saveSplits = async (req: Parameters<Router>[0], res: Parameters<Router>[1]) => {
     await updateSplits(repo, String(req.params.id), req.body, currentUser(req)!.repId);
     res.json(await detailOf(String(req.params.id)));
-  });
+  };
+  r.patch('/deals/:id/splits', saveSplits);
+  r.post('/deals/:id/splits', saveSplits);
   r.patch('/deals/:id/status', async (req, res) => {
     await setDealStatus(repo, String(req.params.id), String(req.body?.dealStatus ?? ''), currentUser(req)!.repId);
     res.json(await detailOf(String(req.params.id)));

@@ -91,7 +91,7 @@ export interface AdminDealRow {
   id: string; renewedFromId: string | null; renewedById: string | null; opportunityId: string; parentId: string | null; date: string; business: string; drawCount: number;
   merchantContact: string; merchantEmail: string; merchantPhone: string; lender: string; product: string;
   funded: number; factor: number | null; apr: number | null; termDays: number | null; frequency: string; payback: number | null;
-  commRate: number; psfPct: number; originationFee: number; lineRate: number | null; lineFee: number; gross: number; referralPartner: string | null; referralRate: number; referralFee: number; net: number;
+  commRate: number; psfPct: number; originationFee: number; lineRate: number | null; lineFee: number; gross: number; lenderClawbackBase: number; referralPartner: string | null; referralRate: number; referralFee: number; net: number;
   roles: RoleView[]; totalRepPayout: number; repBalance: number; repPayable: number; houseNet: number; collected: number; outstanding: number; lenderPaidLabel: string;
   commissionStatus: string; dealStatus: string; storedDealStatus: string; atRisk: boolean; repPaid: string | null; lenderPaid: string | null; crmId: string | null; crmUrl: string;
   creditLine: number | null; creditLineUsed: number | null; creditLineAvailable: number | null; leadSource: string | null; notes: string | null; drawSubsequentPct: number | null; hasClawback: boolean; clawbackWindow: ClawbackWindow; overdueReceipts: number; overdueAmount: number; increments: { total: number; lenderPaid: number; repPaid: number; disbursed: number; planned: number; perIncrement: number; stopped: boolean } | null;
@@ -102,6 +102,7 @@ export interface ScheduleView { disbursement: Disbursement; amounts: number[] | 
 export interface SegmentView { sk: string; label: string; n: number; date: string; amount: number; commRate: number; gross: number; referralFee: number; net: number; collected: number; outstanding: number; status: string; lenderPaidLabel: string; schedule: ScheduleView | null; termDays: number | null; factor: number | null; payback: number | null; payment: number | null }
 export interface AdminDealDetail extends AdminDealRow {
   segments: SegmentView[];
+  splitsLocked: boolean;
   payments: Array<{ role: string; segmentKey: string | null; unit: string | null; repId: string; repName: string; amount: number; paidAt: string; runId: string | null }>;
   clawbacks: Array<{ id: string; date: string; amount: number; recovered: number; reason: string; status: string; slices: Array<{ repId: string; name: string; share: number; recovered: number; remaining: number }> }>;
 }

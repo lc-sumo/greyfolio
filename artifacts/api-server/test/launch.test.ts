@@ -112,7 +112,8 @@ describe('clawbacks, notes and files on a deal', () => {
     const res = await admin.post('/api/admin/deals/F2/clawbacks').send({ amount: 500, date: '2026-08-01', reason: 'Merchant defaulted' });
     expect(res.status).toBe(201);
     expect(res.body.clawbacks).toHaveLength(1);
-    expect(res.body.clawbacks[0]).toMatchObject({ id: 'cb-F2-1', amount: 500, status: 'open' });
+    expect(res.body.clawbacks[0]).toMatchObject({ amount: 500, status: 'open' });
+    expect(res.body.clawbacks[0].id).toMatch(/^cb-[0-9a-f-]{36}$/);
     // F2 gross 2,000: Julian 35% = 700, Zach 40% = 800, Raymond 5% = 100; the clawback is a quarter of gross.
     const slices = Object.fromEntries(res.body.clawbacks[0].slices.map((s: { repId: string; share: number }) => [s.repId, s.share]));
     expect(slices).toEqual({ 'rep-julian-ribak': 175, 'rep-zach-sanders': 200, 'rep-raymond-amato': 25 });

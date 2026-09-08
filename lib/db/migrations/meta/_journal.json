@@ -134,6 +134,13 @@
       "when": 1788717000000,
       "tag": "0018_reconciliation_statements",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788718000000,
+      "tag": "0019_clawback_forgiveness",
+      "breakpoints": true
     }
   ]
 }

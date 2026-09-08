@@ -149,7 +149,7 @@ describe('deal edits', () => {
   });
 
   it('guards effective-gross schedule stops under lock and keeps allowed schedule mutations tied to account 1200', async () => {
-    const configure = (repo: Awaited<ReturnType<typeof harness>>['repo'], recovered: number) => {
+    const configure = (repo: Awaited<ReturnType<typeof harness>>['repo'], recovered: number, amount = 1_000) => {
       const deal = repo.data.deals.find((candidate) => candidate.id === 'F1')!;
       Object.assign(deal, {
         openerId: 'rep-julian-ribak', openerRate: 1,
@@ -158,7 +158,7 @@ describe('deal edits', () => {
         commCollected: null,
       });
       repo.data.lines[1] = { ...repo.data.lines[1]!, amount: -recovered };
-      repo.data.clawbacks[0] = { ...repo.data.clawbacks[0]!, amount: 1_000, recovered };
+      repo.data.clawbacks[0] = { ...repo.data.clawbacks[0]!, amount, recovered };
     };
     const assert1200Tie = (repo: Awaited<ReturnType<typeof harness>>['repo']) => {
       const deal = repo.data.deals.find((candidate) => candidate.id === 'F1')!;
@@ -178,7 +178,7 @@ describe('deal edits', () => {
     expect(blocked.repo.data.deals.find((deal) => deal.id === 'F1')!.commSchedule?.stoppedAfter).toBeNull();
 
     const allowed = await harness();
-    configure(allowed.repo, 100);
+    configure(allowed.repo, 100, 100);
     expect((await allowed.admin.post('/api/admin/deals/F1/collection').send({ segmentKey: 'base', stopIncrements: true })).status).toBe(200);
     expect(allowed.repo.data.deals.find((deal) => deal.id === 'F1')!.commSchedule?.stoppedAfter).toBe(2);
     assert1200Tie(allowed.repo);
@@ -190,11 +190,69 @@ describe('deal edits', () => {
 
   it('splits may move to an inactive rep on an existing deal (history stays)', async () => {
     const { admin } = await harness();
-    const res = await admin.patch('/api/admin/deals/F1/splits').send({ closerId: 'rep-noah-levine', closerRate: 25 });
+    const res = await admin.patch('/api/admin/deals/F2/splits').send({ closerId: 'rep-noah-levine', closerRate: 25 });
     expect(res.status).toBe(200);
-    expect(res.body.roles[1]).toMatchObject({ name: 'Noah Levine', rate: 0.25, amount: 250 });
-    const cleared = await admin.patch('/api/admin/deals/F1/splits').send({ overrideId: null });
+    expect(res.body.roles[1]).toMatchObject({ name: 'Noah Levine', rate: 0.25, amount: 500 });
+    const cleared = await admin.patch('/api/admin/deals/F2/splits').send({ overrideId: null });
     expect(cleared.body.roles[2]).toMatchObject({ repId: null, rate: 0, amount: 0 });
+  });
+  it('locks paid split economics for POST and PATCH, while allowing no-op saves and edits after void', async () => {
+    const { admin, repo } = await harness();
+    const before = repo.data.deals.find((deal) => deal.id === 'F1')!;
+
+    for (const method of ['post', 'patch'] as const) {
+      const rejected = await admin[method]('/api/admin/deals/F1/splits').send({ openerRate: 20 });
+      expect(rejected.status).toBe(400);
+      expect(rejected.body.error).toMatch(/payouts.*void them.*splits/i);
+      expect(before.openerRate).toBe(0.35);
+    }
+
+    const noOp = await admin.patch('/api/admin/deals/F1/splits').send({
+      openerId: before.openerId,
+      openerRate: 35,
+      closerId: before.closerId,
+      closerRate: 40,
+      overrideId: before.overrideId,
+      overrideRate: 5,
+    });
+    expect(noOp.status).toBe(200);
+    expect(noOp.body.splitsLocked).toBe(true);
+
+    const voided = await admin.post('/api/admin/payroll/runs/run-3/void').send({
+      repId: 'rep-julian-ribak',
+      keys: ['F1|Opener|base'],
+    });
+    expect(voided.status).toBe(200);
+    const changed = await admin.patch('/api/admin/deals/F1/splits').send({ openerRate: 20 });
+    expect(changed.status).toBe(200);
+    expect(changed.body.roles[0].rate).toBe(0.2);
+    expect(changed.body.splitsLocked).toBe(false);
+  });
+
+  it('serializes split edits with payout creation so exactly one economic ordering wins', async () => {
+    const { admin, repo } = await harness();
+    expect((await admin.post('/api/admin/deals/F2/collection').send({ segmentKey: 'base', status: 'YES - Paid In Full' })).status).toBe(200);
+
+    const [pay, split] = await Promise.all([
+      admin.post('/api/admin/payroll/runs/run-4/pay').send({
+        repId: 'rep-zach-sanders',
+        selectedKeys: ['F2|Closer|base'],
+      }),
+      admin.patch('/api/admin/deals/F2/splits').send({ closerRate: 20 }),
+    ]);
+
+    const deal = repo.data.deals.find((candidate) => candidate.id === 'F2')!;
+    const paid = repo.data.lines.find((line) => line.key === 'F2|Closer|base');
+    expect(pay.status).toBe(201);
+    if (split.status === 400) {
+      expect(split.body.error).toMatch(/void them/);
+      expect(deal.closerRate).toBe(0.4);
+      expect(paid?.amount).toBe(800);
+    } else {
+      expect(split.status).toBe(200);
+      expect(deal.closerRate).toBe(0.2);
+      expect(paid?.amount).toBe(400);
+    }
   });
   it('the CRM deal ID is editable and drives the CRM link', async () => {
     const { admin, rep } = await harness();

@@ -10,6 +10,7 @@ import {
   withAmounts,
   scheduleFor,
   segmentOf,
+  standingLines,
   withCollection,
   withRemainder,
   withStatus,
@@ -20,7 +21,7 @@ import {
   type NewDealDraft,
   type SegmentKey,
 } from '@greystone/commission';
-import { clawbackRecovered, clawbackRecoveryExcesses, clawbackRepTotal, totalGross, type Clawback, type DealDraw, type PayoutLine } from '@greystone/commission';
+import { clawbackRecovered, clawbackRecoveryExcesses, clawbackRepTotal, lenderClawbackBase, type Clawback, type DealDraw, type PayoutLine } from '@greystone/commission';
 import { HttpError } from '../http-error.js';
 import type { Repo } from '../repo.js';
 
@@ -48,7 +49,13 @@ function guardRecoveredAttribution(clawback: Clawback, proposedDeal: Deal, lines
 }
 
 function guardDealClawbacks(proposedDeal: Deal, lines: PayoutLine[], clawbacks: Clawback[]): void {
-  for (const clawback of clawbacks) guardRecoveredAttribution(clawback, proposedDeal, lines);
+  const active = clawbacks.filter((clawback) => !clawback.forgivenAt);
+  for (const clawback of active) guardRecoveredAttribution(clawback, proposedDeal, lines);
+  const total = active.reduce((sum, clawback) => sum + clawback.amount, 0);
+  const lenderBase = lenderClawbackBase(proposedDeal);
+  if (total > lenderBase + 0.005) {
+    throw new HttpError(400, `Active clawbacks total ${total.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}; together they cannot exceed the lender-paid commission basis of ${lenderBase.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} (merchant PSF excluded)`);
+  }
 }
 
 function proposedSegmentDeal(current: Deal, segmentKey: SegmentKey, patch: { collected: number | null; schedule: Deal['commSchedule'] }): Deal {
@@ -190,7 +197,7 @@ export async function updateTerms(repo: Repo, id: string, input: Partial<NewDeal
   const patch = { ...pricedFields, commSchedule, commCollected, parentId: draft.parentId || null, opportunityId: draft.parentId || id };
   await repo.updateDealLocked(id, patch, (current, lockedLines, lockedClawbacks) => {
     const proposed = { ...current, ...patch };
-    for (const clawback of lockedClawbacks) guardRecoveredAttribution(clawback, proposed, lockedLines);
+    guardDealClawbacks(proposed, lockedLines, lockedClawbacks);
     if (lockedLines.length) throw new HttpError(400, `${id} has payouts in the ledger — void them before changing its terms`);
     if (priced.creditLine === null) return;
     const used = priced.funded + current.draws.reduce((sum, draw) => sum + draw.amount, 0);
@@ -235,7 +242,19 @@ export async function updateSplits(repo: Repo, id: string, input: SplitsInput, a
   if (!patch.overrideId) patch.overrideRate = 0;
   await repo.updateDealLocked(id, patch, (current, lockedLines, lockedClawbacks) => {
     const proposed = { ...current, ...patch };
-    for (const clawback of lockedClawbacks) guardRecoveredAttribution(clawback, proposed, lockedLines);
+    const economicsChanged =
+      current.openerId !== proposed.openerId ||
+      current.openerRate !== proposed.openerRate ||
+      current.closerId !== proposed.closerId ||
+      current.closerRate !== proposed.closerRate ||
+      current.overrideId !== proposed.overrideId ||
+      current.overrideRate !== proposed.overrideRate;
+    const hasStandingCommissionPayout = standingLines(lockedLines).some((line) =>
+      line.role === 'Opener' || line.role === 'Closer' || line.role === 'Override');
+    guardDealClawbacks(proposed, lockedLines, lockedClawbacks);
+    if (economicsChanged && hasStandingCommissionPayout) {
+      throw new HttpError(400, `${id} has payouts in the ledger — void them before changing its splits`);
+    }
   });
   await repo.writeAudit({ actorRepId, action: 'deal.update', targetRepId: null, path: `/api/admin/deals/${id}/splits`, detail: patch });
   return { ...deal, ...patch };
@@ -375,23 +394,18 @@ export interface ClawbackInput {
  * `repClawback` and nets against their next payout, never twice.
  */
 export async function recordClawback(repo: Repo, dealId: string, input: ClawbackInput, actorRepId: string): Promise<Clawback> {
-  const deal = await requireDeal(repo, dealId);
-  const amount = Number(input.amount);
-  if (!Number.isFinite(amount) || amount <= 0) throw new HttpError(400, 'Clawback amount must be more than zero');
-  const gross = totalGross(deal);
-  if (amount > gross + 0.005) throw new HttpError(400, `A clawback cannot exceed the deal's gross commission (${gross.toLocaleString('en-US', { style: 'currency', currency: 'USD' })})`);
-  const ctxNow = await repo.loadContext();
-  const already = ctxNow.clawbacks.filter((c) => c.dealId === dealId).reduce((t, c) => t + c.amount, 0);
-  if (already + amount > gross + 0.005) throw new HttpError(400, `Clawbacks on ${dealId} already total ${already.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}; together they cannot exceed the deal's gross commission of ${gross.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}`);
-  const date = String(input.date ?? today()).slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new HttpError(400, 'Clawback date must be YYYY-MM-DD');
-  if (date > today()) throw new HttpError(400, 'Clawback date cannot be in the future');
-  if (date < deal.date) throw new HttpError(400, `Clawback date is before the deal funded (${deal.date})`);
-  const ctx = await repo.loadContext();
-  const n = ctx.clawbacks.filter((c) => c.dealId === dealId).length + 1;
-  const clawback: Clawback = { id: `cb-${dealId}-${n}`, dealId, date, amount: Math.round(amount * 100) / 100, recovered: 0, reason: String(input.reason ?? '').trim().slice(0, 500), status: 'open' };
-  await repo.insertClawback(clawback);
-  await repo.writeAudit({ actorRepId, action: 'deal.clawback', targetRepId: null, path: `/api/admin/deals/${dealId}/clawbacks`, detail: { clawbackId: clawback.id, amount: clawback.amount, date } });
+  const clawback = await repo.mutateClawback(dealId, null, ({ deal, activeClawbacks, lines }) => {
+    const amount = Math.round(Number(input.amount) * 100) / 100;
+    if (!Number.isFinite(amount) || amount <= 0) throw new HttpError(400, 'Clawback amount must be more than zero');
+    const date = String(input.date ?? today()).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new HttpError(400, 'Clawback date must be YYYY-MM-DD');
+    if (date > today()) throw new HttpError(400, 'Clawback date cannot be in the future');
+    if (date < deal.date) throw new HttpError(400, `Clawback date is before the deal funded (${deal.date})`);
+    const next: Clawback = { id: `cb-${globalThis.crypto.randomUUID()}`, dealId, date, amount, recovered: 0, reason: String(input.reason ?? '').trim().slice(0, 500), status: 'open' };
+    guardDealClawbacks(deal, lines, [...activeClawbacks, next]);
+    return { result: next, create: next };
+  });
+  await repo.writeAudit({ actorRepId, action: 'deal.clawback', targetRepId: null, path: `/api/admin/deals/${dealId}/clawbacks`, detail: { clawbackId: clawback.id, amount: clawback.amount, date: clawback.date } });
   return clawback;
 }
 
@@ -498,37 +512,34 @@ export async function updateDrawTerms(repo: Repo, dealId: string, ref: string, i
 
 /** Correct a clawback. The amount can only drop as far as what reps have already repaid on it. */
 export async function updateClawback(repo: Repo, dealId: string, clawbackId: string, input: { amount?: unknown; date?: unknown; reason?: unknown }, actorRepId: string): Promise<Clawback> {
-  const deal = await requireDeal(repo, dealId);
-  const ctx = await repo.loadContext();
-  const cb = ctx.clawbacks.find((c) => c.id === clawbackId && c.dealId === dealId);
-  if (!cb) throw new HttpError(404, 'Clawback not found');
-  const patch: Partial<Pick<Clawback, 'amount' | 'date' | 'reason'>> = {};
-  if (input.amount !== undefined) {
-    const amount = Math.round(Number(input.amount) * 100) / 100;
-    if (!(amount > 0)) throw new HttpError(400, 'Clawback amount must be more than zero');
-    if (amount > totalGross(deal) + 0.005) throw new HttpError(400, "A clawback cannot exceed the deal's gross commission");
-    patch.amount = amount;
-  }
-  if (input.date !== undefined) {
-    const date = String(input.date).slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > today() || date < deal.date) throw new HttpError(400, 'Clawback date must be between the funded date and today');
-    patch.date = date;
-  }
-  if (input.reason !== undefined) patch.reason = String(input.reason ?? '').trim().slice(0, 500);
-  await repo.updateClawbackLocked(dealId, cb.id, patch, (lockedDeal, lockedClawback, lockedLines) => {
-    guardRecoveredAttribution({ ...lockedClawback, ...patch }, lockedDeal, lockedLines);
+  const updated = await repo.mutateClawback(dealId, clawbackId, ({ deal, clawback, activeClawbacks, lines }) => {
+    if (!clawback || clawback.forgivenAt) throw new HttpError(404, 'Clawback not found');
+    const patch: Partial<Pick<Clawback, 'amount' | 'date' | 'reason'>> = {};
+    if (input.amount !== undefined) {
+      const amount = Math.round(Number(input.amount) * 100) / 100;
+      if (!Number.isFinite(amount) || amount <= 0) throw new HttpError(400, 'Clawback amount must be more than zero');
+      patch.amount = amount;
+    }
+    if (input.date !== undefined) {
+      const date = String(input.date).slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > today() || date < deal.date) throw new HttpError(400, 'Clawback date must be between the funded date and today');
+      patch.date = date;
+    }
+    if (input.reason !== undefined) patch.reason = String(input.reason ?? '').trim().slice(0, 500);
+    const next = { ...clawback, ...patch };
+    guardDealClawbacks(deal, lines, activeClawbacks.map((current) => current.id === clawback.id ? next : current));
+    return { result: { ...next }, update: patch };
   });
-  await repo.writeAudit({ actorRepId, action: 'deal.clawback.update', targetRepId: null, path: `/api/admin/deals/${dealId}/clawbacks/${cb.id}`, detail: patch });
-  return { ...cb, ...patch };
+  await repo.writeAudit({ actorRepId, action: 'deal.clawback.update', targetRepId: null, path: `/api/admin/deals/${dealId}/clawbacks/${clawbackId}`, detail: { amount: updated.amount, date: updated.date, reason: updated.reason } });
+  return updated;
 }
 
 /** Forgive / remove a clawback recorded in error. Refused once any rep has repaid on it — void those recoveries first. */
 export async function deleteClawback(repo: Repo, dealId: string, clawbackId: string, actorRepId: string): Promise<void> {
-  await requireDeal(repo, dealId);
-  const ctx = await repo.loadContext();
-  const cb = ctx.clawbacks.find((c) => c.id === clawbackId && c.dealId === dealId);
-  if (!cb) throw new HttpError(404, 'Clawback not found');
-  if (ctx.lines.some((l) => l.clawbackId === cb.id && l.role === 'Clawback recovery')) throw new HttpError(400, 'Reps have repaid on this clawback — void those recovery rows in payroll first');
-  await repo.deleteClawback(cb.id);
+  const cb = await repo.mutateClawback(dealId, clawbackId, ({ clawback, lines }) => {
+    if (!clawback || clawback.forgivenAt) throw new HttpError(404, 'Clawback not found');
+    if (clawbackRecovered(lines, clawback.id) > 0) throw new HttpError(400, 'Reps have repaid on this clawback — void those recovery rows in payroll first');
+    return { result: clawback, forgive: true };
+  });
   await repo.writeAudit({ actorRepId, action: 'deal.clawback.delete', targetRepId: null, path: `/api/admin/deals/${dealId}/clawbacks/${cb.id}`, detail: { amount: cb.amount, date: cb.date } });
 }

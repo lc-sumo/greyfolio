@@ -167,7 +167,7 @@ export function projectAccounting(input: AccountingProjectionInput): AccountingP
     }
   }
   const dealsById = new Map(input.deals.map((d) => [d.id, d]));
-  for (const cb of [...input.clawbacks].sort((a, b) => a.id.localeCompare(b.id))) if (cb.amount > 0) {
+  for (const cb of [...input.clawbacks].sort((a, b) => a.id.localeCompare(b.id))) if (!cb.forgivenAt && cb.amount > 0) {
     const deal = dealsById.get(cb.dealId);
     const dimensions = { dealId: cb.dealId };
     out.push(journal({

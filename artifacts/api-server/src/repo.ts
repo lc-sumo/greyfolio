@@ -17,6 +17,29 @@ export interface PlannedPayoutMutation<T> {
   result: T;
 }
 
+/**
+ * Snapshot supplied to a clawback mutation while its parent deal is locked.
+ * `clawback` intentionally includes a forgiven target, while
+ * `activeClawbacks` follows every operational/context read and excludes it.
+ * Lines include positive payout, recovery, and append-only Void history.
+ */
+export interface ClawbackMutationContext {
+  deal: Deal;
+  clawback: Clawback | null;
+  activeClawbacks: Clawback[];
+  lines: PayoutLine[];
+}
+
+export type ClawbackMutation<T> = {
+  result: T;
+  /** Create is valid only when `clawbackId` is null. IDs are service-owned and must be collision-safe. */
+  create?: Clawback;
+  /** Update is valid only when `clawbackId` names a row on the locked deal. */
+  update?: Partial<Pick<Clawback, 'amount' | 'date' | 'reason'>>;
+  /** Retains the row and all recovery foreign keys by timestamping it. */
+  forgive?: boolean;
+};
+
 export interface Thresholds {
   clawbackWindowDays: number;
   paymentOverdueDays: number;
@@ -181,6 +204,13 @@ export interface Repo {
   /** Serializes clawback economics with deal attribution and recovery rows. */
   updateClawbackLocked(dealId: string, id: string, patch: Partial<Pick<Clawback, 'amount' | 'date' | 'reason'>>, validate: (deal: Deal, clawback: Clawback, lines: PayoutLine[]) => void): Promise<void>;
   deleteClawback(id: string): Promise<void>;
+  /**
+   * The single transactional lifecycle primitive for future clawback services.
+   * It takes the same parent-deal row lock as deal monetary edits (and payroll)
+   * before reloading authoritative draws, clawbacks, and ledger/void history.
+   * The callback returns at most one lifecycle write: create, update, or forgive.
+   */
+  mutateClawback<T>(dealId: string, clawbackId: string | null, mutate: (context: ClawbackMutationContext) => ClawbackMutation<T> | Promise<ClawbackMutation<T>>): Promise<T>;
   /** Cascade a settings rename onto the deals that reference the old name. Returns how many changed. */
   renameRef(kind: 'lender' | 'partner' | 'product', from: string, to: string): Promise<number>;
   insertDraw(dealId: string, draw: DealDraw): Promise<void>;

@@ -237,9 +237,11 @@ export const commissionClawbacks = pgTable(
     // Phase 1 addition
     /** Roll-up of every negative ledger row against this clawback. Must equal `clawbackRecovered(lines, id)`. */
     recovered: money('recovered').notNull().default(0),
+    /** A forgiven clawback remains available to historical recovery rows, but is not operationally active. */
+    forgivenAt: timestamp('forgiven_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
-  (t) => [index('commission_clawbacks_deal_idx').on(t.dealId)],
+  (t) => [index('commission_clawbacks_deal_idx').on(t.dealId), index('commission_clawbacks_active_deal_idx').on(t.dealId).where(sql`${t.forgivenAt} is null`)],
 );
 
 /**

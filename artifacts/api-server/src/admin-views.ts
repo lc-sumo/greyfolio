@@ -1,5 +1,5 @@
 /** Admin projections: everything, including house net, referral and every rep's name. Never served to reps. */
-import { RENEWAL_BUCKET_LABEL, cents, clawbackSlices, clawbackWindow, collectedGross, collectedOf, collectionLabel, crmUrl, dealCommissionStatus, dealLines, dealPayback, disbursementOf, effectiveDealStatus, effectiveIncrements, houseNet, isLinePaid, outstandingGross, outstandingOf, paidKeys, paymentFor, renewalOf, roleAssignments, scheduleEvents, scheduleParts, segmentStatus, segments, standingLines, sum, totalFunded, totalGross, totalNet, totalRepPayout, type Clawback, type ClawbackWindow, type Deal, type LedgerContext, type RenewalBucket, type Rep, type Role, type ScheduleEvent, type Segment, unitsPaid } from '@greystone/commission';
+import { RENEWAL_BUCKET_LABEL, cents, clawbackSlices, clawbackWindow, collectedGross, collectedOf, collectionLabel, crmUrl, dealCommissionStatus, dealLines, dealPayback, disbursementOf, effectiveDealStatus, effectiveIncrements, houseNet, isLinePaid, lenderClawbackBase, outstandingGross, outstandingOf, paidKeys, paymentFor, renewalOf, roleAssignments, scheduleEvents, scheduleParts, segmentStatus, segments, standingLines, sum, totalFunded, totalGross, totalNet, totalRepPayout, type Clawback, type ClawbackWindow, type Deal, type LedgerContext, type RenewalBucket, type Rep, type Role, type ScheduleEvent, type Segment, unitsPaid } from '@greystone/commission';
 import type { Settings } from './repo.js';
 
 export interface RoleView {
@@ -38,6 +38,8 @@ export interface AdminDealRow {
   lineRate: number | null;
   lineFee: number;
   gross: number;
+  /** Maximum aggregate lender clawback; merchant-paid PSF is excluded. */
+  lenderClawbackBase: number;
   referralPartner: string | null;
   referralRate: number;
   referralFee: number;
@@ -119,6 +121,7 @@ export function adminDealRow(deal: Deal, ctx: LedgerContext, reps: Rep[], settin
     lineRate: deal.lineRate ?? null,
     lineFee: deal.lineFee ?? 0,
     gross: totalGross(deal),
+    lenderClawbackBase: lenderClawbackBase(deal),
     referralPartner: deal.referralPartner,
     referralRate: deal.referralRate,
     referralFee: sum(segs.map((s) => s.referralFee)),
@@ -210,6 +213,8 @@ export interface SegmentView {
 
 export interface AdminDealDetail extends AdminDealRow {
   segments: SegmentView[];
+  /** Standing commission ledger rows make role/rate economics immutable until voided. */
+  splitsLocked: boolean;
   payments: Array<{ role: string; segmentKey: string | null; unit: string | null; repId: string; repName: string; amount: number; paidAt: string; runId: string | null }>;
   clawbacks: Array<Clawback & { slices: Array<{ repId: string; name: string; share: number; recovered: number; remaining: number }> }>;
 }
@@ -224,6 +229,7 @@ export function adminDealDetail(deal: Deal, ctx: LedgerContext, reps: Rep[], set
   const name = (id: string) => reps.find((r) => r.id === id)?.name ?? id;
   return {
     ...row,
+    splitsLocked: standingLines(ctx.lines).some((l) => l.dealId === deal.id && (l.role === 'Opener' || l.role === 'Closer' || l.role === 'Override')),
     segments: segments(deal).map((s) => ({
       sk: s.sk,
       label: s.label,

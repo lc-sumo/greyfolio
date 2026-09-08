@@ -1,5 +1,5 @@
 import { assertBalanced, cents, journalFingerprint, projectAccounting, type AccountingJournal, type Clawback, type Deal, type DealDraw, type LedgerContext, type PayoutLine, type PayrollRun, type Rep, type Team, type WeeklySchedule } from '@greystone/commission';
-import { NOTIFICATION_DEFAULTS, PERMISSION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AccountingPeriod, type AuditEntry, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Reconciliation, type Repo, type RepFile, type RepTask, type Settings, type StoredJournal, type TotpState, type TrustedDevice } from './repo.js';
+import { NOTIFICATION_DEFAULTS, PERMISSION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AccountingPeriod, type AuditEntry, type ClawbackMutationContext, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Reconciliation, type Repo, type RepFile, type RepTask, type Settings, type StoredJournal, type TotpState, type TrustedDevice } from './repo.js';
 import { requestMeta } from './auth/request-context.js';
 
 export interface MemoryData {
@@ -14,6 +14,9 @@ export interface MemoryData {
 
 /** In-memory Repo over plain arrays. Mutates the arrays it is given. */
 export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data: MemoryData } {
+  // SQL reads nullable timestamps as null; normalize legacy fixtures which
+  // predate this additive column to that same active representation.
+  for (const clawback of data.clawbacks) clawback.forgivenAt ??= null;
   const audit: AuditEntry[] = [];
   const ctx: LedgerContext = data;
   const passwords = new Map<string, string>();
@@ -36,6 +39,21 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
   let initialAccountingSyncCompleted = false;
   let accountingQueue: Promise<void> = Promise.resolve();
   const payoutQueues = new Map<string, Promise<void>>();
+  const dealQueues = new Map<string, Promise<void>>();
+  async function serializeDeal<T>(dealId: string, work: () => T | Promise<T>): Promise<T> {
+    const previous = dealQueues.get(dealId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    const tail = previous.catch(() => undefined).then(() => current);
+    dealQueues.set(dealId, tail);
+    await previous.catch(() => undefined);
+    try {
+      return await work();
+    } finally {
+      release();
+      if (dealQueues.get(dealId) === tail) dealQueues.delete(dealId);
+    }
+  }
   async function serializePayout<T>(repId: string, work: () => T | Promise<T>): Promise<T> {
     const previous = payoutQueues.get(repId) ?? Promise.resolve();
     let release!: () => void;
@@ -98,7 +116,7 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
       try {
         let projectionResult: ReturnType<typeof projectAccounting> | null = null;
         if (entries === null) {
-          projectionResult = projectAccounting({ deals: data.deals, payoutLines: data.lines, clawbacks: data.clawbacks });
+          projectionResult = projectAccounting({ deals: data.deals, payoutLines: data.lines, clawbacks: data.clawbacks.filter((clawback) => !clawback.forgivenAt) });
           entries = projectionResult.journals;
         }
         entries.forEach(assertBalanced);
@@ -405,7 +423,7 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
       return data.runs;
     },
     async loadContext() {
-      return ctx;
+      return { ...ctx, clawbacks: data.clawbacks.filter((clawback) => !clawback.forgivenAt) };
     },
     async getSetting<T>(key: string): Promise<T | null> {
       return ((data.settings as unknown as Record<string, unknown>)[key] as T) ?? null;
@@ -431,7 +449,7 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
       data.deals.unshift({ ...deal, draws: [...deal.draws] });
     },
     async insertClawback(c) {
-      data.clawbacks.push({ ...c });
+      data.clawbacks.push({ ...c, forgivenAt: c.forgivenAt ?? null });
     },
     async updateClawback(id, patch) {
       const i = data.clawbacks.findIndex((x) => x.id === id);
@@ -447,8 +465,36 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
       Object.assign(clawback, patch);
     },
     async deleteClawback(id) {
-      const i = data.clawbacks.findIndex((x) => x.id === id);
-      if (i >= 0) data.clawbacks.splice(i, 1);
+      const clawback = data.clawbacks.find((x) => x.id === id);
+      if (clawback && !clawback.forgivenAt) clawback.forgivenAt = new Date().toISOString();
+    },
+    async mutateClawback<T>(dealId: string, clawbackId: string | null, mutate: (context: ClawbackMutationContext) => import('./repo.js').ClawbackMutation<T> | Promise<import('./repo.js').ClawbackMutation<T>>): Promise<T> {
+      return serializeDeal(dealId, async () => {
+        const deal = data.deals.find((x) => x.id === dealId);
+        if (!deal) throw new Error(`No deal ${dealId}`);
+        const target = clawbackId === null ? null : data.clawbacks.find((x) => x.id === clawbackId && x.dealId === dealId) ?? null;
+        if (clawbackId !== null && !target) throw new Error(`No clawback ${clawbackId} on deal ${dealId}`);
+        const mutation = await mutate({
+          deal: { ...deal, draws: deal.draws.map((draw) => ({ ...draw })) },
+          clawback: target ? { ...target } : null,
+          activeClawbacks: data.clawbacks.filter((c) => c.dealId === dealId && !c.forgivenAt).map((c) => ({ ...c })),
+          lines: data.lines.filter((line) => line.dealId === dealId).map((line) => ({ ...line })),
+        });
+        const writes = Number(!!mutation.create) + Number(!!mutation.update) + Number(!!mutation.forgive);
+        if (writes > 1) throw new Error('A clawback mutation may create, update, or forgive, not multiple lifecycle writes');
+        if (mutation.create) {
+          if (clawbackId !== null || mutation.create.dealId !== dealId) throw new Error('Clawback create must use the locked deal and no target id');
+          if (data.clawbacks.some((c) => c.id === mutation.create!.id)) throw new Error(`Clawback ${mutation.create.id} already exists`);
+          data.clawbacks.push({ ...mutation.create, forgivenAt: mutation.create.forgivenAt ?? null });
+        } else if (mutation.update) {
+          if (!target) throw new Error('Clawback update requires a target');
+          Object.assign(target, mutation.update);
+        } else if (mutation.forgive) {
+          if (!target) throw new Error('Clawback forgive requires a target');
+          target.forgivenAt = new Date().toISOString();
+        }
+        return mutation.result;
+      });
     },
     async renameRef(kind, from, to) {
       let n = 0;
@@ -644,7 +690,7 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
         const planned = plan({
           deals: data.deals.map((deal) => ({ ...deal, draws: deal.draws.map((draw) => ({ ...draw })) })),
           lines: data.lines.map((line) => ({ ...line })),
-          clawbacks: data.clawbacks.map((clawback) => ({ ...clawback })),
+          clawbacks: data.clawbacks.filter((clawback) => !clawback.forgivenAt).map((clawback) => ({ ...clawback })),
         });
         const c = planned.commit;
         for (const l of c.lines) if (data.lines.some((x) => x.key === l.key)) throw new Error(`Ledger key ${l.key} already exists`);

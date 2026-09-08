@@ -113,5 +113,5 @@ export function toPayoutLine(l: PayoutLineRow): PayoutLine {
 }
 
 export function toClawback(c: ClawbackRow): Clawback {
-  return { id: c.id, dealId: c.dealId, date: c.date, amount: c.amount, recovered: c.recovered, reason: c.reason, status: c.status as Clawback['status'] };
+  return { id: c.id, dealId: c.dealId, date: c.date, amount: c.amount, recovered: c.recovered, reason: c.reason, status: c.status as Clawback['status'], forgivenAt: c.forgivenAt?.toISOString() ?? null };
 }

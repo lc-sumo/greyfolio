@@ -32,7 +32,7 @@ import {
   toTeam,
   type Database,
 } from '@greystone/db';
-import { NOTIFICATION_DEFAULTS, PERMISSION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AccountingPeriod, type AuditEntry, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Reconciliation, type Repo, type RepFile, type RepTask, type Settings, type StoredJournal, type TotpState, type TrustedDevice } from './repo.js';
+import { NOTIFICATION_DEFAULTS, PERMISSION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AccountingPeriod, type AuditEntry, type ClawbackMutationContext, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Reconciliation, type Repo, type RepFile, type RepTask, type Settings, type StoredJournal, type TotpState, type TrustedDevice } from './repo.js';
 import type { PlaybookRule } from './services/playbook-rules.js';
 import { requestMeta } from './auth/request-context.js';
 
@@ -110,7 +110,7 @@ export function dbRepo(db: Database): Repo {
             tx.select().from(commissionDeals).where(sql`${commissionDeals.deletedAt} is null`).orderBy(desc(commissionDeals.date), desc(commissionDeals.id)),
             tx.select().from(commissionDealDraws),
             tx.select().from(commissionPayoutLines),
-            tx.select().from(commissionClawbacks),
+            tx.select().from(commissionClawbacks).where(sql`${commissionClawbacks.forgivenAt} is null`),
           ]);
           projectionResult = projectAccounting({ deals: deals.map((d) => toDeal(d, draws)), payoutLines: lines.map(toPayoutLine), clawbacks: clawbacks.map(toClawback) });
           syncEntries = projectionResult.journals;
@@ -441,7 +441,7 @@ export function dbRepo(db: Database): Repo {
         db.select().from(commissionDeals).where(sql`${commissionDeals.deletedAt} is null`).orderBy(desc(commissionDeals.date), desc(commissionDeals.id)),
         db.select().from(commissionDealDraws),
         db.select().from(commissionPayoutLines),
-        db.select().from(commissionClawbacks),
+        db.select().from(commissionClawbacks).where(sql`${commissionClawbacks.forgivenAt} is null`),
       ]);
       return { deals: deals.map((d) => toDeal(d, draws)), lines: lines.map(toPayoutLine), clawbacks: clawbacks.map(toClawback) };
     },
@@ -475,7 +475,7 @@ export function dbRepo(db: Database): Repo {
       };
     },
     async insertClawback(c: Clawback) {
-      await db.insert(commissionClawbacks).values({ id: c.id, dealId: c.dealId, date: c.date, amount: c.amount, reason: c.reason, status: c.status, recovered: c.recovered });
+      await db.insert(commissionClawbacks).values({ id: c.id, dealId: c.dealId, date: c.date, amount: c.amount, reason: c.reason, status: c.status, recovered: c.recovered, forgivenAt: c.forgivenAt ? new Date(c.forgivenAt) : null });
     },
     async deleteDeal(id: string, actorRepId?: string) {
       await db.update(commissionDeals)
@@ -580,7 +580,41 @@ export function dbRepo(db: Database): Repo {
       });
     },
     async deleteClawback(id: string) {
-      await db.delete(commissionClawbacks).where(eq(commissionClawbacks.id, id));
+      await db.update(commissionClawbacks).set({ forgivenAt: sql`now()` }).where(and(eq(commissionClawbacks.id, id), sql`${commissionClawbacks.forgivenAt} is null`));
+    },
+    async mutateClawback<T>(dealId: string, clawbackId: string | null, mutate: (context: ClawbackMutationContext) => import('./repo.js').ClawbackMutation<T> | Promise<import('./repo.js').ClawbackMutation<T>>): Promise<T> {
+      return db.transaction(async (tx) => {
+        // This is deliberately the same first lock as deal monetary edits and
+        // payout commits (parent deal row; stable deal ordering is irrelevant
+        // for this one-deal operation).
+        const dealRows = await tx.select().from(commissionDeals).where(eq(commissionDeals.id, dealId)).for('update');
+        if (!dealRows[0]) throw new Error(`No deal ${dealId}`);
+        const draws = await tx.select().from(commissionDealDraws).where(eq(commissionDealDraws.dealId, dealId)).for('update');
+        const clawbackRows = await tx.select().from(commissionClawbacks).where(eq(commissionClawbacks.dealId, dealId)).for('update');
+        const lineRows = await tx.select().from(commissionPayoutLines).where(eq(commissionPayoutLines.dealId, dealId)).for('update');
+        const clawbacks = clawbackRows.map(toClawback);
+        const target = clawbackId === null ? null : clawbacks.find((c) => c.id === clawbackId) ?? null;
+        if (clawbackId !== null && !target) throw new Error(`No clawback ${clawbackId} on deal ${dealId}`);
+        const mutation = await mutate({
+          deal: toDeal(dealRows[0], draws),
+          clawback: target,
+          activeClawbacks: clawbacks.filter((c) => !c.forgivenAt),
+          lines: lineRows.map(toPayoutLine),
+        });
+        const writes = Number(!!mutation.create) + Number(!!mutation.update) + Number(!!mutation.forgive);
+        if (writes > 1) throw new Error('A clawback mutation may create, update, or forgive, not multiple lifecycle writes');
+        if (mutation.create) {
+          if (clawbackId !== null || mutation.create.dealId !== dealId) throw new Error('Clawback create must use the locked deal and no target id');
+          await tx.insert(commissionClawbacks).values({ id: mutation.create.id, dealId, date: mutation.create.date, amount: mutation.create.amount, reason: mutation.create.reason, status: mutation.create.status, recovered: mutation.create.recovered, forgivenAt: mutation.create.forgivenAt ? new Date(mutation.create.forgivenAt) : null });
+        } else if (mutation.update) {
+          if (!target) throw new Error('Clawback update requires a target');
+          await tx.update(commissionClawbacks).set(mutation.update).where(eq(commissionClawbacks.id, target.id));
+        } else if (mutation.forgive) {
+          if (!target) throw new Error('Clawback forgive requires a target');
+          await tx.update(commissionClawbacks).set({ forgivenAt: sql`now()` }).where(eq(commissionClawbacks.id, target.id));
+        }
+        return mutation.result;
+      });
     },
     async renameRef(kind: 'lender' | 'partner' | 'product', from: string, to: string) {
       const col = kind === 'lender' ? commissionDeals.lender : kind === 'product' ? commissionDeals.product : commissionDeals.referralPartner;
@@ -801,7 +835,9 @@ export function dbRepo(db: Database): Repo {
           .for('update');
         const draws = await tx.select().from(commissionDealDraws).for('update');
         const lineRows = await tx.select().from(commissionPayoutLines).for('update');
-        const clawbackRows = await tx.select().from(commissionClawbacks).for('update');
+        const clawbackRows = await tx.select().from(commissionClawbacks)
+          .where(sql`${commissionClawbacks.forgivenAt} is null`)
+          .for('update');
         const context: LedgerContext = {
           deals: dealRows.map((deal) => toDeal(deal, draws)),
           lines: lineRows.map(toPayoutLine),

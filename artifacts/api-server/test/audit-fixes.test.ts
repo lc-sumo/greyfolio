@@ -107,14 +107,45 @@ describe('clawbacks: edit, forgive, cap', () => {
     const rec = await admin.post('/api/admin/deals/F2/clawbacks').send({ amount: 1_500, date: '2026-08-01', reason: 'typo' });
     expect(rec.status).toBe(201);
     expect((await admin.post('/api/admin/deals/F2/clawbacks').send({ amount: 600, date: '2026-08-02' })).body.error).toMatch(/together they cannot exceed/);
-    const ed = await admin.patch('/api/admin/deals/F2/clawbacks/cb-F2-1').send({ amount: 500, reason: 'Merchant defaulted' });
+    const clawbackId = rec.body.clawbacks[0].id;
+    expect(clawbackId).toMatch(/^cb-[0-9a-f-]{36}$/);
+    const ed = await admin.patch(`/api/admin/deals/F2/clawbacks/${clawbackId}`).send({ amount: 500, reason: 'Merchant defaulted' });
     expect(ed.body.clawbacks[0]).toMatchObject({ amount: 500, reason: 'Merchant defaulted' });
-    expect((await admin.patch('/api/admin/deals/F2/clawbacks/cb-F2-1').send({ date: '2027-01-01' })).status).toBe(400);
-    const gone = await admin.delete('/api/admin/deals/F2/clawbacks/cb-F2-1');
+    expect((await admin.patch(`/api/admin/deals/F2/clawbacks/${clawbackId}`).send({ date: '2027-01-01' })).status).toBe(400);
+    const gone = await admin.delete(`/api/admin/deals/F2/clawbacks/${clawbackId}`);
     expect(gone.body.clawbacks).toHaveLength(0);
     // cb-1 on F1 has a recovery row → cannot be forgiven, and cannot drop below what was recovered.
     expect((await admin.delete('/api/admin/deals/F1/clawbacks/cb-1')).body.error).toMatch(/repaid on this clawback/);
     expect((await admin.patch('/api/admin/deals/F1/clawbacks/cb-1').send({ amount: 50 })).body.error).toMatch(/already repaid/);
+  });
+
+  it('allows a separate lender-only default after payout while paid terms stay locked', async () => {
+    const { admin, repo } = await harness();
+    const paid = repo.data.deals.find((deal) => deal.id === 'F1')!;
+    // Deliberately retain the original gross-based $350 payout row. The
+    // $1,000 deal is $800 lender commission + $200 merchant PSF.
+    Object.assign(paid, {
+      commRate: 0.08, psfPct: 0.02, gross: 1_000, net: 1_000,
+      openerId: 'rep-julian-ribak', openerRate: 0.35,
+      closerId: null, closerRate: 0, overrideId: null, overrideRate: 0,
+    });
+    repo.data.lines.splice(1); // preserve only F1's original positive payout
+    repo.data.clawbacks.splice(0);
+
+    const first = await admin.post('/api/admin/deals/F1/clawbacks').send({ amount: 400, date: '2026-08-15', reason: 'default' });
+    expect(first.status).toBe(201);
+    expect(first.body).toMatchObject({ lenderClawbackBase: 800, repBalance: -140, repPayable: 0 });
+    const second = await admin.post('/api/admin/deals/F1/clawbacks').send({ amount: 400, date: '2026-08-16', reason: 'second lender notice' });
+    expect(second.status).toBe(201);
+    expect(second.body).toMatchObject({ lenderClawbackBase: 800, repBalance: -280, repPayable: 0 });
+    expect(repo.data.lines).toEqual([expect.objectContaining({ key: 'F1|Opener|base', amount: 350, role: 'Opener' })]);
+
+    expect((await admin.post('/api/admin/deals/F1/clawbacks').send({ amount: 0.01 })).body.error).toMatch(/together they cannot exceed.*lender-paid/i);
+    const firstId = first.body.clawbacks[0].id;
+    expect((await admin.patch(`/api/admin/deals/F1/clawbacks/${firstId}`).send({ amount: 400.01 })).body.error).toMatch(/together they cannot exceed.*lender-paid/i);
+    // The separate liability action is intentionally allowed after payment;
+    // ordinary repricing is still refused by the paid-history guard.
+    expect((await admin.patch('/api/admin/deals/F1/terms').send({ amount: 9_999 })).body.error).toMatch(/payouts in the ledger.*void/i);
   });
 });
 

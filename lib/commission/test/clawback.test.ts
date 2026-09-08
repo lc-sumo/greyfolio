@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { clawbackRecovered, clawbackRepTotal, clawbackSlices, clawbackStatus, repClawback } from '../src/clawback.js';
-import { line, makeClawback, makeDeal } from './fixtures.js';
+import { clawbackRecovered, clawbackRepTotal, clawbackSlices, clawbackStatus, clawbacksFor, hasLenderClawbackParticipation, repClawback } from '../src/clawback.js';
+import { lenderClawbackBase } from '../src/segments.js';
+import { line, makeClawback, makeDeal, makeDraw } from './fixtures.js';
 
 describe('repClawback', () => {
   // F1: funded 10,000 @ 10% → net 1,000. Opener rep-07 @35% = 350, closer rep-05 @40% = 400, override rep-02 @5% = 50.
@@ -47,6 +48,41 @@ describe('repClawback', () => {
     const cb = makeClawback('cb-7', 'F1', 5_000);
     expect(repClawback(cb, deal, 'rep-07', []).share).toBe(350);
     expect(clawbackRepTotal(cb, deal)).toBe(800);
+  });
+
+  it('uses only lender-paid commission when a merchant PSF is present', () => {
+    // The $1,000 gross contains $800 lender commission plus $200 merchant PSF.
+    const psfDeal = makeDeal({
+      id: 'F-PSF', funded: 10_000, commRate: 0.08, psfPct: 0.02,
+      openerId: 'rep-07', openerRate: 0.35, closerId: null, overrideId: null,
+    });
+    const cb = makeClawback('cb-psf', psfDeal.id, 800);
+    expect(psfDeal.gross).toBe(1_000);
+    expect(lenderClawbackBase(psfDeal)).toBe(800);
+    // The original gross payout would be $350, but the new debt is 35% of
+    // lender dollars only ($280).
+    expect(repClawback(cb, psfDeal, 'rep-07', []).share).toBe(280);
+  });
+
+  it('uses the effective stopped base plus LOC draws, never PSF', () => {
+    const deal = makeDeal({
+      id: 'F-STOP', funded: 10_000, commRate: 0.08, psfPct: 0.02,
+      commSchedule: { mode: 'weekly', weeks: 2, received: 1, startDate: '2026-08-01', stoppedAfter: 1 },
+      draws: [makeDraw(1, 1_000, 0.1)],
+    });
+    // The stopped base is half of $800 lender commission ($400); D1 adds its
+    // full $100 lender commission. The unearned half of the $200 PSF is not
+    // clawbackable either.
+    expect(lenderClawbackBase(deal)).toBe(500);
+  });
+
+  it('does not attribute or list a clawback where no lender-paid component exists', () => {
+    const psfOnly = makeDeal({ id: 'F-PSF-ONLY', commRate: 0, psfPct: 0.02, openerId: 'rep-07', openerRate: 0.35 });
+    const cb = makeClawback('cb-psf-only', psfOnly.id, 1);
+    expect(lenderClawbackBase(psfOnly)).toBe(0);
+    expect(hasLenderClawbackParticipation(psfOnly, 'rep-07')).toBe(false);
+    expect(repClawback(cb, psfOnly, 'rep-07', [])).toEqual({ share: 0, recovered: 0, remaining: 0 });
+    expect(clawbacksFor([cb], [psfOnly], 'rep-07')).toEqual([]);
   });
 });
 

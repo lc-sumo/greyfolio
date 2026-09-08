@@ -89,6 +89,35 @@ describe('unified accounting projection', () => {
     }
   });
 
+  it('does not recreate account 1200 liability from a forgiven tombstone', () => {
+    const deal = makeDeal({ id: 'F1', funded: 10_000, commRate: 0.1, commCollected: 1_000 });
+    const clawback = makeClawback('cb-forgiven', 'F1', 600, { forgivenAt: '2026-09-01' });
+    const journals = projectAccounting({ deals: [deal], payoutLines: [], clawbacks: [clawback] }).journals;
+
+    expect(repClawback(clawback, deal, 'rep-07', [])).toEqual({ share: 0, recovered: 0, remaining: 0 });
+    expect(journals.some((journal) => journal.sourceKey.includes(clawback.id))).toBe(false);
+    expect(journals.flatMap((journal) => journal.lines).filter((line) => line.accountCode === '1200')).toEqual([]);
+  });
+
+  it('uses lender-only slices in account 1200 without reversing the original PSF-inclusive payout', () => {
+    const deal = makeDeal({
+      id: 'F-PSF', funded: 10_000, commRate: 0.08, psfPct: 0.02, commCollected: 1_000,
+      closerId: null, overrideId: null, openerRate: 0.35,
+    });
+    const original: PayoutLine = { key: 'F-PSF|Opener|base', dealId: 'F-PSF', segmentKey: 'base', role: 'Opener', repId: 'rep-07', amount: 350, runId: 'run-1', clawbackId: null, paidAt: '2026-08-20' };
+    const clawback = makeClawback('cb-psf', 'F-PSF', 800);
+    const journals = projectAccounting({ deals: [deal], payoutLines: [original], clawbacks: [clawback] }).journals;
+    expect(journals.find((journal) => journal.sourceKey === 'clawback-recovery-accrual:cb-psf:rep-07')!.lines).toEqual([
+      expect.objectContaining({ accountCode: '1200', debit: 280, credit: 0, repId: 'rep-07' }),
+      expect.objectContaining({ accountCode: '4090', debit: 0, credit: 280, repId: 'rep-07' }),
+    ]);
+    expect(journals.find((journal) => journal.sourceKey === 'payout:F-PSF|Opener|base')!.lines).toEqual([
+      expect.objectContaining({ accountCode: '2000', debit: 350, credit: 0 }),
+      expect.objectContaining({ accountCode: '1000', debit: 0, credit: 350 }),
+    ]);
+    expect(journals.some((journal) => journal.sourceType === 'payout_void')).toBe(false);
+  });
+
   it('uses the referenced journal amount and accounts as the void golden source', () => {
     const payoutLines: PayoutLine[] = [
       { key: 'F1|Opener|base', dealId: 'F1', segmentKey: 'base', role: 'Opener', repId: 'rep-07', amount: 350, runId: 'run-1', clawbackId: null, paidAt: '2026-08-20' },

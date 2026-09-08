@@ -26,7 +26,7 @@ export async function seedDemo(db: ReturnType<typeof createDb>, today?: string) 
       await tx.insert(commissionDeals).values(deal);
       for (const x of draws) await tx.insert(commissionDealDraws).values({ dealId: d.id, n: x.n, ref: x.ref, date: x.date, amount: x.amount, commRate: x.commRate, gross: x.gross, referralFee: x.referralFee, net: x.net, collected: x.collected, schedule: x.schedule });
     }
-    for (const c of demo.clawbacks) await tx.insert(commissionClawbacks).values(c);
+    for (const c of demo.clawbacks) await tx.insert(commissionClawbacks).values({ ...c, forgivenAt: c.forgivenAt ? new Date(c.forgivenAt) : null });
     if (demo.lines.length) await tx.insert(commissionPayoutLines).values(demo.lines);
   });
   return demoSummary(demo);

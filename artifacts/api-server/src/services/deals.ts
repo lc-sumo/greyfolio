@@ -180,7 +180,7 @@ export async function updateTerms(repo: Repo, id: string, input: Partial<NewDeal
   return requireDeal(repo, id);
 }
 
-/** Remove a mistyped deal. Refused once the ledger, a clawback or another deal (as parent) references it. */
+/** Tombstone a mistyped deal. History is retained; operational reads and the next books sync treat it as removed. */
 export async function deleteDeal(repo: Repo, id: string, actorRepId: string): Promise<void> {
   const deal = await requireDeal(repo, id);
   const ctx = await repo.loadContext();
@@ -188,7 +188,7 @@ export async function deleteDeal(repo: Repo, id: string, actorRepId: string): Pr
   if (ctx.clawbacks.some((c) => c.dealId === id)) throw new HttpError(400, `${id} has a clawback on record and cannot be deleted`);
   const children = ctx.deals.filter((d) => d.parentId === id);
   if (children.length) throw new HttpError(400, `${id} is the parent of ${children.map((d) => d.id).join(', ')} — re-parent or delete those first`);
-  await repo.deleteDeal(id);
+  await repo.deleteDeal(id, actorRepId);
   await repo.writeAudit({ actorRepId, action: 'deal.delete', targetRepId: null, path: `/api/admin/deals/${id}`, detail: { business: deal.business, funded: deal.funded, lender: deal.lender, draws: deal.draws.map((d) => ({ ref: d.ref, amount: d.amount, date: d.date })) } });
 }
 

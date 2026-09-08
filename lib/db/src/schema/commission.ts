@@ -157,6 +157,9 @@ export const commissionDeals = pgTable(
     apr: numeric('apr', { precision: 8, scale: 4, mode: 'number' }),
     /** Overrides the deal id in the CRM link. */
     crmId: text('crm_id'),
+    /** Audited tombstone: operational reads exclude deleted deals while all accounting dimensions remain valid. */
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    deletedBy: text('deleted_by').references(() => commissionReps.id, { onDelete: 'restrict' }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -492,6 +495,96 @@ export const commissionTrustedDevices = pgTable(
   },
   (t) => [index('commission_trusted_devices_rep_idx').on(t.repId), uniqueIndex('commission_trusted_devices_hash_idx').on(t.tokenHash)],
 );
+
+/* ------------------------------------------------------------------ */
+/* Double-entry books (append-only source journals)                    */
+/* ------------------------------------------------------------------ */
+export const commissionAccounts = pgTable('commission_accounts', {
+  code: text('code').primaryKey(),
+  name: text('name').notNull(),
+  type: text('type').notNull(),
+  /** Fixed system-purpose accounts are protected by the database trigger. */
+  purpose: text('purpose').notNull().unique(),
+  system: boolean('system').notNull().default(true),
+  active: boolean('active').notNull().default(true),
+  createdAt: createdAt(),
+});
+
+export const commissionAccountingPeriods = pgTable('commission_accounting_periods', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  start: isoDate('start').notNull(),
+  end: isoDate('end').notNull(),
+  status: text('status').notNull().default('open'),
+  closedAt: timestamp('closed_at', { withTimezone: true }),
+  closedBy: text('closed_by').references(() => commissionReps.id),
+  reopenedAt: timestamp('reopened_at', { withTimezone: true }),
+  reopenedBy: text('reopened_by').references(() => commissionReps.id),
+  createdAt: createdAt(),
+}, (t) => [uniqueIndex('commission_accounting_period_range_idx').on(t.start, t.end)]);
+
+export const commissionJournals = pgTable('commission_journals', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sourceKey: text('source_key').notNull(),
+  sourceType: text('source_type').notNull(),
+  date: isoDate('date').notNull(),
+  memo: text('memo').notNull(),
+  fingerprint: text('fingerprint').notNull(),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+  reversalOf: uuid('reversal_of'),
+  logicalSourceKey: text('logical_source_key').notNull(),
+  sourceVersion: integer('source_version').notNull().default(1),
+  correctionDate: isoDate('correction_date'),
+  detectedAt: timestamp('detected_at', { withTimezone: true }),
+  postingStatus: text('posting_status').notNull().default('sealed'),
+  sealedAt: timestamp('sealed_at', { withTimezone: true }),
+  createdAt: createdAt(),
+}, (t) => [
+  uniqueIndex('commission_journals_source_key_idx').on(t.sourceKey),
+  uniqueIndex('commission_journals_logical_version_kind_idx').on(t.logicalSourceKey, t.sourceVersion, t.sourceType),
+  index('commission_journals_date_idx').on(t.date),
+]);
+
+export const commissionJournalLines = pgTable('commission_journal_lines', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  journalId: uuid('journal_id').notNull().references(() => commissionJournals.id, { onDelete: 'restrict' }),
+  accountCode: text('account_code').notNull().references(() => commissionAccounts.code, { onDelete: 'restrict' }),
+  debit: money('debit').notNull().default(0),
+  credit: money('credit').notNull().default(0),
+  memo: text('memo'),
+  dealId: text('deal_id').references(() => commissionDeals.id, { onDelete: 'restrict' }),
+  repId: text('rep_id').references(() => commissionReps.id, { onDelete: 'restrict' }),
+  createdAt: createdAt(),
+}, (t) => [index('commission_journal_lines_journal_idx').on(t.journalId), index('commission_journal_lines_account_idx').on(t.accountCode)]);
+
+/** Mutable concurrency pointer only; every journal in the chain remains immutable. */
+export const commissionAccountingSourceChains = pgTable('commission_accounting_source_chains', {
+  logicalSourceKey: text('logical_source_key').primaryKey(),
+  sourceVersion: integer('source_version').notNull().default(1),
+  effectiveJournalId: uuid('effective_journal_id').references(() => commissionJournals.id, { onDelete: 'restrict' }),
+  currentFingerprint: text('current_fingerprint'),
+  updatedAt: updatedAt(),
+});
+
+export const commissionReconciliations = pgTable('commission_reconciliations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  accountCode: text('account_code').notNull().references(() => commissionAccounts.code),
+  statementStart: isoDate('statement_start').notNull(),
+  statementDate: isoDate('statement_date').notNull(),
+  openingBalance: money('opening_balance').notNull(),
+  statementBalance: money('statement_balance').notNull(),
+  status: text('status').notNull().default('open'),
+  note: text('note'),
+  createdBy: text('created_by').references(() => commissionReps.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+export const commissionReconciliationMatches = pgTable('commission_reconciliation_matches', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  reconciliationId: uuid('reconciliation_id').notNull().references(() => commissionReconciliations.id, { onDelete: 'cascade' }),
+  journalLineId: uuid('journal_line_id').notNull().references(() => commissionJournalLines.id, { onDelete: 'restrict' }),
+  amount: money('amount').notNull(),
+  createdAt: createdAt(),
+}, (t) => [uniqueIndex('commission_reconciliation_match_unique_idx').on(t.reconciliationId, t.journalLineId)]);
 
 /* ------------------------------------------------------------------ */
 /* Relations                                                           */

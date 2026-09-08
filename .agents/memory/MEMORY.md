@@ -2,3 +2,4 @@
 - [Portal distribution path](portal-dist-publish-path.md) — Anchor the built portal path before pnpm enters the filtered API package.
 - [Production schema ownership](production-schema-ownership.md) — Replit Publish owns production schema changes; never run migrations during app startup.
 - [Accounting mutation locks](accounting-mutation-locks.md) — Revalidate payout economics under the same deal locks used by monetary edits before writing ledger rows.
+- [Accounting sync serialization](accounting-sync-serialization.md) — Queue locally before reserving a cross-process advisory-lock connection, then open the accounting snapshot transaction.

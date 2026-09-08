@@ -1,5 +1,5 @@
-import type { Clawback, Deal, DealDraw, LedgerContext, PayoutLine, PayrollRun, Rep, Team, WeeklySchedule } from '@greystone/commission';
-import { NOTIFICATION_DEFAULTS, PERMISSION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AuditEntry, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Repo, type RepFile, type RepTask, type Settings, type TotpState, type TrustedDevice } from './repo.js';
+import { assertBalanced, cents, journalFingerprint, projectAccounting, type AccountingJournal, type Clawback, type Deal, type DealDraw, type LedgerContext, type PayoutLine, type PayrollRun, type Rep, type Team, type WeeklySchedule } from '@greystone/commission';
+import { NOTIFICATION_DEFAULTS, PERMISSION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AccountingPeriod, type AuditEntry, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Reconciliation, type Repo, type RepFile, type RepTask, type Settings, type StoredJournal, type TotpState, type TrustedDevice } from './repo.js';
 import { requestMeta } from './auth/request-context.js';
 
 export interface MemoryData {
@@ -28,7 +28,191 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
   const firings: PlaybookFiring[] = [];
   const tasks: RepTask[] = [];
   const devices: TrustedDevice[] = [];
+  const journals: StoredJournal[] = [];
+  const periods: AccountingPeriod[] = [];
+  const reconciliations: Reconciliation[] = [];
+  const chains = new Map<string, { version: number; effectiveId: string | null; fingerprint: string | null }>();
+  let bookId = 0;
+  let initialAccountingSyncCompleted = false;
+  let accountingQueue: Promise<void> = Promise.resolve();
+  const stored = (entry: AccountingJournal, extra?: Partial<StoredJournal>): StoredJournal => ({
+    ...entry,
+    id: `journal-${++bookId}`,
+    logicalSourceKey: entry.sourceKey,
+    sourceVersion: 1,
+    reversalOf: null,
+    correctionDate: null,
+    postingStatus: 'sealed',
+    sealedAt: new Date().toISOString(),
+    ...extra,
+    lines: entry.lines.map((l) => ({ ...l, id: `journal-line-${++bookId}` })),
+  });
+  const correctionDate = (onOrAfter: string) => {
+    const candidates = periods.filter((p) => p.status === 'open' && p.end >= onOrAfter).map((p) => onOrAfter < p.start ? p.start : onOrAfter).sort();
+    return candidates[0] ?? null;
+  };
   return {
+    async listJournals(filter = {}) {
+      return journals.filter((j) => (!filter.from || j.date >= filter.from) && (!filter.to || j.date <= filter.to) && (!filter.sourceKey || j.sourceKey === filter.sourceKey) && (!filter.accountCode || j.lines.some((l) => l.accountCode === filter.accountCode))).map((j) => ({ ...j, lines: [...j.lines] }));
+    },
+    async insertJournals(entries: AccountingJournal[]) {
+      let inserted = 0; let existing = 0;
+      for (const entry of entries) {
+        assertBalanced(entry);
+        if (journals.some((j) => j.sourceKey === entry.sourceKey)) { existing++; continue; }
+        if (periods.some((p) => p.status === 'closed' && entry.date >= p.start && entry.date <= p.end)) throw new Error(`Accounting period is closed for ${entry.date}`);
+        const row = stored(entry);
+        journals.push(row);
+        if (!chains.has(entry.sourceKey)) chains.set(entry.sourceKey, { version: 1, effectiveId: row.id, fingerprint: entry.fingerprint });
+        inserted++;
+      }
+      return { inserted, existing };
+    },
+    async syncAccounting(entries, detectedOn) {
+      let release!: () => void;
+      const previous = accountingQueue;
+      accountingQueue = new Promise<void>((resolve) => { release = resolve; });
+      await previous;
+      try {
+        let projectionResult: ReturnType<typeof projectAccounting> | null = null;
+        if (entries === null) {
+          projectionResult = projectAccounting({ deals: data.deals, payoutLines: data.lines, clawbacks: data.clawbacks });
+          entries = projectionResult.journals;
+        }
+        entries.forEach(assertBalanced);
+        const result = { inserted: 0, existing: 0, corrected: 0, removed: 0, unresolved: [] as Array<{ logicalSourceKey: string; reason: string; effectiveSourceKey?: string }>, pendingProjection: 0 };
+        const projected = new Map(entries.map((j) => [j.sourceKey, j]));
+        for (const entry of entries) {
+          let chain = chains.get(entry.sourceKey);
+          if (!chain) {
+            const old = journals.find((j) => j.logicalSourceKey === entry.sourceKey || j.sourceKey === entry.sourceKey);
+            if (old) {
+              chain = { version: old.sourceVersion, effectiveId: old.id, fingerprint: old.fingerprint };
+              chains.set(entry.sourceKey, chain);
+            }
+          }
+          if (!chain) {
+            if (periods.some((p) => p.status === 'closed' && entry.date >= p.start && entry.date <= p.end)) {
+              result.unresolved.push({ logicalSourceKey: entry.sourceKey, reason: `Accounting period is closed for ${entry.date}` });
+              continue;
+            }
+            const row = stored(entry);
+            journals.push(row);
+            chains.set(entry.sourceKey, { version: 1, effectiveId: row.id, fingerprint: entry.fingerprint });
+            result.inserted++;
+            continue;
+          }
+          if (chain.fingerprint === entry.fingerprint && chain.effectiveId) { result.existing++; continue; }
+          const effective = chain.effectiveId ? journals.find((j) => j.id === chain!.effectiveId) : undefined;
+          const date = correctionDate([detectedOn, entry.date, effective?.date ?? ''].sort().at(-1)!);
+          if (!date) {
+            result.unresolved.push({ logicalSourceKey: entry.sourceKey, reason: 'No permissible open accounting period', ...(effective ? { effectiveSourceKey: effective.sourceKey } : {}) });
+            continue;
+          }
+          const version = chain.version + 1;
+          if (effective) {
+            const reversalBase: Omit<AccountingJournal, 'fingerprint'> = {
+              sourceKey: `${entry.sourceKey}:correction:v${version}:reversal`, sourceType: `${effective.sourceType}_reversal`, date,
+              memo: `Correction reversal — ${effective.memo}`,
+              lines: effective.lines.map(({ id: _id, ...l }) => ({ ...l, debit: l.credit, credit: l.debit })),
+              metadata: { ...(effective.metadata ?? {}), correction: true, correctionDetectedOn: detectedOn, originalAccountingDate: effective.date },
+            };
+            journals.push(stored({ ...reversalBase, fingerprint: journalFingerprint(reversalBase) }, { logicalSourceKey: entry.sourceKey, sourceVersion: version, reversalOf: effective.id, correctionDate: date }));
+          }
+          const replacement: AccountingJournal = {
+            ...entry, sourceKey: `${entry.sourceKey}:correction:v${version}:replacement`, date,
+            metadata: { ...(entry.metadata ?? {}), correction: true, correctionDetectedOn: detectedOn, originalAccountingDate: entry.date },
+          };
+          const replacementRow = stored(replacement, { logicalSourceKey: entry.sourceKey, sourceVersion: version, correctionDate: date });
+          journals.push(replacementRow);
+          chains.set(entry.sourceKey, { version, effectiveId: replacementRow.id, fingerprint: entry.fingerprint });
+          result.corrected++;
+        }
+        for (const [logicalSourceKey, chain] of chains) {
+          if (projected.has(logicalSourceKey) || !chain.effectiveId) continue;
+          const effective = journals.find((j) => j.id === chain.effectiveId);
+          if (!effective) continue;
+          const date = correctionDate(detectedOn > effective.date ? detectedOn : effective.date);
+          if (!date) {
+            result.unresolved.push({ logicalSourceKey, reason: 'No permissible open accounting period', effectiveSourceKey: effective.sourceKey });
+            continue;
+          }
+          const version = chain.version + 1;
+          const reversalBase: Omit<AccountingJournal, 'fingerprint'> = {
+            sourceKey: `${logicalSourceKey}:correction:v${version}:removed`, sourceType: `${effective.sourceType}_reversal`, date,
+            memo: `Removed-source reversal — ${effective.memo}`,
+            lines: effective.lines.map(({ id: _id, ...l }) => ({ ...l, debit: l.credit, credit: l.debit })),
+            metadata: { ...(effective.metadata ?? {}), correction: true, sourceRemoved: true, correctionDetectedOn: detectedOn, originalAccountingDate: effective.date },
+          };
+          journals.push(stored({ ...reversalBase, fingerprint: journalFingerprint(reversalBase) }, { logicalSourceKey, sourceVersion: version, reversalOf: effective.id, correctionDate: date }));
+          chains.set(logicalSourceKey, { version, effectiveId: null, fingerprint: null });
+          result.removed++;
+        }
+        result.pendingProjection = result.unresolved.length;
+        if (!result.unresolved.length) initialAccountingSyncCompleted = true;
+        return { ...result, ...(projectionResult ? { projected: projectionResult.journals.length, assumedCollectionDates: projectionResult.assumedCollectionDates.length } : {}) };
+      } finally {
+        release();
+      }
+    },
+    async listAccountingPeriods() { return periods.map((p) => ({ ...p })).sort((a, b) => a.start.localeCompare(b.start)); },
+    async createAccountingPeriod(input) {
+      if (periods.some((p) => input.start <= p.end && input.end >= p.start)) throw new Error('Accounting periods may not overlap');
+      const p: AccountingPeriod = { id: `period-${++bookId}`, ...input, status: 'open', closedAt: null, closedBy: null, reopenedAt: null, reopenedBy: null }; periods.push(p); return { ...p };
+    },
+    async closeAccountingPeriod(id, actorRepId) {
+      const p = periods.find((x) => x.id === id);
+      if (!p) throw new Error(`No accounting period ${id}`);
+      if (p.status !== 'open') throw new Error('Only open accounting periods can be closed');
+      if (!initialAccountingSyncCompleted) throw new Error('Initial accounting sync must complete before period close');
+      const result = await (this as Repo).syncAccounting(null, new Date().toISOString().slice(0, 10));
+      if (result.unresolved.length) throw new Error(`Period close blocked by ${result.unresolved.length} unresolved source posting(s): ${result.unresolved.map((x) => `${x.logicalSourceKey}: ${x.reason}`).join('; ')}`);
+      const inPeriod = journals.filter((j) => j.date >= p.start && j.date <= p.end);
+      const debit = cents(inPeriod.flatMap((j) => j.lines).reduce((n, line) => n + line.debit, 0));
+      const credit = cents(inPeriod.flatMap((j) => j.lines).reduce((n, line) => n + line.credit, 0));
+      if (debit !== credit) throw new Error(`Period journal tie-out failed: debits ${debit.toFixed(2)} do not equal credits ${credit.toFixed(2)}`);
+      p.status = 'closed'; p.closedAt = new Date().toISOString(); p.closedBy = actorRepId;
+      return { ok: true, periodId: id, checklist: { projected: result.projected ?? 0, inserted: result.inserted, existing: result.existing, corrected: result.corrected, removed: result.removed, unresolved: 0, journalCount: inPeriod.length, debit, credit, balanced: true } };
+    },
+    async reopenAccountingPeriod(id, actorRepId) { const p = periods.find((x) => x.id === id); if (!p) throw new Error(`No accounting period ${id}`); if (p.status !== 'closed') throw new Error('Only closed accounting periods can be reopened'); p.status = 'open'; p.reopenedAt = new Date().toISOString(); p.reopenedBy = actorRepId; },
+    async createReconciliation(input) {
+      const prior = reconciliations.filter((x) => x.accountCode === input.accountCode && x.status === 'completed').sort((a, b) => b.statementDate.localeCompare(a.statementDate))[0];
+      if (prior && (input.statementStart <= prior.statementDate || cents(input.openingBalance) !== cents(prior.statementBalance))) throw new Error('Statement must start after the prior completed statement and carry forward its closing balance');
+      const r: Reconciliation = { ...input, openingBalance: cents(input.openingBalance), statementBalance: cents(input.statementBalance), id: `reconciliation-${++bookId}`, matches: [] };
+      reconciliations.push(r);
+      return { ...r, matches: [] };
+    },
+    async listReconciliations() { return reconciliations.map((r) => ({ ...r, matches: [...r.matches] })); },
+    async findReconciliation(id) { const r = reconciliations.find((x) => x.id === id); return r ? { ...r, matches: [...r.matches] } : null; },
+    async updateReconciliation(id, patch) {
+      const r = reconciliations.find((x) => x.id === id);
+      if (!r) throw new Error(`No reconciliation ${id}`);
+      if (r.status !== 'open') throw new Error('Reconciliation is not open');
+      if (patch.status && patch.status !== 'completed') throw new Error('Use the audited reopen endpoint to reopen a reconciliation');
+      if (patch.status === 'completed' && cents(r.openingBalance + r.matches.reduce((n, m) => n + m.amount, 0) - r.statementBalance) !== 0) throw new Error('Reconciliation difference must be exactly zero cents');
+      if (patch.note !== undefined) r.note = patch.note;
+      if (patch.status !== undefined) r.status = patch.status;
+    },
+    async reopenReconciliation(id) {
+      const r = reconciliations.find((x) => x.id === id);
+      if (!r) throw new Error(`No reconciliation ${id}`);
+      if (r.status !== 'completed') throw new Error('Only completed reconciliations can be reopened');
+      r.status = 'open';
+    },
+    async matchReconciliation(id, match) {
+      const r = reconciliations.find((x) => x.id === id);
+      if (!r) throw new Error(`No reconciliation ${id}`);
+      if (r.status !== 'open') throw new Error('Reconciliation is not open');
+      if (!Number.isFinite(match.amount) || match.amount === 0) throw new Error('Match amount must be nonzero');
+      const journal = journals.find((j) => j.date <= r.statementDate && j.lines.some((l) => l.id === match.journalLineId));
+      const line = journal?.lines.find((l) => l.id === match.journalLineId);
+      if (!line || line.accountCode !== r.accountCode) throw new Error('Journal line does not belong to reconciliation account or cutoff');
+      if (reconciliations.some((x) => x.matches.some((m) => m.journalLineId === match.journalLineId))) throw new Error('Journal line is already matched');
+      const value = cents(line.debit - line.credit);
+      const amount = cents(match.amount);
+      if (amount !== value) throw new Error('Match amount must equal the full signed journal line amount');
+      r.matches.push({ ...match, amount });
+    },
     async listTrustedDevices(repId) {
       return devices.filter((d) => d.repId === repId).map((d) => ({ ...d })).sort((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt));
     },

@@ -1,9 +1,9 @@
-import type { Clawback, Deal, DealDraw, Lender, LedgerContext, PayoutLine, PayrollRun, ProductRule, ReferralPartner, Rep, Team, WeeklySchedule } from '@greystone/commission';
+import type { AccountingJournal, Clawback, Deal, DealDraw, Lender, LedgerContext, PayoutLine, PayrollRun, ProductRule, ReferralPartner, Rep, Team, WeeklySchedule } from '@greystone/commission';
 import type { PlaybookRule } from './services/playbook-rules.js';
 
 export interface AuditEntry {
   actorRepId: string;
-  action: 'login' | 'logout' | 'view-as' | 'deal.create' | 'deal.update' | 'deal.draw' | 'deal.collection' | 'payroll.run' | 'payroll.pay' | 'settings.update' | 'team.update' | 'rep.update' | 'rep.password' | 'login.failed' | 'deal.delete' | 'payroll.void' | 'deal.import' | 'password.reset' | 'rep.totp' | 'deal.note' | 'deal.file' | 'deal.clawback' | 'deal.remittance' | 'mail.sent' | 'deal.draw.delete' | 'payroll.run.delete' | 'payroll.run.archive' | 'deal.contact' | 'deal.draw.update' | 'deal.clawback.update' | 'deal.clawback.delete' | 'payroll.run.reopen' | 'settings.rename' | 'rep.invite' | 'rep.device' | 'session.idle' | 'rep.file' | 'rep.calendar' | 'deal.referral.paid' | 'settings.playbook' | 'playbook.fired' | 'task' | 'mail.merchant' | 'backup';
+  action: 'login' | 'logout' | 'view-as' | 'deal.create' | 'deal.update' | 'deal.draw' | 'deal.collection' | 'payroll.run' | 'payroll.pay' | 'settings.update' | 'team.update' | 'rep.update' | 'rep.password' | 'login.failed' | 'deal.delete' | 'payroll.void' | 'deal.import' | 'password.reset' | 'rep.totp' | 'deal.note' | 'deal.file' | 'deal.clawback' | 'deal.remittance' | 'mail.sent' | 'deal.draw.delete' | 'payroll.run.delete' | 'payroll.run.archive' | 'deal.contact' | 'deal.draw.update' | 'deal.clawback.update' | 'deal.clawback.delete' | 'payroll.run.reopen' | 'settings.rename' | 'rep.invite' | 'rep.device' | 'session.idle' | 'rep.file' | 'rep.calendar' | 'deal.referral.paid' | 'settings.playbook' | 'playbook.fired' | 'task' | 'mail.merchant' | 'backup' | 'books.sync' | 'books.period.close' | 'books.period.reopen' | 'books.period.create' | 'books.reconciliation';
   targetRepId: string | null;
   path: string | null;
   detail?: Record<string, unknown>;
@@ -99,6 +99,33 @@ export interface RepTask {
   createdAt: string;
   doneAt: string | null;
 }
+export interface AccountingPeriod { id: string; start: string; end: string; status: 'open' | 'closed'; closedAt: string | null; closedBy: string | null; reopenedAt: string | null; reopenedBy: string | null }
+export interface StoredJournalLine { id: string; accountCode: AccountingJournal['lines'][number]['accountCode']; debit: number; credit: number; memo?: string; dealId?: string | null; repId?: string | null }
+export interface StoredJournal extends Omit<AccountingJournal, 'lines'> {
+  id: string;
+  lines: StoredJournalLine[];
+  logicalSourceKey: string;
+  sourceVersion: number;
+  reversalOf: string | null;
+  correctionDate: string | null;
+  postingStatus: 'posting' | 'sealed';
+  sealedAt: string | null;
+}
+export interface AccountingSyncIssue { logicalSourceKey: string; reason: string; effectiveSourceKey?: string }
+export interface AccountingSyncResult {
+  inserted: number;
+  existing: number;
+  corrected: number;
+  removed: number;
+  unresolved: AccountingSyncIssue[];
+  pendingProjection: number;
+}
+export interface PeriodCloseResult {
+  ok: true;
+  periodId: string;
+  checklist: { projected: number; inserted: number; existing: number; corrected: number; removed: number; unresolved: number; journalCount: number; debit: number; credit: number; balanced: true };
+}
+export interface Reconciliation { id: string; accountCode: string; statementStart: string; statementDate: string; openingBalance: number; statementBalance: number; status: 'open' | 'completed'; note: string | null; createdBy: string | null; matches: Array<{ journalLineId: string; amount: number }> }
 
 /** Stored deal columns that a service may patch (never draws — those have their own methods). */
 export type DealPatch = Partial<Omit<Deal, 'id' | 'draws'>>;
@@ -121,13 +148,29 @@ export interface Repo {
   getSettings(): Promise<Settings>;
   writeAudit(entry: AuditEntry): Promise<void>;
   listAudit(limit?: number, offset?: number): Promise<AuditEntry[]>;
+  /* Unified books. Source journals are append-only and keyed by sourceKey. */
+  listJournals(filter?: { from?: string; to?: string; accountCode?: string; sourceKey?: string }): Promise<StoredJournal[]>;
+  insertJournals(journals: AccountingJournal[]): Promise<{ inserted: number; existing: number }>;
+  /** Atomically advances immutable logical-source chains, including removal reversals. */
+  /** With null journals, acquires serialization before reading and projecting operational state. */
+  syncAccounting(journals: AccountingJournal[] | null, detectedOn: string): Promise<AccountingSyncResult & { projected?: number; assumedCollectionDates?: number }>;
+  listAccountingPeriods(): Promise<AccountingPeriod[]>;
+  createAccountingPeriod(period: Pick<AccountingPeriod, 'start' | 'end'>): Promise<AccountingPeriod>;
+  closeAccountingPeriod(id: string, actorRepId: string): Promise<PeriodCloseResult>;
+  reopenAccountingPeriod(id: string, actorRepId: string): Promise<void>;
+  createReconciliation(r: Omit<Reconciliation, 'id' | 'matches'>): Promise<Reconciliation>;
+  listReconciliations(): Promise<Reconciliation[]>;
+  findReconciliation(id: string): Promise<Reconciliation | null>;
+  updateReconciliation(id: string, patch: Partial<Pick<Reconciliation, 'status' | 'note'>>): Promise<void>;
+  reopenReconciliation(id: string): Promise<void>;
+  matchReconciliation(id: string, match: { journalLineId: string; amount: number }): Promise<void>;
   // Deal writes (admin only — enforced by the routes)
   insertDeal(deal: Deal): Promise<void>;
   updateDeal(id: string, patch: DealPatch): Promise<void>;
   /** Serializes a facility update with its draws; validation runs under the parent-row lock immediately before write. */
   updateDealLocked(id: string, patch: DealPatch, validate: (current: Deal, lines: PayoutLine[]) => void): Promise<void>;
-  /** Removes the deal and its draws. Callers must first prove nothing in the ledger references it. */
-  deleteDeal(id: string): Promise<void>;
+  /** Audited tombstone. Operational reads hide it; dependent and accounting history remains intact. */
+  deleteDeal(id: string, actorRepId?: string): Promise<void>;
   insertClawback(c: Clawback): Promise<void>;
   updateClawback(id: string, patch: Partial<Pick<Clawback, 'amount' | 'date' | 'reason'>>): Promise<void>;
   deleteClawback(id: string): Promise<void>;

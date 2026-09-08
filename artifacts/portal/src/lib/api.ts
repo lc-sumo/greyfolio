@@ -196,6 +196,41 @@ export const EXCEPTION_SHORT: Record<ExceptionKind, string> = { 'funded-no-commi
 export interface RepFileView { id: string; repId: string; name: string; mime: string; size: number; uploadedBy: string; uploadedByName?: string; createdAt: string }
 export interface AnnualMe { year: number; years: string[]; grossPaid: number; recovered: number; cash: number; payouts: number; deals: number }
 
+/* ---- Unified accounting (Books control room). Mirrors admin-books.ts and
+   the persisted commission journal contracts; amounts are integer cents. ---- */
+export type AccountingAccountCode = '1000' | '1100' | '1200' | '2000' | '2010' | '3000' | '4000' | '4090' | '5000' | '5010';
+export const ACCOUNTING_CHART: Array<{ code: AccountingAccountCode; name: string; type: string }> = [
+  { code: '1000', name: 'Cash', type: 'asset' }, { code: '1100', name: 'Lender commission A/R', type: 'asset' },
+  { code: '1200', name: 'Rep recovery receivable', type: 'asset' },
+  { code: '2000', name: 'Rep payable', type: 'liability' }, { code: '2010', name: 'Referral payable', type: 'liability' },
+  { code: '3000', name: 'Opening equity', type: 'equity' }, { code: '4000', name: 'Commission revenue', type: 'revenue' },
+  { code: '4090', name: 'Clawback contra-revenue/loss', type: 'revenue' }, { code: '5000', name: 'Rep commission expense', type: 'expense' },
+  { code: '5010', name: 'Referral expense', type: 'expense' },
+];
+export interface JournalLine { id: string; accountCode: AccountingAccountCode; debit: number; credit: number; memo?: string; dealId?: string | null; repId?: string | null }
+export interface Journal { id: string; sourceKey: string; logicalSourceKey: string; sourceVersion: number; sourceType: string; date: string; memo: string; fingerprint: string; reversalOf: string | null; correctionDate: string | null; metadata?: Record<string, string | number | boolean | null>; lines: JournalLine[] }
+export interface JournalsResponse { journals: Journal[] }
+export interface AccountingPeriod { id: string; start: string; end: string; status: 'open' | 'closed'; closedAt: string | null; closedBy: string | null; reopenedAt: string | null; reopenedBy: string | null }
+export interface PeriodsResponse { periods: AccountingPeriod[] }
+export interface PeriodCloseResult { ok: true; periodId: string; checklist: { projected: number; inserted: number; existing: number; corrected: number; removed: number; unresolved: number; journalCount: number; debit: number; credit: number; balanced: true } }
+export interface Reconciliation { id: string; accountCode: string; statementStart: string; statementDate: string; openingBalance: number; statementBalance: number; status: 'open' | 'completed'; note: string | null; createdBy: string | null; clearedAmount: number; expectedBalance: number; difference: number; matches: Array<{ journalLineId: string; amount: number }> }
+export interface CreateReconciliationRequest { accountCode: AccountingAccountCode; statementStart: string; statementDate: string; openingBalance: number; statementBalance: number; note?: string | null }
+/** PATCH deliberately excludes account, interval, and balance fields. Reopening uses POST /:id/reopen. */
+export interface PatchReconciliationRequest { note?: string | null; status?: 'completed' }
+export interface ReconciliationsResponse { reconciliations: Reconciliation[] }
+export interface EligibleReconciliationLine { id: string; date: string; amount: number; sourceKey: string; label: string }
+export interface EligibleReconciliationLines { accountCode: string; statementStart: string; statementDate: string; lines: EligibleReconciliationLine[] }
+export interface TrialBalanceRow { accountCode: AccountingAccountCode; name: string; debit: number; credit: number; balance: number; journals: string[] }
+export interface TrialBalanceReport { rows: TrialBalanceRow[]; totals: { debit: number; credit: number }; balanced: boolean }
+export interface ProfitLossReport { from: string | null; to: string | null; revenue: number; clawbacks: number; netRevenue: number; expenses: number; netIncome: number; drilldown: TrialBalanceRow[] }
+export interface BalanceSheetReport { asOf: string | null; assets: number; liabilities: number; equity: number; balanced: boolean; drilldown: TrialBalanceRow[] }
+export interface CashFlowEntry { sourceKey: string; date: string; amount: number; metadata?: Record<string, string | number | boolean | null> }
+export interface CashFlowReport { from: string | null; to: string | null; inflows: number; outflows: number; netCash: number; entries: CashFlowEntry[] }
+export interface RepPayableEntry { journalId: string; sourceKey: string; sourceType: string; date: string; repId: string | null; dealId: string | null; accrual: number; payoutOrRecovery: number; endingEffect: number }
+export interface RepPayablesReport { asOf: string | null; payable: number; rows: RepPayableEntry[]; drilldown: string[] }
+export interface AccountingSyncIssue { logicalSourceKey: string; reason: string; effectiveSourceKey?: string }
+export interface AccountingSyncResult { inserted: number; existing: number; corrected: number; removed: number; unresolved: AccountingSyncIssue[]; projected: number; assumedCollectionDates: number; pendingProjection: number }
+
 /* ---- Playbooks and tasks ---- */
 export type { PlaybookAction, PlaybookFilters, PlaybookRule, PlaybookTrigger } from '../../../api-server/src/services/playbook-rules';
 export { MERGE_FIELD_HELP, TASK_OUTCOMES, TRIGGER_KINDS } from '../../../api-server/src/services/playbook-rules';

@@ -6,9 +6,15 @@ import { Card, Loading, Metric, Pill } from '../components/ui';
 import { DEMO, EXCEPTION_LABEL, EXCEPTION_SHORT, api, post, type AgeBucket, type CashView, type ExceptionKind, type Exceptions, type PartnerPayables, type Receivables, type Settings } from '../lib/api';
 import { compact, day, money, monthLabel } from '../lib/format';
 import { useSession } from '../lib/session';
+import { AccountingOverview, Journal, Periods, Reconciliations, Reports } from '../components/books/Accounting';
 
-type Tab = 'exceptions' | 'receivables' | 'partners' | 'cash';
+type Tab = 'overview' | 'journal' | 'periods' | 'reconciliation' | 'reports' | 'exceptions' | 'receivables' | 'partners' | 'cash';
 const TABS: Array<{ key: Tab; label: string; hint: string }> = [
+  { key: 'overview', label: 'Control room', hint: 'Sync status, posting integrity, assumed-date warnings, and the periods still open for posting.' },
+  { key: 'journal', label: 'Journal', hint: 'Immutable, line-level postings with source keys and drilldowns into operational records.' },
+  { key: 'periods', label: 'Periods', hint: 'Create, close, and reopen accounting periods. Closed periods reject new journal posts.' },
+  { key: 'reconciliation', label: 'Reconciliation', hint: 'Tie bank statements to exact persisted journal line IDs.' },
+  { key: 'reports', label: 'Reports', hint: 'Trial balance, P&L, balance sheet, direct cash flow, and rep payable drilldown.' },
   { key: 'exceptions', label: 'Exceptions', hint: 'What a bookkeeper would find by reading every row: funded with nothing received, reps paid ahead of the lender, matured deals still marked Performing, clawback windows closing, overdue receipts, partner fees due.' },
   { key: 'receivables', label: 'Receivables', hint: 'What each lender still owes the house, aged from the date it was expected — the schedule for incremental lenders, funded date plus the lender’s payment terms for everyone else.' },
   { key: 'partners', label: 'Partner payables', hint: 'Referral fees owed per partner. Tick the deals you paid and mark them paid; the audit log keeps the date.' },
@@ -17,13 +23,19 @@ const TABS: Array<{ key: Tab; label: string; hint: string }> = [
 const BUCKETS: AgeBucket[] = ['current', '1-30', '31-60', '61-90', '90+'];
 
 export function Books() {
-  const [tab, setTab] = useState<Tab>('exceptions');
+  const [tab, setTab] = useState<Tab>('overview');
   const [open, setOpen] = useState<string | null>(null);
+  const [journalSource, setJournalSource] = useState<string | undefined>();
   const settings = useQuery({ queryKey: ['settings'], queryFn: () => api<Settings>('/api/admin/settings') });
   return (
     <Shell eyebrow="Admin" title="Books">
       <div className="seg pagetabs">{TABS.map((t) => <button key={t.key} className={tab === t.key ? 'on' : ''} onClick={() => setTab(t.key)}>{t.label}</button>)}</div>
       <div className="muted" style={{ marginTop: -6 }}>{TABS.find((t) => t.key === tab)!.hint}</div>
+      {tab === 'overview' && <AccountingOverview onJournal={(source) => { setJournalSource(source); setTab('journal'); }} />}
+      {tab === 'journal' && <Journal initialSource={journalSource} onDeal={setOpen} />}
+      {tab === 'periods' && <Periods />}
+      {tab === 'reconciliation' && <Reconciliations />}
+      {tab === 'reports' && <Reports onJournal={(source) => { setJournalSource(source); setTab('journal'); }} />}
       {tab === 'exceptions' && <ExceptionsTab onOpen={setOpen} />}
       {tab === 'receivables' && <ReceivablesTab onOpen={setOpen} />}
       {tab === 'partners' && <PartnersTab onOpen={setOpen} />}

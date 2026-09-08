@@ -85,6 +85,55 @@
       "when": 1788710000000,
       "tag": "0011_rep_commission_eligible",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788711000000,
+      "tag": "0012_unified_accounting_books",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788712000000,
+      "tag": "0013_accounting_journal_dimensions",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1788713000000,
+      "tag": "0014_accounting_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1788714000000,
+      "tag": "0015_rep_recovery_receivable",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1788715000000,
+      "tag": "0016_accounting_correction_chains",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1788716000000,
+      "tag": "0017_journal_lifecycle_deal_tombstones",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788717000000,
+      "tag": "0018_reconciliation_statements",
+      "breakpoints": true
     }
   ]
 }

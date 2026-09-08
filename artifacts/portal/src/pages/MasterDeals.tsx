@@ -8,7 +8,8 @@ import { DEAL_STATUS_OPTIONS, api, post, qs, type MasterBoard, type Settings } f
 import { compact, day, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 
-const COLS = '120px 70px 84px minmax(200px,1.3fr) minmax(240px,1.3fr) 130px minmax(170px,1fr) 110px 70px 70px 100px 100px 100px minmax(150px,1fr) minmax(150px,1fr) minmax(150px,1fr) 110px 110px 150px 170px minmax(0,1fr)';
+const PRIMARY_COLS = 'minmax(92px, .75fr) minmax(180px, 1.8fr) minmax(130px, 1.05fr) minmax(100px, .8fr) minmax(92px, .8fr) minmax(92px, .8fr) minmax(92px, .8fr) minmax(120px, 1fr) 32px';
+const statusOptions = ['Waiting for payment', 'Partially Paid', 'YES - Paid In Full', 'Performing', 'Prospecting', 'Refi Ready', 'Refinanced', 'Default', 'Slow Pay', 'Paid In Full'];
 
 export function MasterDeals() {
   const { notify } = useSession();
@@ -16,6 +17,7 @@ export function MasterDeals() {
   const [rep, setRep] = useState('');
   const [status, setStatus] = useState('');
   const [open, setOpen] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const settings = useQuery({ queryKey: ['settings'], queryFn: () => api<Settings>('/api/admin/settings') });
   const board = useQuery({ queryKey: ['master', rep, status], queryFn: () => api<MasterBoard>(`/api/admin/deals${qs({ rep, status })}`) });
@@ -25,76 +27,76 @@ export function MasterDeals() {
   }, [board.data, search]);
   const totals = rows.reduce((t, d) => ({ funded: t.funded + d.funded, gross: t.gross + d.gross, net: t.net + d.net, payout: t.payout + d.totalRepPayout, house: t.house + d.houseNet }), { funded: 0, gross: 0, net: 0, payout: 0, house: 0 });
   const collect = async (id: string, body: Record<string, unknown>, label: string) => {
-    try {
-      await post(`/api/admin/deals/${id}/collection`, body);
-      await board.refetch();
-      notify(label);
-    } catch (e) {
-      notify(e instanceof Error ? e.message : 'Could not update');
-    }
+    try { await post(`/api/admin/deals/${id}/collection`, body); await board.refetch(); notify(label); }
+    catch (e) { notify(e instanceof Error ? e.message : 'Could not update'); }
+  };
+  const setDealStatus = async (id: string, dealStatus: string) => {
+    try { await post(`/api/admin/deals/${id}/status`, { dealStatus }, 'PATCH'); await board.refetch(); notify(`${id} — ${dealStatus}`); }
+    catch (e) { notify(e instanceof Error ? e.message : 'Could not update'); }
   };
 
   return (
     <Shell eyebrow="Admin" title="Master deals">
       <Card>
-        <div className="toolbar" style={{ marginBottom: 12 }}>
-          <input className="search" placeholder="Search deal, business, merchant contact, email, phone" value={search} onChange={(e) => setSearch(e.target.value)} style={{ minWidth: 320 }} />
+        <div className="toolbar master-toolbar">
+          <input className="search master-search" placeholder="Search deal, business, contact, email, phone" value={search} onChange={(e) => setSearch(e.target.value)} />
           <select className="filter" value={rep} onChange={(e) => setRep(e.target.value)}>
             <option value="">All reps</option>
             {(board.data?.repOptions.edit ?? []).map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
           </select>
           <select className="filter" value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="">All statuses</option>
-            {['Waiting for payment', 'Partially Paid', 'YES - Paid In Full', 'Performing', 'Prospecting', 'Refi Ready', 'Refinanced', 'Default', 'Slow Pay', 'Paid In Full'].map((s) => <option key={s}>{s}</option>)}
+            {statusOptions.map((s) => <option key={s}>{s}</option>)}
           </select>
           <span className="count">{rows.length} of {board.data?.count ?? 0} deals</span>
           <button className="btn primary" onClick={() => setCreating(true)} disabled={!settings.data || !board.data}>+ New deal</button>
         </div>
         {!board.data ? <Loading error={board.error} /> : rows.length === 0 ? <Empty>No deals match.</Empty> : (
-          <div className="scroller">
-            <div className="table" style={{ ['--cols' as string]: COLS, minWidth: 2450 }}>
-              <div className="tr th">
-                {['Deal ID', 'Sheet #', 'Date', 'Business', 'Merchant contact', 'Lender', 'Product', 'Funded', 'Factor / APR', 'Comm %', 'Gross', 'Referral', 'Net', 'Opener', 'Closer', 'Override', 'Rep payout', 'House net', 'Lender paid comm', 'Commission status', 'Deal status'].map((h, i) => (
-                  <div className={`td ${[7, 10, 11, 12, 16, 17].includes(i) ? 'r' : ''}`} key={h}>{h}</div>
-                ))}
-              </div>
-              {rows.map((d) => (
-                <div className={`tr ${d.atRisk ? 'tint' : ''}`} key={d.id}>
-                  <div className="td num" style={{ cursor: 'pointer' }} onClick={() => setOpen(d.id)}>{d.crmId ?? <span className="subtle">—</span>}{d.crmUrl && <a href={d.crmUrl} target="_blank" rel="noopener" className="crm-mini" onClick={(e) => e.stopPropagation()} title="Open in CRM">↗</a>}{d.hasClawback && <span className="neg" title="Clawback"> ●</span>}</div>
-                  <div className="td num subtle" style={{ cursor: 'pointer' }} onClick={() => setOpen(d.id)}>{d.id}</div>
-                  <div className="td num">{day(d.date)}</div>
-                  <div className="td ellipsis" style={{ cursor: 'pointer' }} onClick={() => setOpen(d.id)}><b>{d.business}</b>{d.drawCount > 0 && <span className="subtle"> · {d.drawCount} draw{d.drawCount > 1 ? 's' : ''}</span>}</div>
-                  <div className="td contact-cell"><Contact name={d.merchantContact} email={d.merchantEmail} phone={d.merchantPhone} /></div>
-                  <div className="td ellipsis">{d.lender}</div>
-                  <div className="td ellipsis">{d.product}</div>
-                  <div className="td r num">{money(d.funded)}{d.increments && <div className={`subtle ${d.increments.stopped ? 'warn' : ''}`} style={{ fontSize: 12.5, marginTop: 2 }} title={`${money(d.increments.perIncrement)} per increment`}>{d.increments.stopped ? `opted out · ${d.increments.total} of ${Math.round(d.increments.planned / d.increments.perIncrement)}` : `${money(d.increments.disbursed)} out · ${d.increments.lenderPaid}/${d.increments.total}`}</div>}</div>
-                  <div className="td num">{d.factor !== null ? d.factor.toFixed(2) : d.apr !== null ? `${d.apr}%` : '—'}</div>
-                  <div className="td num">{pct(d.commRate)}</div>
-                  <div className="td r num">{money(d.gross)}</div>
-                  <div className="td r num subtle">{d.referralFee ? `${money(d.referralFee)}` : '—'}</div>
-                  <div className="td r num">{money(d.net)}</div>
-                  {d.roles.map((r) => (
-                    <div className="td ellipsis" key={r.role}>{r.repId ? <><span className="ellipsis">{r.name}</span><div className="subtle num" style={{ fontSize: 13 }}>{pct(r.rate)} · {money(r.amount)}</div></> : <span className="subtle">—</span>}</div>
-                  ))}
-                  <div className="td r num">{money(d.totalRepPayout)}</div>
-                  <div className="td r num pos">{money(d.houseNet)}</div>
-                  <div className="td"><button className={`pill ${d.overdueReceipts ? 'red' : toneFor(d.lenderPaidLabel === 'Collected' ? 'Paid' : d.commissionStatus)}`} title={d.overdueReceipts ? `${d.overdueReceipts} lender receipt(s) overdue · ${money(d.overdueAmount)}` : undefined} style={{ cursor: 'pointer' }} onClick={() => void collect(d.id, { segmentKey: 'base', toggle: true }, `${d.id} — collection updated`)}>{d.lenderPaidLabel}{d.overdueReceipts ? ' · late' : ''}</button>{d.increments && <div className="subtle num" style={{ fontSize: 12.5, marginTop: 3 }}>Lender {d.increments.lenderPaid}/{d.increments.total} · Rep {d.increments.repPaid}/{d.increments.total}</div>}</div>
-                  <div className="td"><select className="mini" value={d.commissionStatus} onChange={(e) => { const status = e.target.value; if (status === 'Partially Paid') { const v = window.prompt(`How much commission has the lender paid so far on ${d.id} ($)?`); if (v === null) return; const dollars = Number(String(v).replace(/[^0-9.]/g, '')); if (!(dollars > 0)) return; void collect(d.id, { segmentKey: 'base', status, partialDollars: dollars }, `${d.id} — ${money(dollars)} collected`); return; } void collect(d.id, { segmentKey: 'base', status }, `${d.id} — commission ${status.toLowerCase()}`); }}>{['Waiting for payment', 'Partially Paid', 'YES - Paid In Full'].map((s) => <option key={s}>{s}</option>)}</select></div>
-                  <div className="td"><select className="mini" value={d.storedDealStatus === 'Performing' || d.storedDealStatus === 'Prospecting' || d.storedDealStatus === 'Refi Ready' ? 'Performing' : d.storedDealStatus} title={`Showing ${d.dealStatus}`} onChange={async (e) => { try { await post(`/api/admin/deals/${d.id}/status`, { dealStatus: e.target.value }, 'PATCH'); await board.refetch(); notify(`${d.id} — ${e.target.value}`); } catch (x) { notify(x instanceof Error ? x.message : 'Could not update'); } }}>{DEAL_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.value === 'Performing' ? `Auto · ${d.dealStatus}` : o.label}</option>)}</select><div style={{ marginTop: 5 }}>{d.clawbackWindow.cleared ? <span className="cleared"><i>✓</i> {d.clawbackWindow.basis === 'none' ? 'No clawback' : 'Clawback cleared'}</span> : <><ClawbackBar fundedDate={d.date} win={d.clawbackWindow} /><div className="subtle num" style={{ fontSize: 12.5, marginTop: 3 }}>clawback · {d.clawbackWindow.daysLeft}d left</div></>}</div></div>
-                </div>
-              ))}
-              <div className="tr total">
-                <div className="td" style={{ gridColumn: '1 / 8' }}>{rows.length} opportunities · {rows.reduce((s, d) => s + d.drawCount, 0)} draw lines</div>
-                <div className="td r num">{compact(totals.funded)}</div><div className="td" /><div className="td" />
-                <div className="td r num">{money(totals.gross)}</div><div className="td" /><div className="td r num">{money(totals.net)}</div>
-                <div className="td" /><div className="td" /><div className="td" />
-                <div className="td r num">{money(totals.payout)}</div><div className="td r num pos">{money(totals.house)}</div>
-                <div className="td" /><div className="td" /><div className="td" />
-              </div>
+          <div className="master-table">
+            <div className="master-head" style={{ ['--primary-cols' as string]: PRIMARY_COLS }}>
+              {['Deal', 'Business / contact', 'Lender / product', 'Funded', 'Net', 'House', 'Date', 'Status', ''].map((h) => <div key={h} className="master-cell">{h}</div>)}
             </div>
+            {rows.map((d) => {
+              const isExpanded = expanded === d.id;
+              const shownStatus = d.storedDealStatus === 'Performing' || d.storedDealStatus === 'Prospecting' || d.storedDealStatus === 'Refi Ready' ? 'Performing' : d.storedDealStatus;
+              return (
+                <div className={`master-item ${d.atRisk ? 'at-risk' : ''} ${isExpanded ? 'is-open' : ''}`} key={d.id}>
+                  <div className="master-primary" style={{ ['--primary-cols' as string]: PRIMARY_COLS }} role="button" tabIndex={0} onClick={() => setOpen(d.id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(d.id); } }}>
+                    <div className="master-cell deal-key"><b>{d.crmId ?? d.id}</b>{d.crmId && <span className="subtle">#{d.id}</span>}{d.crmUrl && <a href={d.crmUrl} target="_blank" rel="noopener" className="crm-mini" onClick={(e) => e.stopPropagation()} title="Open in CRM">↗</a>}{d.hasClawback && <span className="neg" title="Clawback"> ●</span>}</div>
+                    <div className="master-cell business-cell"><b className="ellipsis">{d.business}</b><span className="subtle ellipsis">{d.merchantContact}{d.drawCount > 0 ? ` · ${d.drawCount} draw${d.drawCount > 1 ? 's' : ''}` : ''}</span></div>
+                    <div className="master-cell"><b className="ellipsis">{d.lender}</b><span className="subtle ellipsis">{d.product}</span></div>
+                    <div className="master-cell num r">{money(d.funded)}</div>
+                    <div className="master-cell num r">{money(d.net)}</div>
+                    <div className="master-cell num r pos">{money(d.houseNet)}</div>
+                    <div className="master-cell num">{day(d.date)}</div>
+                    <div className="master-cell"><span className={`pill ${toneFor(d.commissionStatus)}`}>{d.dealStatus}</span><span className="subtle status-sub">{d.commissionStatus}</span></div>
+                    <button className="expand-btn" aria-expanded={isExpanded} aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${d.business}`} onClick={(e) => { e.stopPropagation(); setExpanded(isExpanded ? null : d.id); }}>{isExpanded ? '−' : '+'}</button>
+                  </div>
+                  {isExpanded && (
+                    <div className="master-detail">
+                      <div><span className="label">Identifiers</span><b className="num">{d.crmId ?? '—'}</b><span className="subtle num">Sheet #{d.id}</span>{d.crmUrl && <a href={d.crmUrl} target="_blank" rel="noopener">Open in CRM ↗</a>}</div>
+                      <div className="detail-contact"><span className="label">Merchant contact</span><Contact name={d.merchantContact} email={d.merchantEmail} phone={d.merchantPhone} /></div>
+                      <div><span className="label">Lender / product</span><b className="ellipsis">{d.lender}</b><span className="subtle ellipsis">{d.product}</span></div>
+                      <div><span className="label">Funded on</span><b className="num">{day(d.date)}</b><span className="subtle num">{d.increments ? (d.increments.stopped ? `Opted out · ${d.increments.total} of ${Math.round(d.increments.planned / d.increments.perIncrement)}` : `${money(d.increments.disbursed)} out · ${d.increments.lenderPaid}/${d.increments.total}`) : 'No draw schedule'}</span></div>
+                      <div><span className="label">Factor / APR</span><b className="num">{d.factor !== null ? d.factor.toFixed(2) : d.apr !== null ? `${d.apr}%` : '—'}</b></div>
+                      <div><span className="label">Commission</span><b className="num">{pct(d.commRate)}</b></div>
+                      <div><span className="label">Gross</span><b className="num">{money(d.gross)}</b></div>
+                      <div><span className="label">Referral</span><b className="num">{d.referralFee ? money(d.referralFee) : '—'}</b></div>
+                      <div><span className="label">Rep payout</span><b className="num">{money(d.totalRepPayout)}</b></div>
+                      {d.roles.map((r) => <div key={r.role}><span className="label">{r.role}</span><b>{r.repId ? r.name : '—'}</b>{r.repId && <span className="subtle num">{pct(r.rate)} · {money(r.amount)}</span>}</div>)}
+                      <div className="detail-wide"><span className="label">Collection</span><button className={`pill ${d.overdueReceipts ? 'red' : toneFor(d.lenderPaidLabel === 'Collected' ? 'Paid' : d.commissionStatus)}`} onClick={() => void collect(d.id, { segmentKey: 'base', toggle: true }, `${d.id} — collection updated`)}>{d.lenderPaidLabel}{d.overdueReceipts ? ' · late' : ''}</button>{d.increments && <span className="subtle num"> Lender {d.increments.lenderPaid}/{d.increments.total} · Rep {d.increments.repPaid}/{d.increments.total}</span>}</div>
+                      <div className="detail-wide"><span className="label">Commission status</span><select className="mini" value={d.commissionStatus} onChange={(e) => { const next = e.target.value; if (next === 'Partially Paid') { const v = window.prompt(`How much commission has the lender paid so far on ${d.id} ($)?`); if (v === null) return; const dollars = Number(String(v).replace(/[^0-9.]/g, '')); if (!(dollars > 0)) return; void collect(d.id, { segmentKey: 'base', status: next, partialDollars: dollars }, `${d.id} — ${money(dollars)} collected`); return; } void collect(d.id, { segmentKey: 'base', status: next }, `${d.id} — commission ${next.toLowerCase()}`); }}>{['Waiting for payment', 'Partially Paid', 'YES - Paid In Full'].map((s) => <option key={s}>{s}</option>)}</select></div>
+                      <div className="detail-wide"><span className="label">Deal status</span><select className="mini" value={shownStatus} title={`Showing ${d.dealStatus}`} onChange={(e) => void setDealStatus(d.id, e.target.value)}>{DEAL_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.value === 'Performing' ? `Auto · ${d.dealStatus}` : o.label}</option>)}</select><div className="clawback-detail">{d.clawbackWindow.cleared ? <span className="cleared"><i>✓</i> {d.clawbackWindow.basis === 'none' ? 'No clawback' : 'Clawback cleared'}</span> : <><ClawbackBar fundedDate={d.date} win={d.clawbackWindow} /><span className="subtle num">clawback · {d.clawbackWindow.daysLeft}d left</span></>}</div></div>
+                      <button className="btn detail-open" onClick={() => setOpen(d.id)}>Open deal details</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <div className="master-total"><span>{rows.length} opportunities · {rows.reduce((s, d) => s + d.drawCount, 0)} draw lines</span><b className="num">Funded {compact(totals.funded)}</b><b className="num">Net {money(totals.net)}</b><b className="num pos">House {money(totals.house)}</b><b className="num">Payout {money(totals.payout)}</b></div>
           </div>
         )}
-        <div className="subtle" style={{ marginTop: 10, fontSize: 13.5 }}>Rows tinted red are inside the {settings.data?.thresholds.clawbackWindowDays ?? 30}-day clawback window or flagged slow-pay. Deal status follows the dates (Performing → Prospecting at {settings.data?.thresholds.additionalCapitalAfterDays ?? 30} days → Refi Ready at {Math.round((settings.data?.thresholds.renewalMark ?? 0.4) * 100)}% paid in) unless set by hand. Click the lender-paid pill to record a week (weekly lenders) or toggle collected (upfront). The status select writes collection — it never sets a status on its own.</div>
+        <div className="subtle accounting-note">Rows tinted red are inside the {settings.data?.thresholds.clawbackWindowDays ?? 30}-day clawback window or flagged slow-pay. Deal status follows the dates (Performing → Prospecting at {settings.data?.thresholds.additionalCapitalAfterDays ?? 30} days → Refi Ready at {Math.round((settings.data?.thresholds.renewalMark ?? 0.4) * 100)}% paid in) unless set by hand. Click the lender-paid pill to record a week (weekly lenders) or toggle collected (upfront). The status select writes collection — it never sets a status on its own.</div>
       </Card>
       {open && settings.data && board.data && <AdminDealDrawer id={open} settings={settings.data} editOptions={board.data.repOptions.edit} onClose={() => setOpen(null)} />}
       {creating && settings.data && board.data && <NewDealDrawer settings={settings.data} board={board.data} onClose={() => setCreating(false)} onSaved={(d) => { setCreating(false); setOpen(d.id); }} />}

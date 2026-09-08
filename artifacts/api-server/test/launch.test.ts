@@ -148,8 +148,9 @@ describe('clawbacks, notes and files on a deal', () => {
 
 describe('statements and digests', () => {
   it('emails each paid rep their statement when a run is approved', async () => {
-    const { admin, mailer } = await harness();
-    await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: ['F2|Opener|base'] });
+    const { admin, mailer, repo } = await harness();
+    await repo.updateDeal('F2', { commCollected: 2_000 });
+    expect((await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: ['F2|Opener|base'] })).status).toBe(201);
     // The payout receipt belongs to the committed payment event, not approval.
     mailer.sent.length = 0;
     const approved = await admin.post('/api/admin/payroll/runs/run-4/advance');

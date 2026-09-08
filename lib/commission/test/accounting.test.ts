@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { assertBalanced, projectAccounting } from '../src/accounting.js';
+import { repClawback } from '../src/clawback.js';
 import type { PayoutLine } from '../src/types.js';
-import { makeDeal, makeDraw } from './fixtures.js';
+import { makeClawback, makeDeal, makeDraw } from './fixtures.js';
 
 describe('unified accounting projection', () => {
   it('is cent-balanced and deterministic from the earliest source date', () => {
@@ -70,6 +71,22 @@ describe('unified accounting projection', () => {
       { accountCode: '1200', debit: 35, credit: 0 },
     ]);
     expect(golden('payout:void|cbrec|cb-1|run-1|rep-07').some((l) => l.accountCode === '2000')).toBe(false);
+  });
+
+  it('ties every rep operational remaining liability to account 1200 after a valid reduction', () => {
+    const deal = makeDeal({ id: 'F1', funded: 10_000, commRate: 0.1, commCollected: 1_000 });
+    const clawback = makeClawback('cb-1', 'F1', 600);
+    const payoutLines: PayoutLine[] = [
+      { key: 'cbrec|cb-1|run-1|rep-07', dealId: 'F1', segmentKey: null, role: 'Clawback recovery', repId: 'rep-07', amount: -100, runId: 'run-1', clawbackId: 'cb-1', paidAt: '2026-08-20' },
+      { key: 'cbrec|cb-1|run-1|rep-05', dealId: 'F1', segmentKey: null, role: 'Clawback recovery', repId: 'rep-05', amount: -50, runId: 'run-1', clawbackId: 'cb-1', paidAt: '2026-08-20' },
+    ];
+    const journals = projectAccounting({ deals: [deal], payoutLines, clawbacks: [clawback] }).journals;
+    for (const repId of ['rep-07', 'rep-05', 'rep-02']) {
+      const account1200 = journals.flatMap((journal) => journal.lines)
+        .filter((line) => line.accountCode === '1200' && line.repId === repId)
+        .reduce((balance, line) => balance + line.debit - line.credit, 0);
+      expect(account1200).toBe(repClawback(clawback, deal, repId, payoutLines).remaining);
+    }
   });
 
   it('uses the referenced journal amount and accounts as the void golden source', () => {

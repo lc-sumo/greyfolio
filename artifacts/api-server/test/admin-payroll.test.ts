@@ -15,6 +15,9 @@ const today = new Date().toISOString().slice(0, 10);
 
 async function harness(mailer: Mailer = memoryMailer()) {
   const repo = memoryRepo();
+  // Successful payroll paths use an authoritative lender receipt; separate
+  // tests cover rejection of uncollected advances.
+  await repo.updateDeal('F2', { commCollected: 2_000 });
   const app = createApp(config, repo, { mailer });
   const as = async (email: string) => {
     const agent = request.agent(app);
@@ -55,7 +58,7 @@ describe('GET /api/admin/payroll', () => {
     expect(res.body.runs.map((r: { id: string }) => r.id)).toEqual(['run-4', 'run-3']);
     expect(res.body.runs[1]).toMatchObject({ id: 'run-3', paidGross: 350, recovered: 100, cash: 250, repCount: 1, lineCount: 1 });
     // Every figure is repLedger's — the same number the rep's wallet shows.
-    const ctx = { deals, lines, clawbacks };
+    const ctx = { deals: deals.map((d) => d.id === 'F2' ? { ...d, commCollected: 2_000 } : d), lines, clawbacks };
     const owed = (id: string) => repLedger(ctx, id).owed;
     const reps: Array<{ id: string; owed: number; lineCount: number }> = res.body.reps;
     for (const r of reps) expect(r.owed).toBe(owed(r.id));
@@ -64,6 +67,8 @@ describe('GET /api/admin/payroll', () => {
     expect(reps.map((r) => r.id)).toEqual(sorted.map((r) => r.id));
     expect(res.body.reps.find((r: { id: string }) => r.id === 'rep-zach-sanders').held).toBe(400);
     expect(res.body.outstanding).toBe(res.body.reps.reduce((s: number, r: { owed: number }) => s + r.owed, 0));
+    expect(res.body.balance).toBe(res.body.outstanding);
+    expect(res.body.payable).toBe(res.body.reps.reduce((s: number, r: { payable: number }) => s + r.payable, 0));
   });
 });
 
@@ -161,8 +166,8 @@ describe('per-rep payroll detail', () => {
     const { admin } = await harness();
     const res = await admin.get('/api/admin/payroll/runs/run-3/reps/rep-julian-ribak');
     expect(res.body.rep).toMatchObject({ id: 'rep-julian-ribak', name: 'Julian Ribak' });
-    expect(res.body.lines).toEqual([expect.objectContaining({ key: 'F2|Opener|base', segmentLabel: 'Initial', business: 'F2 Business', role: 'Opener', rate: 0.35, amount: 700, lenderPaidLabel: 'Not collected', collected: false, collectedKeys: [], uncollectedKeys: ['F2|Opener|base'], uncollectedAmount: 700, units: null })]);
-    expect(res.body.payableUnits).toEqual([expect.objectContaining({ key: 'F2|Opener|base', dealId: 'F2', business: 'F2 Business', role: 'Opener', segmentLabel: 'Initial', amount: 700, collected: false, unit: null })]);
+    expect(res.body.lines).toEqual([expect.objectContaining({ key: 'F2|Opener|base', segmentLabel: 'Initial', business: 'F2 Business', role: 'Opener', rate: 0.35, amount: 700, lenderPaidLabel: 'Collected', collected: true, collectedKeys: ['F2|Opener|base'], uncollectedKeys: [], uncollectedAmount: 0, units: null })]);
+    expect(res.body.payableUnits).toEqual([expect.objectContaining({ key: 'F2|Opener|base', dealId: 'F2', business: 'F2 Business', role: 'Opener', segmentLabel: 'Initial', amount: 700, collected: true, unit: null })]);
     expect(res.body.clawbacks).toEqual([{ id: 'cb-1', dealId: 'F1', business: 'F1 Business', date: '2026-08-15', remaining: 250 }]);
     expect(res.body.outstandingClawback).toBe(250);
     expect(res.body.paidInRun.map((p: { role: string; amount: number }) => [p.role, p.amount])).toEqual([['Opener', 350], ['Clawback recovery', -100]]);
@@ -179,9 +184,10 @@ describe('per-rep payroll detail', () => {
       ['F9|Opener|base|u2', true, 'Initial · Increment 2', 2, 'Increment 2'],
       ['F9|Opener|base|u3', false, 'Initial · Increment 3', 3, 'Increment 3'],
     ]);
-    const plan = planPayout(context, { repId: 'rep-julian-ribak', selectedKeys: units.map((unit) => unit.key), runId: 'run-4', paidAt: '2026-09-02' });
-    expect(units.map((unit) => [unit.key, unit.amount])).toEqual(plan.lines.map((line) => [line.key, line.amount]));
-    expect(plan.gross).toBe(units.reduce((total, unit) => total + unit.amount, 0));
+    const collected = units.filter((unit) => unit.collected);
+    const plan = planPayout(context, { repId: 'rep-julian-ribak', selectedKeys: collected.map((unit) => unit.key), runId: 'run-4', paidAt: '2026-09-02' });
+    expect(collected.map((unit) => [unit.key, unit.amount])).toEqual(plan.lines.map((line) => [line.key, line.amount]));
+    expect(plan.gross).toBe(collected.reduce((total, unit) => total + unit.amount, 0));
   });
   it('previews netting before commit', async () => {
     const { admin } = await harness();
@@ -195,7 +201,7 @@ describe('POST pay', () => {
     const { admin, repo, mailer } = await harness();
     const res = await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: ['F2|Opener|base'] });
     expect(res.status).toBe(201);
-    expect(res.body).toMatchObject({ repId: 'rep-julian-ribak', runId: 'run-4', gross: 700, withheld: 250, net: 450, lines: 1, recoveries: 1, dealsFullyPaid: [], uncollectedDealIds: ['F2'] });
+    expect(res.body).toMatchObject({ repId: 'rep-julian-ribak', runId: 'run-4', gross: 700, withheld: 250, net: 450, lines: 1, recoveries: 1, dealsFullyPaid: [], uncollectedDealIds: [] });
     expect(repo.data.lines.filter((l) => l.runId === 'run-4').map((l) => [l.role, l.amount, l.clawbackId])).toEqual([['Opener', 700, null], ['Clawback recovery', -250, 'cb-1']]);
     expect(repo.data.clawbacks[0]).toMatchObject({ recovered: 350, status: 'open' }); // Zach and Raymond still owe theirs
     expect(repo.audit.some((entry) => entry.action === 'payroll.pay' && entry.targetRepId === 'rep-julian-ribak')).toBe(true);
@@ -208,7 +214,7 @@ describe('POST pay', () => {
     expect(receipt?.text).toMatch(/Net paid: +\$450\.00/);
     // Wallet agrees with the ledger the run just wrote.
     const wallet = await admin.get('/api/me/wallet').set('X-View-As', 'rep-julian-ribak');
-    expect(wallet.body).toMatchObject({ earned: 1_050, paid: 1_050, cash: 700, held: 0, recovered: 350, owed: 0 });
+    expect(wallet.body).toMatchObject({ earned: 1_050, paid: 1_050, cash: 700, held: 0, recovered: 350, balance: 0, payable: 0, owed: 0 });
     // Paying the same line again is refused.
     expect((await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: ['F2|Opener|base'] })).body.error).toMatch(/already paid/);
   });
@@ -227,29 +233,65 @@ describe('POST pay', () => {
     expect((await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: ['F1|Closer|base'] })).body.error).toMatch(/not payable/);
   });
 
-  it('rejects a stale payout deterministically when deal terms change after planning but before commit', async () => {
+  it('reloads changed deal economics before planning inside the payout lock', async () => {
     const { repo } = await harness();
-    const originalCommit = repo.commitPayoutForOpenRun.bind(repo);
+    const originalPlan = repo.planPayoutForRun.bind(repo);
     let injected = false;
-    repo.commitPayoutForOpenRun = async (runId, commit, validateDeals) => {
-      // This hook is the exact boundary after paySelected loaded its context
-      // and built the plan, but before the repository validates and appends.
+    repo.planPayoutForRun = async (runId, repId, allowed, plan) => {
       injected = true;
-      const current = repo.data.deals.find((d) => d.id === 'F2')!;
-      await repo.updateDeal('F2', { termDays: (current.termDays ?? 0) + 1 });
-      return originalCommit(runId, commit, validateDeals);
+      await repo.updateDeal('F2', { openerRate: 0.5 });
+      return originalPlan(runId, repId, allowed, plan);
     };
 
-    await expect(paySelected(repo, {
+    const result = await paySelected(repo, {
       runId: 'run-4',
       repId: 'rep-julian-ribak',
       selectedKeys: ['F2|Opener|base'],
-    }, 'rep-leor')).rejects.toMatchObject({
-      status: 400,
-      message: expect.stringMatching(/deal.*changed.*no payout was recorded.*review and try again/i),
-    });
+    }, 'rep-leor');
     expect(injected).toBe(true);
-    expect(repo.data.lines.filter((l) => l.runId === 'run-4')).toEqual([]);
+    expect(result.gross).toBe(1_000);
+    expect(repo.data.lines.find((l) => l.runId === 'run-4' && l.role === 'Opener')?.amount).toBe(1_000);
+  });
+
+  it('serializes concurrent selections against one canonical payable balance', async () => {
+    const { repo } = await harness();
+    const base = repo.data.deals.find((deal) => deal.id === 'F2')!;
+    const deal = (id: string, collected: number) => ({
+      ...base,
+      id,
+      opportunityId: id,
+      business: `${id} Business`,
+      funded: 10_000,
+      gross: 1_000,
+      net: 1_000,
+      commRate: 0.1,
+      commCollected: collected,
+      openerId: 'rep-julian-ribak',
+      openerRate: 1,
+      closerId: null,
+      overrideId: null,
+      repPaid: null,
+      draws: [],
+    });
+    repo.data.deals.splice(0, repo.data.deals.length, deal('LIABILITY', 0), deal('PAY-A', 1_000), deal('PAY-B', 1_000));
+    repo.data.lines.splice(0);
+    repo.data.clawbacks.splice(0, repo.data.clawbacks.length, {
+      ...clawbacks[0]!,
+      id: 'cb-capacity',
+      dealId: 'LIABILITY',
+      amount: 1_000,
+      recovered: 0,
+      status: 'open',
+    });
+
+    const settled = await Promise.allSettled([
+      paySelected(repo, { runId: 'run-4', repId: 'rep-julian-ribak', selectedKeys: ['PAY-A|Opener|base'] }, 'rep-leor'),
+      paySelected(repo, { runId: 'run-4', repId: 'rep-julian-ribak', selectedKeys: ['PAY-B|Opener|base'] }, 'rep-leor'),
+    ]);
+    expect(settled.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const loser = settled.find((result) => result.status === 'rejected');
+    expect(loser).toMatchObject({ status: 'rejected', reason: { status: 400, message: expect.stringMatching(/balance changed.*refresh/i) } });
+    expect(repo.data.lines.reduce((cash, row) => cash + row.amount, 0)).toBeLessThanOrEqual(1_000);
   });
 
   it('retains the opposite ordering: payout commits first, then an economics edit is rejected', async () => {

@@ -237,6 +237,11 @@ export function buildDemo(today = iso(new Date()), seed = 20260902): DemoData {
   let ctx: LedgerContext = { deals, lines: [], clawbacks: [] };
   for (const run of runs) {
     if (run.status !== 'paid') continue;
+    // Replay authoritative lender receipts as they existed at this historical
+    // run. The balance-aware planner intentionally refuses speculative
+    // advances, so do not let a final-day collection flag stand in for a
+    // receipt that had not arrived yet.
+    ctx = { ...ctx, deals: collectedAsOf(deals, run.end, today) };
     ctx = { ...ctx, clawbacks: clawbacks.filter((c) => c.date <= run.end).map((c) => ctx.clawbacks.find((x) => x.id === c.id) ?? c) };
     for (const rep of reps) {
       const keys = payableLines(ctx.deals, ctx.lines, rep.id)
@@ -250,6 +255,29 @@ export function buildDemo(today = iso(new Date()), seed = 20260902): DemoData {
   // Carry the run-updated clawbacks back over the originals.
   const finalClawbacks = clawbacks.map((c) => ctx.clawbacks.find((x) => x.id === c.id) ?? c);
   return { today, teams, reps, deals: ctx.deals, runs, clawbacks: finalClawbacks, lines: ctx.lines };
+}
+
+/** Reconstruct only lender receipts known by a historical payroll cutoff. */
+function collectedAsOf(deals: Deal[], asOf: string, today: string): Deal[] {
+  const receipt = <T extends { gross: number; collected: number | null; schedule: { weeks: number; received: number } | null; date: string }>(x: T): T => {
+    const full = x.schedule
+      ? Math.max(0, x.schedule.received - Math.floor(daysBetween(asOf, today) / 7)) >= x.schedule.weeks
+      : (x.collected ?? 0) >= x.gross && daysBetween(x.date, asOf) > 40;
+    return {
+      ...x,
+      collected: x.schedule ? x.collected : full ? x.gross : 0,
+      schedule: x.schedule ? { ...x.schedule, received: full ? x.schedule.weeks : 0 } : null,
+    };
+  };
+  return deals.map((deal) => {
+    const base = receipt({ gross: deal.gross, collected: deal.commCollected, schedule: deal.commSchedule, date: deal.date });
+    return {
+      ...deal,
+      commCollected: base.collected,
+      commSchedule: base.schedule,
+      draws: deal.draws.map((draw) => receipt(draw)),
+    };
+  });
 }
 
 /** Was this segment's commission fully collected as of `asOf`? (Approximates the schedule backwards.) */

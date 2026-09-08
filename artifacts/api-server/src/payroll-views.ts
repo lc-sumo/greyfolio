@@ -20,6 +20,11 @@ export interface PayrollRepRow {
   id: string;
   name: string;
   active: boolean;
+  /** Signed operational commission balance. */
+  balance: number;
+  /** Cash currently payable, excluding a negative balance. */
+  payable: number;
+  /** @deprecated signed alias for balance. */
   owed: number;
   held: number;
   lineCount: number;
@@ -30,7 +35,7 @@ export function payrollReps(ctx: LedgerContext, reps: Rep[]): PayrollRepRow[] {
   return reps
     .map((r) => {
       const l = repLedger(ctx, r.id);
-      return { id: r.id, name: r.name, active: r.active, owed: l.owed, held: l.held, lineCount: payableLines(ctx.deals, ctx.lines, r.id).length };
+      return { id: r.id, name: r.name, active: r.active, balance: l.balance, payable: l.payable, owed: l.balance, held: l.held, lineCount: payableLines(ctx.deals, ctx.lines, r.id).length };
     })
     .sort((a, b) => b.owed - a.owed || a.name.localeCompare(b.name));
 }
@@ -143,6 +148,8 @@ export interface PayrollRepDetail {
   payableUnits: PayableUnitView[];
   clawbacks: Array<{ id: string; dealId: string; business: string; date: string; remaining: number }>;
   outstandingClawback: number;
+  balance: number;
+  payable: number;
   paidInRun: Array<{ key: string; dealId: string; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string; role: string; voided: boolean; voids: string | null; segmentKey: string | null; unitLabel: string | null; amount: number; paidAt: string }>;
   paidSummary: { gross: number; recovered: number; cash: number; lineCount: number };
 }
@@ -150,6 +157,7 @@ export interface PayrollRepDetail {
 export function payrollRepDetail(ctx: LedgerContext, rep: Rep, runId: string): PayrollRepDetail {
   const byId = new Map(ctx.deals.map((d) => [d.id, d]));
   const queue = clawbackQueue(ctx, rep.id);
+  const ledger = repLedger(ctx, rep.id);
   const paid = ctx.lines.filter((l) => l.runId === runId && l.repId === rep.id);
   const gone = voidedKeys(paid);
   return {
@@ -158,6 +166,8 @@ export function payrollRepDetail(ctx: LedgerContext, rep: Rep, runId: string): P
     payableUnits: payableUnitsFor(ctx, rep.id),
     clawbacks: queue.map((q) => ({ id: q.clawback.id, dealId: q.clawback.dealId, business: byId.get(q.clawback.dealId)?.business ?? q.clawback.dealId, date: q.clawback.date, remaining: q.remaining })),
     outstandingClawback: sum(queue.map((q) => q.remaining)),
+    balance: ledger.balance,
+    payable: ledger.payable,
     paidInRun: paid
       .map((l) => ({ key: l.key, dealId: l.dealId, business: byId.get(l.dealId)?.business ?? '—', merchantContact: byId.get(l.dealId)?.merchantContact ?? '—', merchantEmail: byId.get(l.dealId)?.merchantEmail ?? '', merchantPhone: byId.get(l.dealId)?.merchantPhone ?? '', role: l.role, segmentKey: l.segmentKey, unitLabel: unitLabelOf(l.role === 'Void' ? (l.voids ?? l.key) : l.key), amount: l.amount, paidAt: l.paidAt, voided: gone.has(l.key), voids: l.voids ?? null }))
       .sort((a, b) => a.paidAt.localeCompare(b.paidAt) || Math.sign(b.amount) - Math.sign(a.amount) || a.key.localeCompare(b.key)),

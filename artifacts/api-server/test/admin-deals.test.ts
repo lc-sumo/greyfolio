@@ -2,7 +2,7 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { configFromEnv } from '../src/config.js';
-import { repLedger } from '@greystone/commission';
+import { projectAccounting, repClawback, repLedger } from '@greystone/commission';
 import { clawbacks, deals, lines, memoryRepo, reps } from './memory-repo.js';
 
 const config = configFromEnv({ AUTH_MODE: 'dev', SESSION_SECRET: 'test-secret', PORT: '0' });
@@ -119,6 +119,75 @@ describe('POST /api/admin/deals', () => {
 });
 
 describe('deal edits', () => {
+  it('guards clawback reductions by each rep standing recovery, not only the aggregate', async () => {
+    const { admin, repo } = await harness();
+    repo.data.lines[1] = { ...repo.data.lines[1]!, amount: -350 };
+    repo.data.clawbacks[0] = { ...repo.data.clawbacks[0]!, recovered: 350 };
+
+    // Proposed total rep liability is $400, so the old aggregate-only guard
+    // passed $350. Julian's proposed slice is only $175 and must block it.
+    const rejected = await admin.patch('/api/admin/deals/F1/clawbacks/cb-1').send({ amount: 500 });
+    expect(rejected.status).toBe(400);
+    expect(rejected.body.error).toMatch(/rep-julian-ribak.*repaid.*350.*proposed.*175.*void excess recovery first/i);
+    expect(repo.data.clawbacks[0]!.amount).toBe(1_000);
+
+    const validHarness = await harness();
+    const valid = await validHarness.admin.patch('/api/admin/deals/F1/clawbacks/cb-1').send({ amount: 500 });
+    expect(valid.status).toBe(200);
+    expect(valid.body.clawbacks.find((clawback: { id: string }) => clawback.id === 'cb-1').amount).toBe(500);
+    expect(validHarness.repo.data.clawbacks[0]!.amount).toBe(500);
+  });
+
+  it('applies the same per-rep guard when a split edit changes attribution', async () => {
+    const { admin, repo } = await harness();
+    repo.data.lines[1] = { ...repo.data.lines[1]!, amount: -350 };
+    repo.data.clawbacks[0] = { ...repo.data.clawbacks[0]!, recovered: 350 };
+    const rejected = await admin.patch('/api/admin/deals/F1/splits').send({ openerRate: 20, closerRate: 60 });
+    expect(rejected.status).toBe(400);
+    expect(rejected.body.error).toMatch(/rep-julian-ribak.*proposed.*200.*void excess recovery first/i);
+    expect(repo.data.deals.find((deal) => deal.id === 'F1')!.openerRate).toBe(0.35);
+  });
+
+  it('guards effective-gross schedule stops under lock and keeps allowed schedule mutations tied to account 1200', async () => {
+    const configure = (repo: Awaited<ReturnType<typeof harness>>['repo'], recovered: number) => {
+      const deal = repo.data.deals.find((candidate) => candidate.id === 'F1')!;
+      Object.assign(deal, {
+        openerId: 'rep-julian-ribak', openerRate: 1,
+        closerId: null, closerRate: 0, overrideId: null, overrideRate: 0,
+        commSchedule: { mode: 'weekly', weeks: 10, received: 2, startDate: deal.date, remainder: 'spread', stoppedAfter: null },
+        commCollected: null,
+      });
+      repo.data.lines[1] = { ...repo.data.lines[1]!, amount: -recovered };
+      repo.data.clawbacks[0] = { ...repo.data.clawbacks[0]!, amount: 1_000, recovered };
+    };
+    const assert1200Tie = (repo: Awaited<ReturnType<typeof harness>>['repo']) => {
+      const deal = repo.data.deals.find((candidate) => candidate.id === 'F1')!;
+      const clawback = repo.data.clawbacks[0]!;
+      const account1200 = projectAccounting({ deals: repo.data.deals, payoutLines: repo.data.lines, clawbacks: repo.data.clawbacks }).journals
+        .flatMap((journal) => journal.lines)
+        .filter((line) => line.accountCode === '1200' && line.repId === 'rep-julian-ribak')
+        .reduce((balance, line) => balance + line.debit - line.credit, 0);
+      expect(account1200).toBe(repClawback(clawback, deal, 'rep-julian-ribak', repo.data.lines).remaining);
+    };
+
+    const blocked = await harness();
+    configure(blocked.repo, 500);
+    const rejected = await blocked.admin.post('/api/admin/deals/F1/collection').send({ segmentKey: 'base', stopIncrements: true });
+    expect(rejected.status).toBe(400);
+    expect(rejected.body.error).toMatch(/repaid.*500.*proposed.*200.*void excess recovery first/i);
+    expect(blocked.repo.data.deals.find((deal) => deal.id === 'F1')!.commSchedule?.stoppedAfter).toBeNull();
+
+    const allowed = await harness();
+    configure(allowed.repo, 100);
+    expect((await allowed.admin.post('/api/admin/deals/F1/collection').send({ segmentKey: 'base', stopIncrements: true })).status).toBe(200);
+    expect(allowed.repo.data.deals.find((deal) => deal.id === 'F1')!.commSchedule?.stoppedAfter).toBe(2);
+    assert1200Tie(allowed.repo);
+
+    const amounts = [2_000, 2_000, ...Array(8).fill(750)];
+    expect((await allowed.admin.post('/api/admin/deals/F1/collection').send({ segmentKey: 'base', amounts })).status).toBe(200);
+    assert1200Tie(allowed.repo);
+  });
+
   it('splits may move to an inactive rep on an existing deal (history stays)', async () => {
     const { admin } = await harness();
     const res = await admin.patch('/api/admin/deals/F1/splits').send({ closerId: 'rep-noah-levine', closerRate: 25 });

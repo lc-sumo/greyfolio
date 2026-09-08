@@ -26,8 +26,8 @@ export function Dashboard() {
             <section className="wallet">
               <div className="top">
                 <div>
-                  <div className="label">Balance owed to me</div>
-                  <div className="balance">{money(d.wallet.owed)}</div>
+                  <div className="label">Commission balance</div>
+                  <div className={`balance ${d.wallet.balance < 0 ? 'neg' : ''}`}>{money(d.wallet.balance)}</div>
                 </div>
                 <div className="next">
                   <span>Next payout</span>
@@ -37,7 +37,7 @@ export function Dashboard() {
               </div>
               <div className="figs">
                 <div><span className="label">Lifetime earned</span><b>{money(d.wallet.earned)}</b></div>
-                <div><span className="label">Paid to me</span><b className="teal">{money(d.wallet.paid)}</b></div>
+                <div><span className="label">Currently payable</span><b className="teal">{money(d.wallet.payable)}</b></div>
                 <div><span className="label">Awaiting lender</span><b className="amber">{money(d.wallet.awaitingLender)}</b></div>
                 <div><span className="label">Clawback held</span><b className={d.wallet.held ? 'red' : ''}>{money(d.wallet.held)}</b></div>
               </div>
@@ -48,18 +48,18 @@ export function Dashboard() {
             <div className="grid-auto">
               <Metric label="Earned this period" value={money(d.period.earned)} sub={`${d.period.dealCount} deal${d.period.dealCount === 1 ? '' : 's'} funded ${day(d.period.from)} – ${day(d.period.to)}`} />
               <Metric label="Paid this period" value={money(d.period.paid)} tone="pos" sub={d.period.recovered ? <span className="neg">less {money(d.period.recovered)} clawback recovered</span> : 'no clawbacks recovered'} />
-              <Metric label="Balance owed" value={money(d.period.owed)} tone={d.period.owed ? 'warn' : undefined} sub="lifetime · collected from lenders − paid − held" />
+              <Metric label="Commission balance" value={money(d.wallet.balance)} tone={d.wallet.balance < 0 ? 'neg' : d.wallet.payable ? 'warn' : undefined} sub={`payable cash ${money(d.wallet.payable)} · accrued − paid − clawback liability`} />
               <Metric label="Funded volume" value={compact(d.period.funded)} sub="deals I opened, closed or override" />
               <Metric label="My rank" value={d.period.rank ? `#${d.period.rank}` : '—'} sub={`of ${d.period.repCount} reps by commission this period`} />
             </div>
 
-            <Card title="Owed to me" extra="most recent unpaid deals">
+            <Card title="Unpaid accrued commission" extra="most recent unpaid deal lines">
               {d.owedToMe.length === 0 ? (
-                <div className="muted">Nothing outstanding — every line you have earned is paid.</div>
+                <div className="muted">No unpaid accrued deal lines. Your global commission balance above includes any clawback offset.</div>
               ) : (
                 <div className="scroller">
                   <div className="table" style={{ ['--cols' as string]: '90px 80px minmax(170px,1.3fr) 130px 100px 100px minmax(120px,1fr)', minWidth: 800 }}>
-                    <div className="tr th"><div className="td">Deal</div><div className="td">Date</div><div className="td">Business</div><div className="td">Lender</div><div className="td r">My share</div><div className="td r">Owed</div><div className="td">Lender paid comm</div></div>
+                    <div className="tr th"><div className="td">Deal</div><div className="td">Date</div><div className="td">Business</div><div className="td">Lender</div><div className="td r">My share</div><div className="td r">Unpaid accrued</div><div className="td">Lender paid comm</div></div>
                     {d.owedToMe.map((v) => (
                       <div className="tr click" key={v.id} onClick={() => setOpen(v.id)}>
                         <div className="td num pos">{v.id}</div>

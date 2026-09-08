@@ -1,4 +1,4 @@
-import type { AccountingJournal, Clawback, Deal, DealDraw, Lender, LedgerContext, PayoutLine, PayrollRun, ProductRule, ReferralPartner, Rep, Team, WeeklySchedule } from '@greystone/commission';
+import type { AccountingJournal, Clawback, Deal, DealDraw, Lender, LedgerContext, PayoutLine, PayrollRun, ProductRule, ReferralPartner, Rep, SegmentKey, Team, WeeklySchedule } from '@greystone/commission';
 import type { PlaybookRule } from './services/playbook-rules.js';
 
 export interface AuditEntry {
@@ -10,6 +10,11 @@ export interface AuditEntry {
   at?: string;
   /** Client IP; filled from the request context when the writer does not pass one. */
   ip?: string | null;
+}
+
+export interface PlannedPayoutMutation<T> {
+  commit: PayoutCommit;
+  result: T;
 }
 
 export interface Thresholds {
@@ -168,23 +173,28 @@ export interface Repo {
   insertDeal(deal: Deal): Promise<void>;
   updateDeal(id: string, patch: DealPatch): Promise<void>;
   /** Serializes a facility update with its draws; validation runs under the parent-row lock immediately before write. */
-  updateDealLocked(id: string, patch: DealPatch, validate: (current: Deal, lines: PayoutLine[]) => void): Promise<void>;
+  updateDealLocked(id: string, patch: DealPatch, validate: (current: Deal, lines: PayoutLine[], clawbacks: Clawback[]) => void): Promise<void>;
   /** Audited tombstone. Operational reads hide it; dependent and accounting history remains intact. */
   deleteDeal(id: string, actorRepId?: string): Promise<void>;
   insertClawback(c: Clawback): Promise<void>;
   updateClawback(id: string, patch: Partial<Pick<Clawback, 'amount' | 'date' | 'reason'>>): Promise<void>;
+  /** Serializes clawback economics with deal attribution and recovery rows. */
+  updateClawbackLocked(dealId: string, id: string, patch: Partial<Pick<Clawback, 'amount' | 'date' | 'reason'>>, validate: (deal: Deal, clawback: Clawback, lines: PayoutLine[]) => void): Promise<void>;
   deleteClawback(id: string): Promise<void>;
   /** Cascade a settings rename onto the deals that reference the old name. Returns how many changed. */
   renameRef(kind: 'lender' | 'partner' | 'product', from: string, to: string): Promise<number>;
   insertDraw(dealId: string, draw: DealDraw): Promise<void>;
   /** Builds and inserts a draw while holding the parent facility and its draw rows locked. */
-  insertDrawLocked(dealId: string, build: (current: Deal) => DealDraw): Promise<DealDraw>;
+  insertDrawLocked(dealId: string, build: (current: Deal, lines: PayoutLine[], clawbacks: Clawback[]) => DealDraw): Promise<DealDraw>;
   updateDraw(dealId: string, ref: string, patch: { collected: number | null; schedule: WeeklySchedule | null }): Promise<void>;
+  /** Mutates base/draw collection economics while the complete parent deal is locked. */
+  updateSegmentLocked(dealId: string, segmentKey: SegmentKey, build: (current: Deal, lines: PayoutLine[], clawbacks: Clawback[]) => { collected: number | null; schedule: WeeklySchedule | null; lenderPaid?: string | null }): Promise<void>;
   deleteDraw(dealId: string, ref: string): Promise<void>;
+  deleteDrawLocked(dealId: string, ref: string, validate: (proposed: Deal, lines: PayoutLine[], clawbacks: Clawback[]) => void): Promise<void>;
   /** Re-price a draw in place (same ref). */
   replaceDraw(dealId: string, ref: string, draw: DealDraw): Promise<void>;
   /** Builds and replaces a draw while holding the parent facility and its draw rows locked. */
-  replaceDrawLocked(dealId: string, ref: string, build: (current: Deal, lines: PayoutLine[]) => DealDraw): Promise<DealDraw>;
+  replaceDrawLocked(dealId: string, ref: string, build: (current: Deal, lines: PayoutLine[], clawbacks: Clawback[]) => DealDraw): Promise<DealDraw>;
   // Payroll (admin only — enforced by the routes)
   insertRun(run: PayrollRun): Promise<void>;
   updateRun(id: string, patch: Partial<Pick<PayrollRun, 'status' | 'label'>> & { approvedAt?: string | null; paidAt?: string | null }): Promise<void>;
@@ -197,6 +207,17 @@ export interface Repo {
   commitPayoutForOpenRun(runId: string, commit: PayoutCommit, validateDeals?: (current: Deal[]) => boolean): Promise<boolean>;
   /** Lock any non-archived run and append an accounting correction in one transaction. */
   commitPayoutForUnarchivedRun(runId: string, commit: PayoutCommit): Promise<boolean>;
+  /**
+   * Claim the run and serialize all balance-changing work for a rep. The
+   * callback receives an authoritative, locked context and must both plan and
+   * return the rows to append.
+   */
+  planPayoutForRun<T>(
+    runId: string,
+    repId: string,
+    allowed: Array<'draft' | 'approved' | 'paid'>,
+    plan: (context: LedgerContext) => PlannedPayoutMutation<T>,
+  ): Promise<T | null>;
   // Settings, teams, reps (admin only — enforced by the routes)
   putSetting(key: string, value: unknown): Promise<void>;
   insertTeam(team: Team): Promise<void>;

@@ -87,6 +87,10 @@ export interface RepDealView {
   /** Share on commission the lender has already paid. */
   accrued: number;
   paid: number;
+  /** Signed deal balance after its outstanding clawback liability. */
+  balance: number;
+  /** Cash from this deal currently payable; never negative. */
+  payable: number;
   owed: number;
   payoutStatus: PayoutStatus;
   commissionStatus: CommissionStatus;
@@ -95,7 +99,7 @@ export interface RepDealView {
   repPaid: string | null;
   /** When this deal clears the lender's clawback window — the rep's commission is safe after that. */
   clawbackWindow: ClawbackWindow;
-  clawback: { amount: number; remaining: number; status: Clawback['status'] } | null;
+  clawback: { amount: number; recovered: number; remaining: number; status: Clawback['status'] } | null;
 }
 
 function payoutStatus(share: number, paid: number, accrued: number): PayoutStatus {
@@ -120,7 +124,13 @@ export function repDealView(deal: Deal, repId: string, lines: PayoutLine[], claw
   // Every clawback on the deal, summed — one banner, one remaining figure.
   const cbs = clawbacks.filter((c) => c.dealId === deal.id);
   const slices = cbs.map((c) => repClawback(c, deal, repId, lines));
-  const cb = cbs.length ? { amount: sum(slices.map((x) => x.share)), remaining: sum(slices.map((x) => x.remaining)), status: cbs.some((c) => c.status === 'open') ? ('open' as const) : ('recovered' as const) } : null;
+  const cb = cbs.length ? {
+    amount: sum(slices.map((x) => x.share)),
+    recovered: sum(slices.map((x) => x.recovered)),
+    remaining: sum(slices.map((x) => x.remaining)),
+    status: slices.some((x) => x.remaining > 0) ? ('open' as const) : ('recovered' as const),
+  } : null;
+  const balance = cents(accrued - paid - (cb?.remaining ?? 0));
   return {
     id: deal.id,
     crmId: deal.crmId,
@@ -153,7 +163,11 @@ export function repDealView(deal: Deal, repId: string, lines: PayoutLine[], claw
     share,
     accrued,
     paid,
-    owed: Math.max(0, cents(accrued - paid)),
+    balance,
+    payable: Math.max(0, balance),
+    owed: balance,
+    // Original commission settlement is independent of a later clawback.
+    // The signed balance and clawback breakdown carry that separate debt.
     payoutStatus: payoutStatus(share, paid, accrued),
     commissionStatus: dealCommissionStatus(deal),
     lenderPaidLabel: segs.length === 1 ? collectionLabel(segs[0]!) : `${segs.filter((s) => collectionLabel(s) === 'Collected' || /^(\d+)\/\1 wks$/.test(collectionLabel(s))).length}/${segs.length} segments`,
@@ -170,6 +184,8 @@ export interface RepWallet {
   cash: number;
   held: number;
   recovered: number;
+  balance: number;
+  payable: number;
   owed: number;
   dealCount: number;
   /** "Awaiting lender": the rep's share sitting on commission the lender has not paid yet. */
@@ -178,7 +194,7 @@ export interface RepWallet {
 
 export function repWallet(ctx: LedgerContext, repId: string): RepWallet {
   const l = repLedger(ctx, repId);
-  return { earned: l.earned, paid: l.paid, cash: l.cash, held: l.held, recovered: l.recovered, owed: l.owed, dealCount: l.deals.length, awaitingLender: l.awaitingLender };
+  return { earned: l.earned, paid: l.paid, cash: l.cash, held: l.held, recovered: l.recovered, balance: l.balance, payable: l.payable, owed: l.owed, dealCount: l.deals.length, awaitingLender: l.awaitingLender };
 }
 
 export interface RepClawbackView {

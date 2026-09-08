@@ -1,5 +1,5 @@
 /** Admin projections: everything, including house net, referral and every rep's name. Never served to reps. */
-import { RENEWAL_BUCKET_LABEL, clawbackSlices, clawbackWindow, collectedGross, collectedOf, collectionLabel, crmUrl, dealCommissionStatus, dealLines, dealPayback, disbursementOf, effectiveDealStatus, effectiveIncrements, houseNet, isLinePaid, outstandingGross, outstandingOf, paidKeys, paymentFor, renewalOf, roleAssignments, scheduleEvents, scheduleParts, segmentStatus, segments, sum, totalFunded, totalGross, totalNet, totalRepPayout, type Clawback, type ClawbackWindow, type Deal, type LedgerContext, type RenewalBucket, type Rep, type Role, type ScheduleEvent, type Segment, unitsPaid } from '@greystone/commission';
+import { RENEWAL_BUCKET_LABEL, cents, clawbackSlices, clawbackWindow, collectedGross, collectedOf, collectionLabel, crmUrl, dealCommissionStatus, dealLines, dealPayback, disbursementOf, effectiveDealStatus, effectiveIncrements, houseNet, isLinePaid, outstandingGross, outstandingOf, paidKeys, paymentFor, renewalOf, roleAssignments, scheduleEvents, scheduleParts, segmentStatus, segments, standingLines, sum, totalFunded, totalGross, totalNet, totalRepPayout, type Clawback, type ClawbackWindow, type Deal, type LedgerContext, type RenewalBucket, type Rep, type Role, type ScheduleEvent, type Segment, unitsPaid } from '@greystone/commission';
 import type { Settings } from './repo.js';
 
 export interface RoleView {
@@ -44,6 +44,10 @@ export interface AdminDealRow {
   net: number;
   roles: RoleView[];
   totalRepPayout: number;
+  /** Signed accrued payout balance after positive payouts and clawback liability. */
+  repBalance: number;
+  /** Cash currently payable on this deal; a negative balance is withheld from later earnings. */
+  repPayable: number;
   houseNet: number;
   collected: number;
   outstanding: number;
@@ -87,6 +91,10 @@ export function adminDealRow(deal: Deal, ctx: LedgerContext, reps: Rep[], settin
   const segs = segments(deal);
   const full = segs.filter((s) => outstandingOf(s) === 0 && s.gross > 0).length;
   const win = clawbackWindow(deal, { lender: settings.lenders.find((l) => l.name === deal.lender), rule: settings.products.find((p) => p.name === deal.product), defaultDays: settings.thresholds.clawbackWindowDays }, today);
+  const accruedRep = sum(lines.filter((l) => l.collected).map((l) => l.amount));
+  const paidRep = sum(standingLines(ctx.lines).filter((l) => l.dealId === deal.id && l.amount > 0).map((l) => l.amount));
+  const clawbackLiability = sum(ctx.clawbacks.filter((c) => c.dealId === deal.id).flatMap((c) => clawbackSlices(c, deal, ctx.lines).map((s) => s.remaining)));
+  const repBalance = cents(accruedRep - paidRep - clawbackLiability);
   return {
     id: deal.id,
     opportunityId: deal.opportunityId,
@@ -117,6 +125,8 @@ export function adminDealRow(deal: Deal, ctx: LedgerContext, reps: Rep[], settin
     net: totalNet(deal),
     roles: [roleView('Opener', deal.openerId, deal.openerRate), roleView('Closer', deal.closerId, deal.closerRate), roleView('Override', deal.overrideId, deal.overrideRate)],
     totalRepPayout: totalRepPayout(deal),
+    repBalance,
+    repPayable: Math.max(0, repBalance),
     houseNet: houseNet(deal),
     collected: collectedGross(deal),
     outstanding: outstandingGross(deal),

@@ -12,12 +12,12 @@ export interface RepRoleLine { role: Role; rate: number; amount: number; segment
 export interface RepDealView {
   id: string; crmId: string | null; date: string; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string; missingContact: Array<'contact' | 'email' | 'phone'>; lender: string; product: string; funded: number; drawCount: number;
   disbursement: Disbursement | null;
-  roles: Role[]; lines: RepRoleLine[]; share: number; accrued: number; paid: number; owed: number; payoutStatus: PayoutStatus;
+  roles: Role[]; lines: RepRoleLine[]; share: number; accrued: number; paid: number; balance: number; payable: number; owed: number; payoutStatus: PayoutStatus;
   commissionStatus: CommissionStatus; lenderPaidLabel: string; dealStatus: string; repPaid: string | null; clawbackWindow: ClawbackWindow;
-  clawback: { amount: number; remaining: number; status: 'open' | 'recovered' } | null;
+  clawback: { amount: number; recovered: number; remaining: number; status: 'open' | 'recovered' } | null;
 }
 export interface RepDealDetail extends RepDealView { payments: Array<{ role: string; segmentKey: string | null; unit: string | null; amount: number; paidAt: string; runId: string | null }> }
-export interface RepWallet { earned: number; paid: number; cash: number; held: number; recovered: number; owed: number; dealCount: number; awaitingLender: number }
+export interface RepWallet { earned: number; paid: number; cash: number; held: number; recovered: number; balance: number; payable: number; owed: number; dealCount: number; awaitingLender: number }
 export interface LeaderboardRow { rank: number; label: string; isMe: boolean; commission: number | null }
 export interface RepDashboard {
   wallet: RepWallet;
@@ -92,7 +92,7 @@ export interface AdminDealRow {
   merchantContact: string; merchantEmail: string; merchantPhone: string; lender: string; product: string;
   funded: number; factor: number | null; apr: number | null; termDays: number | null; frequency: string; payback: number | null;
   commRate: number; psfPct: number; originationFee: number; lineRate: number | null; lineFee: number; gross: number; referralPartner: string | null; referralRate: number; referralFee: number; net: number;
-  roles: RoleView[]; totalRepPayout: number; houseNet: number; collected: number; outstanding: number; lenderPaidLabel: string;
+  roles: RoleView[]; totalRepPayout: number; repBalance: number; repPayable: number; houseNet: number; collected: number; outstanding: number; lenderPaidLabel: string;
   commissionStatus: string; dealStatus: string; storedDealStatus: string; atRisk: boolean; repPaid: string | null; lenderPaid: string | null; crmId: string | null; crmUrl: string;
   creditLine: number | null; creditLineUsed: number | null; creditLineAvailable: number | null; leadSource: string | null; notes: string | null; drawSubsequentPct: number | null; hasClawback: boolean; clawbackWindow: ClawbackWindow; overdueReceipts: number; overdueAmount: number; increments: { total: number; lenderPaid: number; repPaid: number; disbursed: number; planned: number; perIncrement: number; stopped: boolean } | null;
 }
@@ -118,8 +118,9 @@ export const post = <T,>(path: string, body: unknown, method = 'POST') => api<T>
 
 /* ---- Payroll (Phase 5). Admin only. ---- */
 export interface RunSummary { id: string; label: string; start: string; end: string; status: 'draft' | 'approved' | 'paid' | 'archived'; paidGross: number; recovered: number; cash: number; repCount: number; lineCount: number }
-export interface PayrollRepRow { id: string; name: string; active: boolean; owed: number; held: number; lineCount: number }
-export interface PayrollOverview { runs: RunSummary[]; reps: PayrollRepRow[]; outstanding: number }
+export interface PayrollRepRow { id: string; name: string; active: boolean; balance: number; payable: number; owed: number; held: number; lineCount: number }
+/** `outstanding` is the legacy signed aggregate; `payable` is payout-action cash. */
+export interface PayrollOverview { runs: RunSummary[]; reps: PayrollRepRow[]; outstanding: number; balance: number; payable: number }
 export interface PayableLineView { key: string; dealId: string; segmentKey: string; segmentLabel: string; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string; lender: string; funded: number; role: string; rate: number; amount: number; lenderPaidLabel: string; collected: boolean; collectedKeys: string[]; collectedAmount: number; uncollectedKeys: string[]; uncollectedAmount: number; units: { paid: number; total: number; collected: number } | null }
 export interface PayrollRepDetail {
   rep: { id: string; name: string; active: boolean };
@@ -128,6 +129,8 @@ export interface PayrollRepDetail {
   payableUnits: Array<{ key: string; dealId: string; business: string; role: string; segmentKey: string; segmentLabel: string; amount: number; collected: boolean; unit: { n: number; kind: 'upfront' | 'increment' | 'remainder'; label: string; expected: string | null } | null }>;
   clawbacks: Array<{ id: string; dealId: string; business: string; date: string; remaining: number }>;
   outstandingClawback: number;
+  balance: number;
+  payable: number;
   paidInRun: Array<{ key: string; dealId: string; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string; role: string; voided: boolean; voids: string | null; segmentKey: string | null; unitLabel: string | null; amount: number; paidAt: string }>;
   paidSummary: { gross: number; recovered: number; cash: number; lineCount: number; voided: number };
 }

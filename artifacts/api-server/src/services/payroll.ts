@@ -116,27 +116,31 @@ export async function paySelected(repo: Repo, req: PayRequest, actorRepId: strin
   if (run.status === 'archived') throw new HttpError(400, `${run.label} is archived and closed — open a new run`);
   const rep = await repo.findRep(req.repId);
   if (!rep) throw new HttpError(404, `Rep ${req.repId} not found`);
-  const ctx = await repo.loadContext();
   let plan: PayoutPlan;
   try {
-    plan = planPayout(ctx, { repId: req.repId, selectedKeys: req.selectedKeys, runId: run.id, paidAt: today() });
+    const paidAt = today();
+    const committed = await repo.planPayoutForRun(run.id, req.repId, ['draft', 'approved'], (ctx) => {
+      const currentPlan = planPayout(ctx, { repId: req.repId, selectedKeys: req.selectedKeys, runId: run.id, paidAt });
+      if (currentPlan.net <= 0) {
+        throw new PayoutError('Payable balance changed; refresh payroll before trying again');
+      }
+      // Sanity: applying the plan must leave the ledger consistent before write.
+      applyPayout(ctx, currentPlan);
+      return {
+        result: currentPlan,
+        commit: {
+          lines: [...currentPlan.lines, ...currentPlan.recoveries],
+          clawbackUpdates: currentPlan.clawbackUpdates,
+          dealsFullyPaid: currentPlan.dealsFullyPaid,
+          paidAt,
+        },
+      };
+    });
+    if (!committed) throw new HttpError(400, `${run.label} changed while payroll was being prepared — no payout was recorded; review and try again`);
+    plan = committed;
   } catch (e) {
     if (e instanceof PayoutError) throw new HttpError(400, e.message);
     throw e;
-  }
-  const affectedDealIds = new Set([...plan.lines, ...plan.recoveries].map((line) => line.dealId));
-  const snapshot = (deals: typeof ctx.deals) => JSON.stringify(
-    deals.filter((deal) => affectedDealIds.has(deal.id)).sort((a, b) => a.id.localeCompare(b.id)),
-  );
-  const plannedEconomics = snapshot(ctx.deals);
-  // Sanity: applying the plan must leave the ledger consistent before we write it.
-  applyPayout(ctx, plan);
-  if (!await repo.commitPayoutForOpenRun(
-    run.id,
-    { lines: [...plan.lines, ...plan.recoveries], clawbackUpdates: plan.clawbackUpdates, dealsFullyPaid: plan.dealsFullyPaid, paidAt: today() },
-    (currentDeals) => snapshot(currentDeals) === plannedEconomics,
-  )) {
-    throw new HttpError(400, `${run.label} or one of its deals changed while payroll was being prepared — no payout was recorded; review and try again`);
   }
   await repo.writeAudit({ actorRepId, action: 'payroll.pay', targetRepId: req.repId, path: `/api/admin/payroll/runs/${run.id}/pay`, detail: { lines: plan.lines.length, gross: plan.gross, withheld: plan.withheld, net: plan.net } });
   return plan;
@@ -159,17 +163,28 @@ export async function voidPayout(repo: Repo, req: VoidRequestInput, actorRepId: 
   const run = runs.find((r) => r.id === req.runId);
   if (!run) throw new HttpError(404, `Run ${req.runId} not found`);
   if (run.status === 'archived') throw new HttpError(400, `${run.label} is archived and closed`);
-  const ctx = await repo.loadContext();
   let plan: VoidPlan;
   try {
-    plan = planVoid(ctx, { repId: req.repId, runId: run.id, keys: req.keys, paidAt: today() });
+    const paidAt = today();
+    const committed = await repo.planPayoutForRun(run.id, req.repId, ['draft', 'approved', 'paid'], (ctx) => {
+      const currentPlan = planVoid(ctx, { repId: req.repId, runId: run.id, keys: req.keys, paidAt });
+      applyVoid(ctx, currentPlan);
+      return {
+        result: currentPlan,
+        commit: {
+          lines: currentPlan.lines,
+          clawbackUpdates: currentPlan.clawbackUpdates,
+          dealsFullyPaid: [],
+          dealsUnstamped: currentPlan.dealsUnstamped,
+          paidAt,
+        },
+      };
+    });
+    if (!committed) throw new HttpError(400, `${run.label} is archived and closed — no void was recorded`);
+    plan = committed;
   } catch (e) {
     if (e instanceof VoidError) throw new HttpError(400, e.message);
     throw e;
-  }
-  applyVoid(ctx, plan);
-  if (!await repo.commitPayoutForUnarchivedRun(run.id, { lines: plan.lines, clawbackUpdates: plan.clawbackUpdates, dealsFullyPaid: [], dealsUnstamped: plan.dealsUnstamped, paidAt: today() })) {
-    throw new HttpError(400, `${run.label} is archived and closed — no void was recorded`);
   }
   await repo.writeAudit({ actorRepId, action: 'payroll.void', targetRepId: req.repId, path: `/api/admin/payroll/runs/${run.id}/void`, detail: { rows: plan.lines.length, reversed: plan.reversed, recoveriesReturned: plan.recoveriesReturned, keys: plan.lines.map((l) => l.voids) } });
   return plan;

@@ -20,7 +20,7 @@ import {
   type NewDealDraft,
   type SegmentKey,
 } from '@greystone/commission';
-import { clawbackRecovered, clawbackRepTotal, totalGross, type Clawback, type DealDraw } from '@greystone/commission';
+import { clawbackRecovered, clawbackRecoveryExcesses, clawbackRepTotal, totalGross, type Clawback, type DealDraw, type PayoutLine } from '@greystone/commission';
 import { HttpError } from '../http-error.js';
 import type { Repo } from '../repo.js';
 
@@ -37,6 +37,24 @@ function bad(e: unknown): never {
   if (e instanceof ValidationError) throw new HttpError(400, e.message);
   if (e instanceof Error && !(e instanceof HttpError)) throw new HttpError(400, e.message);
   throw e;
+}
+
+function guardRecoveredAttribution(clawback: Clawback, proposedDeal: Deal, lines: PayoutLine[]): void {
+  const recovered = clawbackRecovered(lines, clawback.id);
+  const repTotalAfter = clawbackRepTotal(clawback, proposedDeal);
+  const excess = clawbackRecoveryExcesses(clawback, proposedDeal, lines)[0];
+  if (excess) throw new HttpError(400, `${excess.repId} has already repaid ${excess.recovered.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}, above their proposed ${excess.share.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} share — void excess recovery first`);
+  if (recovered > repTotalAfter) throw new HttpError(400, `Reps have already repaid ${recovered.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} on this clawback — void those recoveries before changing its economics`);
+}
+
+function guardDealClawbacks(proposedDeal: Deal, lines: PayoutLine[], clawbacks: Clawback[]): void {
+  for (const clawback of clawbacks) guardRecoveredAttribution(clawback, proposedDeal, lines);
+}
+
+function proposedSegmentDeal(current: Deal, segmentKey: SegmentKey, patch: { collected: number | null; schedule: Deal['commSchedule'] }): Deal {
+  return segmentKey === 'base'
+    ? { ...current, commCollected: patch.collected, commSchedule: patch.schedule }
+    : { ...current, draws: current.draws.map((draw) => draw.ref === segmentKey ? { ...draw, ...patch } : draw) };
 }
 
 /** Only admins reach this (routes enforce it). Reps never create deals. */
@@ -170,7 +188,9 @@ export async function updateTerms(repo: Repo, id: string, input: Partial<NewDeal
   }
   const { id: _id, draws: _draws, opportunityId: _opp, dealStatus: _st, repPaid: _rp, lenderPaid: _lp, crmId: _crm, ...pricedFields } = priced as Deal & { crmId?: string | null };
   const patch = { ...pricedFields, commSchedule, commCollected, parentId: draft.parentId || null, opportunityId: draft.parentId || id };
-  await repo.updateDealLocked(id, patch, (current, lockedLines) => {
+  await repo.updateDealLocked(id, patch, (current, lockedLines, lockedClawbacks) => {
+    const proposed = { ...current, ...patch };
+    for (const clawback of lockedClawbacks) guardRecoveredAttribution(clawback, proposed, lockedLines);
     if (lockedLines.length) throw new HttpError(400, `${id} has payouts in the ledger — void them before changing its terms`);
     if (priced.creditLine === null) return;
     const used = priced.funded + current.draws.reduce((sum, draw) => sum + draw.amount, 0);
@@ -213,7 +233,10 @@ export async function updateSplits(repo: Repo, id: string, input: SplitsInput, a
   if (!patch.openerId) patch.openerRate = 0;
   if (!patch.closerId) patch.closerRate = 0;
   if (!patch.overrideId) patch.overrideRate = 0;
-  await repo.updateDeal(id, patch);
+  await repo.updateDealLocked(id, patch, (current, lockedLines, lockedClawbacks) => {
+    const proposed = { ...current, ...patch };
+    for (const clawback of lockedClawbacks) guardRecoveredAttribution(clawback, proposed, lockedLines);
+  });
   await repo.writeAudit({ actorRepId, action: 'deal.update', targetRepId: null, path: `/api/admin/deals/${id}/splits`, detail: patch });
   return { ...deal, ...patch };
 }
@@ -237,15 +260,19 @@ export async function addDraw(repo: Repo, id: string, input: { amount: number; d
   const incremental = !!settings.products.find((p) => p.name === deal.product)?.incremental;
   let draw: DealDraw;
   try {
-    draw = await repo.insertDrawLocked(id, (current) => newDraw(current, {
-      amount: Number(input.amount),
-      date,
-      partner,
-      termDays: input.termDays ? Number(input.termDays) : null,
-      factor: input.factor ? Number(input.factor) : null,
-      // LOC draws are paid upfront; only an incremental (consolidation) product schedules its draws.
-      schedule: incremental ? scheduleFor(lender, date) : null,
-    }));
+    draw = await repo.insertDrawLocked(id, (current, lockedLines, lockedClawbacks) => {
+      const proposedDraw = newDraw(current, {
+        amount: Number(input.amount),
+        date,
+        partner,
+        termDays: input.termDays ? Number(input.termDays) : null,
+        factor: input.factor ? Number(input.factor) : null,
+        // LOC draws are paid upfront; only an incremental (consolidation) product schedules its draws.
+        schedule: incremental ? scheduleFor(lender, date) : null,
+      });
+      guardDealClawbacks({ ...current, draws: [...current.draws, proposedDraw] }, lockedLines, lockedClawbacks);
+      return proposedDraw;
+    });
   } catch (e) {
     bad(e);
   }
@@ -272,40 +299,47 @@ export async function setCollection(repo: Repo, id: string, input: CollectionInp
   const deal = await requireDeal(repo, id);
   const seg = segmentOf(deal, input.segmentKey);
   if (!seg) throw new HttpError(404, `Segment ${input.segmentKey} not found on ${id}`);
-  let patch;
-  if ('dollars' in input) patch = withCollection(seg, Number(input.dollars));
-  else if ('status' in input) patch = withStatus(seg, input.status, input.partialDollars);
-  else if ('recordWeeks' in input) {
-    patch = recordWeek(seg, Number(input.recordWeeks));
-    if (!patch) throw new HttpError(400, `${id} ${seg.sk} is not on an incremental schedule`);
-  } else if ('markUpfront' in input) {
-    patch = withUpfront(seg, !!input.markUpfront);
-    if (!patch) throw new HttpError(400, `${id} ${seg.sk} has no upfront share`);
-  } else if ('markRemainder' in input) {
-    patch = withRemainder(seg, !!input.markRemainder);
-    if (!patch) throw new HttpError(400, `${id} ${seg.sk} has no at-end remainder`);
-  } else if ('amounts' in input) {
-    try {
-      patch = withAmounts(seg, Array.isArray(input.amounts) ? input.amounts.map(Number) : null);
-    } catch (e) {
-      throw new HttpError(400, e instanceof Error ? e.message : 'Bad increment grid');
+  const buildPatch = (currentSeg: NonNullable<ReturnType<typeof segmentOf>>) => {
+    let patch;
+    if ('dollars' in input) patch = withCollection(currentSeg, Number(input.dollars));
+    else if ('status' in input) patch = withStatus(currentSeg, input.status, input.partialDollars);
+    else if ('recordWeeks' in input) {
+      patch = recordWeek(currentSeg, Number(input.recordWeeks));
+      if (!patch) throw new HttpError(400, `${id} ${currentSeg.sk} is not on an incremental schedule`);
+    } else if ('markUpfront' in input) {
+      patch = withUpfront(currentSeg, !!input.markUpfront);
+      if (!patch) throw new HttpError(400, `${id} ${currentSeg.sk} has no upfront share`);
+    } else if ('markRemainder' in input) {
+      patch = withRemainder(currentSeg, !!input.markRemainder);
+      if (!patch) throw new HttpError(400, `${id} ${currentSeg.sk} has no at-end remainder`);
+    } else if ('amounts' in input) {
+      try {
+        patch = withAmounts(currentSeg, Array.isArray(input.amounts) ? input.amounts.map(Number) : null);
+      } catch (e) {
+        throw new HttpError(400, e instanceof Error ? e.message : 'Bad increment grid');
+      }
+      if (!patch) throw new HttpError(400, `${id} ${currentSeg.sk} is not funded in increments`);
+    } else if ('stopIncrements' in input) {
+      patch = withStopped(currentSeg, !!input.stopIncrements);
+      if (!patch) throw new HttpError(400, `${id} ${currentSeg.sk} is not funded in increments`);
+    } else {
+      const schedule = currentSeg.schedule;
+      if (schedule) patch = recordWeek(currentSeg, schedule.received >= schedule.weeks ? -schedule.weeks : 1)!;
+      else patch = withCollection(currentSeg, collectedOf(currentSeg) >= currentSeg.gross ? 0 : currentSeg.gross);
     }
-    if (!patch) throw new HttpError(400, `${id} ${seg.sk} is not funded in increments`);
-  } else if ('stopIncrements' in input) {
-    // Merchant opted out: the increments received so far are the increments there will be.
-    patch = withStopped(seg, !!input.stopIncrements);
-    if (!patch) throw new HttpError(400, `${id} ${seg.sk} is not funded in increments`);
-  } else {
-    const s = seg.schedule;
-    if (s) patch = recordWeek(seg, s.received >= s.weeks ? -s.weeks : 1)!;
-    else patch = withCollection(seg, collectedOf(seg) >= seg.gross ? 0 : seg.gross);
-  }
-  const collected = collectedOf({ ...seg, ...patch });
-  if (seg.sk === 'base') {
-    await repo.updateDeal(id, { commCollected: patch.collected, commSchedule: patch.schedule, lenderPaid: collected > 0 ? deal.lenderPaid ?? today() : null });
-  } else {
-    await repo.updateDraw(id, seg.sk, patch);
-  }
+    if (!patch) throw new HttpError(400, `${id} ${seg.sk} is not on an incremental schedule`);
+    return patch;
+  };
+  let collected = 0;
+  await repo.updateSegmentLocked(id, input.segmentKey, (current, lockedLines, lockedClawbacks) => {
+    const currentSeg = segmentOf(current, input.segmentKey);
+    if (!currentSeg) throw new HttpError(404, `Segment ${input.segmentKey} not found on ${id}`);
+    const patch = buildPatch(currentSeg);
+    const proposed = proposedSegmentDeal(current, input.segmentKey, patch);
+    guardDealClawbacks(proposed, lockedLines, lockedClawbacks);
+    collected = collectedOf({ ...currentSeg, ...patch });
+    return { ...patch, ...(input.segmentKey === 'base' ? { lenderPaid: collected > 0 ? current.lenderPaid ?? today() : null } : {}) };
+  });
   await repo.writeAudit({ actorRepId, action: 'deal.collection', targetRepId: null, path: `/api/admin/deals/${id}/collection`, detail: { segmentKey: seg.sk, collected } });
   return requireDeal(repo, id);
 }
@@ -366,9 +400,10 @@ export async function deleteDraw(repo: Repo, dealId: string, ref: string, actorR
   const deal = await requireDeal(repo, dealId);
   const draw = deal.draws.find((d) => d.ref === ref);
   if (!draw) throw new HttpError(404, `Draw ${ref} not found on ${dealId}`);
-  const ctx = await repo.loadContext();
-  if (ctx.lines.some((l) => l.dealId === dealId && l.segmentKey === ref)) throw new HttpError(400, `${dealId} ${ref} has been paid on — void those payouts first, then remove the draw`);
-  await repo.deleteDraw(dealId, ref);
+  await repo.deleteDrawLocked(dealId, ref, (proposed, lockedLines, lockedClawbacks) => {
+    if (lockedLines.some((line) => line.segmentKey === ref)) throw new HttpError(400, `${dealId} ${ref} has been paid on — void those payouts first, then remove the draw`);
+    guardDealClawbacks(proposed, lockedLines, lockedClawbacks);
+  });
   await repo.writeAudit({ actorRepId, action: 'deal.draw.delete', targetRepId: null, path: `/api/admin/deals/${dealId}/draws/${ref}`, detail: { ref, amount: draw.amount, date: draw.date } });
   return requireDeal(repo, dealId);
 }
@@ -433,7 +468,7 @@ export async function updateDrawTerms(repo: Repo, dealId: string, ref: string, i
   const partner = deal.referralPartner ? settings.partners.find((p) => p.name === deal.referralPartner) ?? null : null;
   let next: DealDraw;
   try {
-    next = await repo.replaceDrawLocked(dealId, ref, (current, lockedLines) => {
+    next = await repo.replaceDrawLocked(dealId, ref, (current, lockedLines, lockedClawbacks) => {
       if (lockedLines.some((line) => line.segmentKey === ref)) throw new HttpError(400, `${dealId} ${ref} has been paid on — void those payouts first, then edit the draw`);
       const currentDraw = current.draws.find((d) => d.ref === ref);
       if (!currentDraw) throw new HttpError(404, `Draw ${ref} not found on ${dealId}`);
@@ -449,7 +484,10 @@ export async function updateDrawTerms(repo: Repo, dealId: string, ref: string, i
         frequency: current.frequency,
         referralPaidThisMonth: referralPaidInMonth(ctx.deals.filter((d) => d.id !== dealId), current.referralPartner, date),
       });
-      return { ...repriced, n: currentDraw.n, ref: currentDraw.ref, collected: currentDraw.schedule ? null : Math.min(currentDraw.collected ?? 0, repriced.gross), schedule: currentDraw.schedule ? { ...currentDraw.schedule, startDate: date } : null };
+      const replacement = { ...repriced, n: currentDraw.n, ref: currentDraw.ref, collected: currentDraw.schedule ? null : Math.min(currentDraw.collected ?? 0, repriced.gross), schedule: currentDraw.schedule ? { ...currentDraw.schedule, startDate: date } : null };
+      const proposed = { ...current, draws: current.draws.map((draw) => draw.ref === ref ? replacement : draw) };
+      guardDealClawbacks(proposed, lockedLines, lockedClawbacks);
+      return replacement;
     });
   } catch (e) {
     bad(e);
@@ -469,9 +507,6 @@ export async function updateClawback(repo: Repo, dealId: string, clawbackId: str
     const amount = Math.round(Number(input.amount) * 100) / 100;
     if (!(amount > 0)) throw new HttpError(400, 'Clawback amount must be more than zero');
     if (amount > totalGross(deal) + 0.005) throw new HttpError(400, "A clawback cannot exceed the deal's gross commission");
-    const recovered = clawbackRecovered(ctx.lines, cb.id);
-    const repTotalAfter = clawbackRepTotal({ ...cb, amount }, deal);
-    if (recovered > repTotalAfter + 0.005) throw new HttpError(400, `Reps have already repaid ${recovered.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} on this clawback — void those recoveries before lowering it that far`);
     patch.amount = amount;
   }
   if (input.date !== undefined) {
@@ -480,7 +515,9 @@ export async function updateClawback(repo: Repo, dealId: string, clawbackId: str
     patch.date = date;
   }
   if (input.reason !== undefined) patch.reason = String(input.reason ?? '').trim().slice(0, 500);
-  await repo.updateClawback(cb.id, patch);
+  await repo.updateClawbackLocked(dealId, cb.id, patch, (lockedDeal, lockedClawback, lockedLines) => {
+    guardRecoveredAttribution({ ...lockedClawback, ...patch }, lockedDeal, lockedLines);
+  });
   await repo.writeAudit({ actorRepId, action: 'deal.clawback.update', targetRepId: null, path: `/api/admin/deals/${dealId}/clawbacks/${cb.id}`, detail: patch });
   return { ...cb, ...patch };
 }

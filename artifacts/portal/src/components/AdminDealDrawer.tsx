@@ -81,9 +81,11 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
       ) : (
         <>
           <section className="share">
-            <div className="label" style={{ color: 'var(--navy-text-3)' }}>Total rep payout</div>
-            <div className="big">{money(d.totalRepPayout)}</div>
+            <div className="label" style={{ color: 'var(--navy-text-3)' }}>Total rep commission balance</div>
+            <div className={`big ${d.repBalance < 0 ? 'neg' : ''}`}>{money(d.repBalance)}</div>
             <div className="share-stats">
+              <div><span>Currently payable</span><b>{money(d.repPayable)}</b></div>
+              <div><span>Contractual rep payout</span><b>{money(d.totalRepPayout)}</b></div>
               <div><span>Gross</span><b>{money(d.gross)}</b></div>
               <div><span>Net after referral</span><b>{money(d.net)}</b></div>
               <div><span>House net</span><b style={{ color: 'var(--teal-bright)' }}>{money(d.houseNet)}</b></div>

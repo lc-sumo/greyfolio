@@ -30,7 +30,7 @@ describe('planPayout', () => {
 
   it('invariant #3: recovering a clawback writes a negative ledger row and updates the roll-up', () => {
     const cb = makeClawback('cb-1', 'F1', 1_000); // rep-07 owes 350
-    const plan = planPayout(ctx([F1, F2], [], [cb]), { repId: 'rep-07', selectedKeys: ['F2|Opener|base'], runId: 'run-4', paidAt: '2026-09-02' });
+    const plan = planPayout(ctx([{ ...F1, commCollected: 0 }, F2], [], [cb]), { repId: 'rep-07', selectedKeys: ['F2|Opener|base'], runId: 'run-4', paidAt: '2026-09-02' });
     expect(plan.gross).toBe(700);
     expect(plan.withheld).toBe(350);
     expect(plan.net).toBe(350);
@@ -43,13 +43,14 @@ describe('planPayout', () => {
 
   it('a recovery is collected exactly once across successive runs', () => {
     const cb = makeClawback('cb-1', 'F1', 1_000);
-    let state = ctx([F1, F2], [], [cb]);
+    let state = ctx([{ ...F1, commCollected: 0 }, F2], [], [cb]);
 
     const first = planPayout(state, { repId: 'rep-07', selectedKeys: ['F2|Opener|base'], runId: 'run-4', paidAt: '2026-09-02' });
     state = applyPayout(state, first);
-    expect(repLedger(state, 'rep-07')).toMatchObject({ earned: 1_050, paid: 700, cash: 350, held: 0, recovered: 350, owed: 350 });
+    expect(repLedger(state, 'rep-07')).toMatchObject({ earned: 1_050, paid: 700, cash: 350, held: 0, recovered: 350, owed: 0 });
 
-    // Next run: pay the F1 opener line. Nothing left to withhold — no second recovery row.
+    // The lender later pays F1; its original commission can now clear.
+    state = { ...state, deals: state.deals.map((d) => d.id === 'F1' ? { ...d, commCollected: 1_000 } : d) };
     const second = planPayout(state, { repId: 'rep-07', selectedKeys: ['F1|Opener|base'], runId: 'run-5', paidAt: '2026-09-17' });
     expect(second.withheld).toBe(0);
     expect(second.recoveries).toEqual([]);
@@ -61,20 +62,36 @@ describe('planPayout', () => {
     expect(state.clawbacks[0]?.recovered).toBe(350);
   });
 
+  it('uses append-only keys for sequential partial recoveries in the same run', () => {
+    const liability = makeDeal({ id: 'L', commCollected: 0, closerId: null, overrideId: null, openerRate: 1 });
+    const p1 = makeDeal({ id: 'P1', funded: 6_000, commCollected: 600, closerId: null, overrideId: null, openerRate: 1 });
+    const p2 = makeDeal({ id: 'P2', funded: 6_000, commCollected: 600, closerId: null, overrideId: null, openerRate: 1 });
+    const p3 = makeDeal({ id: 'P3', funded: 8_000, commCollected: 800, closerId: null, overrideId: null, openerRate: 1 });
+    let state = ctx([liability, p1, p2, p3], [], [makeClawback('cb-partial', 'L', 1_000)]);
+
+    state = applyPayout(state, planPayout(state, { repId: 'rep-07', selectedKeys: ['P1|Opener|base'], runId: 'run-4', paidAt: '2026-09-02' }));
+    const partial = planPayout(state, { repId: 'rep-07', selectedKeys: ['P2|Opener|base'], runId: 'run-4', paidAt: '2026-09-02' });
+    expect(partial.recoveries).toEqual([expect.objectContaining({ key: 'cbrec|cb-partial|run-4|rep-07', amount: -200, clawbackId: 'cb-partial' })]);
+    state = applyPayout(state, partial);
+    const remainder = planPayout(state, { repId: 'rep-07', selectedKeys: ['P3|Opener|base'], runId: 'run-4', paidAt: '2026-09-02' });
+    expect(remainder.recoveries).toEqual([expect.objectContaining({ key: 'cbrec|cb-partial|run-4|rep-07#2', amount: -800, clawbackId: 'cb-partial' })]);
+    expect(new Set([...state.lines, ...remainder.lines, ...remainder.recoveries].map((row) => row.key)).size).toBe(state.lines.length + remainder.lines.length + remainder.recoveries.length);
+  });
+
   it('withholds only up to the payout gross and carries the rest forward', () => {
     const cb = makeClawback('cb-1', 'F2', 2_000); // rep-07 owes 700
     let state = ctx([F1, F2], [], [cb]);
     const first = planPayout(state, { repId: 'rep-07', selectedKeys: ['F1|Opener|base'], runId: 'run-4', paidAt: '2026-09-02' });
-    expect(first).toMatchObject({ gross: 350, withheld: 350, net: 0 });
+    expect(first).toMatchObject({ gross: 350, withheld: 0, net: 350 });
     state = applyPayout(state, first);
-    expect(repLedger(state, 'rep-07')).toMatchObject({ paid: 350, cash: 0, held: 350, recovered: 350, owed: 350 });
-    expect(clawbackQueue(state, 'rep-07')).toEqual([{ clawback: state.clawbacks[0], remaining: 350 }]);
+    expect(repLedger(state, 'rep-07')).toMatchObject({ paid: 350, cash: 350, held: 700, recovered: 0, owed: 0 });
+    expect(clawbackQueue(state, 'rep-07')).toEqual([{ clawback: state.clawbacks[0], remaining: 700 }]);
 
     const second = planPayout(state, { repId: 'rep-07', selectedKeys: ['F2|Opener|base'], runId: 'run-5', paidAt: '2026-09-17' });
-    expect(second).toMatchObject({ gross: 700, withheld: 350, net: 350 });
+    expect(second).toMatchObject({ gross: 700, withheld: 700, net: 0 });
     state = applyPayout(state, second);
     expect(repLedger(state, 'rep-07')).toMatchObject({ earned: 1_050, paid: 1_050, cash: 350, held: 0, recovered: 700, owed: 0 });
-    expect(state.lines.filter((x) => x.role === 'Clawback recovery').map((x) => x.amount)).toEqual([-350, -350]);
+    expect(state.lines.filter((x) => x.role === 'Clawback recovery').map((x) => x.amount)).toEqual([-700]);
   });
 
   it('allocates recovery oldest-first across several open clawbacks', () => {
@@ -95,14 +112,14 @@ describe('planPayout', () => {
       state = applyPayout(state, plan);
     }
     // rep-05 (400) and rep-02 (50) had their whole F1 line withheld; rep-07 withheld 350.
-    expect(state.clawbacks[0]).toMatchObject({ recovered: 800, status: 'recovered' });
+    expect(state.clawbacks[0]).toMatchObject({ recovered: 0, status: 'open' });
     // rep-05 is still owed their F2 closer line (800); nothing more is held against them.
-    expect(repLedger(state, 'rep-05')).toMatchObject({ earned: 1_200, paid: 400, cash: 0, held: 0, recovered: 400, owed: 800 });
-    expect(repLedger(state, 'rep-02')).toMatchObject({ earned: 150, paid: 50, cash: 0, held: 0, recovered: 50, owed: 100 });
+    expect(repLedger(state, 'rep-05')).toMatchObject({ earned: 1_200, paid: 400, cash: 400, held: 400, recovered: 0, owed: 400 });
+    expect(repLedger(state, 'rep-02')).toMatchObject({ earned: 150, paid: 50, cash: 50, held: 50, recovered: 0, owed: 50 });
   });
 
   it('stamps repPaid only when every line on every segment is paid', () => {
-    const loc = makeDeal({ id: 'F9', funded: 40_000, commRate: 0.08, product: 'LOC - INITIAL', drawSubsequentPct: 0.04, draws: [makeDraw(1, 25_000, 0.04)], openerId: 'rep-07', closerId: 'rep-07', overrideId: null });
+    const loc = makeDeal({ id: 'F9', funded: 40_000, commRate: 0.08, commCollected: 3_200, product: 'LOC - INITIAL', drawSubsequentPct: 0.04, draws: [makeDraw(1, 25_000, 0.04, { collected: 1_000 })], openerId: 'rep-07', closerId: 'rep-07', overrideId: null });
     let state = ctx([loc]);
     const p1 = planPayout(state, { repId: 'rep-07', selectedKeys: ['F9|Opener|base', 'F9|Closer|base'], runId: 'run-4', paidAt: '2026-09-02' });
     expect(p1.dealsFullyPaid).toEqual([]);
@@ -114,16 +131,15 @@ describe('planPayout', () => {
     expect(state.deals[0]?.repPaid).toBe('2026-09-02');
   });
 
-  it('flags deal ids whose commission the lender has not fully paid', () => {
+  it('rejects an uncollected advance that cannot be covered by clawback recovery', () => {
     const open = { ...F2, commCollected: 0 };
-    const plan = planPayout(ctx([F1, open]), { repId: 'rep-07', selectedKeys: ['F1|Opener|base', 'F2|Opener|base'], runId: 'run-4', paidAt: '2026-09-02' });
-    expect(plan.uncollectedDealIds).toEqual(['F2']);
+    expect(() => planPayout(ctx([F1, open]), { repId: 'rep-07', selectedKeys: ['F1|Opener|base', 'F2|Opener|base'], runId: 'run-4', paidAt: '2026-09-02' })).toThrow(/uncollected advances cannot be paid/);
   });
 
   it('payoutPreview matches the plan', () => {
     const cb = makeClawback('cb-1', 'F1', 1_000);
     const c = ctx([F1, F2], [], [cb]);
-    expect(payoutPreview(c, 'rep-07', ['F2|Opener|base'])).toEqual({ gross: 700, withheld: 350, net: 350, outstandingClawback: 350 });
+    expect(payoutPreview(c, 'rep-07', ['F2|Opener|base'])).toEqual({ gross: 700, withheld: 0, net: 700, outstandingClawback: 350 });
     expect(payoutPreview(c, 'rep-07', [])).toEqual({ gross: 0, withheld: 0, net: 0, outstandingClawback: 350 });
   });
 });

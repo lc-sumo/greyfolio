@@ -28,7 +28,7 @@ export function DealDrawer({ id, onClose }: { id: string; onClose: () => void })
             <div style={{ color: 'var(--navy-text-2)', fontSize: 14.5 }}>
               {d.lines.map((l) => `${l.role} ${pct(l.rate)}${l.segment !== 'Initial' ? ` · ${l.segment}` : ''}`).join(' + ')}
               {' · '}
-              <b style={{ color: d.owed ? 'var(--amber-bright)' : 'var(--teal-bright)' }}>{d.owed ? `${money(d.owed)} still owed to me` : d.paid >= d.share ? 'paid in full' : d.paid > 0 ? 'rest awaiting lender payment' : 'awaiting lender payment'}</b>
+              <b style={{ color: d.balance < 0 ? 'var(--red)' : d.payable ? 'var(--amber-bright)' : 'var(--teal-bright)' }}>{d.balance < 0 ? `${money(d.balance)} commission balance` : d.payable ? `${money(d.payable)} currently payable` : d.paid >= d.share ? 'paid in full' : d.paid > 0 ? 'rest awaiting lender payment' : 'awaiting lender payment'}</b>
             </div>
           </div>
 
@@ -73,6 +73,16 @@ export function DealDrawer({ id, onClose }: { id: string; onClose: () => void })
               ))}
             </div>
           </section>
+          <section className="card">
+            <h3>Commission balance <small>accrued − paid − outstanding clawback</small></h3>
+            <div className="pl">
+              <div className="row"><span>Accrued on this deal</span><span className="num">{money(d.accrued)}</span></div>
+              <div className="row"><span>Positive payouts</span><span className="num">{money(-d.paid)}</span></div>
+              {d.clawback && <div className="row"><span>Outstanding clawback liability</span><span className="num neg">{money(-d.clawback.remaining)}</span></div>}
+              <div className="row"><b>Net commission balance</b><b className={`num ${d.balance < 0 ? 'neg' : ''}`}>{money(d.balance)}</b></div>
+              <div className="row"><span>Currently payable cash</span><span className="num">{money(d.payable)}</span></div>
+            </div>
+          </section>
 
           <section className="card">
             <h3>Payment history</h3>
@@ -98,8 +108,8 @@ export function DealDrawer({ id, onClose }: { id: string; onClose: () => void })
           </div>
           {d.clawback && (
             <div className="note" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>
-              Clawback on this deal: <b>{money(d.clawback.amount)}</b> charged to you
-              {d.clawback.status === 'open' ? <> — <b>{money(d.clawback.remaining)}</b> still nets against your next payout.</> : ' — fully recovered.'}
+              Clawback on this deal: <b>{money(d.clawback.amount)}</b> charged to you · <b>{money(d.clawback.recovered)}</b> recovered · <b>{money(d.clawback.remaining)}</b> remaining.
+              {d.balance < 0 ? <> Your commission balance on this deal is <b>{money(d.balance)}</b>; future earnings recover it before cash is payable.</> : d.clawback.status === 'open' ? ' The remaining amount nets against your next payout.' : ' Fully recovered.'}
             </div>
           )}
         </>

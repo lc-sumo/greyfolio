@@ -16,11 +16,19 @@ export interface RepLedger {
   paid: number;
   /** Σ ALL ledger rows — net of recoveries. */
   cash: number;
-  /** Σ remaining slice over OPEN clawbacks. */
+  /** Σ charged clawback slices that have not been recovered or forgiven. */
   held: number;
   /** Σ recovered slice over every clawback. */
   recovered: number;
-  /** max(0, accrued − paid − held). Nets against settled GROSS, never cash. A rep is owed only what the house has collected. */
+  /**
+   * Signed commission balance: accrued − effective positive payouts −
+   * outstanding clawback liability. This is deliberately not clamped: a
+   * clawback can put a rep into a negative balance.
+   */
+  balance: number;
+  /** Cash currently payable. A negative balance is recovered from future earnings, not paid out. */
+  payable: number;
+  /** @deprecated Use `balance`; retained for existing consumers. */
   owed: number;
 }
 
@@ -45,12 +53,21 @@ export function repLedger(ctx: LedgerContext, repId: string): RepLedger {
   for (const c of clawbacksFor(ctx.clawbacks, ctx.deals, repId)) {
     const slice = repClawback(c, byId.get(c.dealId), repId, ctx.lines);
     recovered += slice.recovered;
-    if (c.status === 'open') held += slice.remaining;
+    // Recovery rows are authoritative. Do not rely on a persisted status here:
+    // it can be stale while an append-only recovery/void is being reconciled.
+    // `remaining` already excludes every standing recovery, so it is charged
+    // exactly once.
+    held += slice.remaining;
   }
   held = cents(held);
   recovered = cents(recovered);
 
-  return { deals, earned, accrued, awaitingLender: Math.max(0, cents(earned - accrued)), paid, cash, held, recovered, owed: Math.max(0, cents(accrued - paid - held)) };
+  const balance = cents(accrued - paid - held);
+  return {
+    deals, earned, accrued, awaitingLender: Math.max(0, cents(earned - accrued)),
+    paid, cash, held, recovered, balance, payable: Math.max(0, balance),
+    owed: balance,
+  };
 }
 
 export interface PaidFigures {

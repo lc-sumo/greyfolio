@@ -35,6 +35,28 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
   let bookId = 0;
   let initialAccountingSyncCompleted = false;
   let accountingQueue: Promise<void> = Promise.resolve();
+  const payoutQueues = new Map<string, Promise<void>>();
+  async function serializePayout<T>(repId: string, work: () => T | Promise<T>): Promise<T> {
+    const previous = payoutQueues.get(repId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    const tail = previous.catch(() => undefined).then(() => current);
+    payoutQueues.set(repId, tail);
+    await previous.catch(() => undefined);
+    try {
+      return await work();
+    } finally {
+      release();
+      if (payoutQueues.get(repId) === tail) payoutQueues.delete(repId);
+    }
+  }
+  async function serializePayouts<T>(repIds: string[], work: () => T | Promise<T>): Promise<T> {
+    const ordered = [...new Set(repIds)].sort();
+    const acquire = (index: number): Promise<T> => index === ordered.length
+      ? Promise.resolve(work())
+      : serializePayout(ordered[index]!, () => acquire(index + 1));
+    return acquire(0);
+  }
   const stored = (entry: AccountingJournal, extra?: Partial<StoredJournal>): StoredJournal => ({
     ...entry,
     id: `journal-${++bookId}`,
@@ -416,6 +438,14 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
       if (i < 0) throw new Error(`No clawback ${id}`);
       data.clawbacks[i] = { ...data.clawbacks[i]!, ...patch };
     },
+    async updateClawbackLocked(dealId, id, patch, validate) {
+      const deal = data.deals.find((x) => x.id === dealId);
+      if (!deal) throw new Error(`No deal ${dealId}`);
+      const clawback = data.clawbacks.find((x) => x.id === id);
+      if (!clawback) throw new Error(`No clawback ${id}`);
+      validate(deal, clawback, data.lines.filter((line) => line.dealId === dealId));
+      Object.assign(clawback, patch);
+    },
     async deleteClawback(id) {
       const i = data.clawbacks.findIndex((x) => x.id === id);
       if (i >= 0) data.clawbacks.splice(i, 1);
@@ -442,7 +472,7 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
       const d = data.deals.find((x) => x.id === id);
       if (!d) throw new Error(`No deal ${id}`);
       // Memory writes run synchronously between awaits, matching the locked DB critical section.
-      validate(d, data.lines.filter((line) => line.dealId === id));
+      validate(d, data.lines.filter((line) => line.dealId === id), data.clawbacks.filter((clawback) => clawback.dealId === id));
       Object.assign(d, patch);
     },
     async insertDraw(dealId, draw: DealDraw) {
@@ -453,7 +483,7 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
     async insertDrawLocked(dealId, build) {
       const d = data.deals.find((x) => x.id === dealId);
       if (!d) throw new Error(`No deal ${dealId}`);
-      const draw = build(d);
+      const draw = build(d, data.lines.filter((line) => line.dealId === dealId), data.clawbacks.filter((clawback) => clawback.dealId === dealId));
       d.draws = [...d.draws, draw];
       return draw;
     },
@@ -461,6 +491,18 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
       const d = data.deals.find((x) => x.id === dealId);
       if (!d) throw new Error(`No deal ${dealId}`);
       d.draws = d.draws.map((x) => (x.ref === ref ? { ...x, ...patch } : x));
+    },
+    async updateSegmentLocked(dealId, segmentKey, build) {
+      const d = data.deals.find((x) => x.id === dealId);
+      if (!d) throw new Error(`No deal ${dealId}`);
+      const patch = build(d, data.lines.filter((line) => line.dealId === dealId), data.clawbacks.filter((clawback) => clawback.dealId === dealId));
+      if (segmentKey === 'base') {
+        d.commCollected = patch.collected;
+        d.commSchedule = patch.schedule;
+        if (patch.lenderPaid !== undefined) d.lenderPaid = patch.lenderPaid;
+      } else {
+        d.draws = d.draws.map((x) => (x.ref === segmentKey ? { ...x, collected: patch.collected, schedule: patch.schedule } : x));
+      }
     },
     async replaceDraw(dealId, ref, draw) {
       const d = data.deals.find((x) => x.id === dealId);
@@ -470,13 +512,20 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
     async replaceDrawLocked(dealId, ref, build) {
       const d = data.deals.find((x) => x.id === dealId);
       if (!d) throw new Error(`No deal ${dealId}`);
-      const draw = build(d, data.lines.filter((line) => line.dealId === dealId));
+      const draw = build(d, data.lines.filter((line) => line.dealId === dealId), data.clawbacks.filter((clawback) => clawback.dealId === dealId));
       d.draws = d.draws.map((x) => (x.ref === ref ? { ...draw, ref } : x));
       return draw;
     },
     async deleteDraw(dealId, ref) {
       const d = data.deals.find((x) => x.id === dealId);
       if (d) d.draws = d.draws.filter((x) => x.ref !== ref);
+    },
+    async deleteDrawLocked(dealId, ref, validate) {
+      const d = data.deals.find((x) => x.id === dealId);
+      if (!d) throw new Error(`No deal ${dealId}`);
+      const proposed = { ...d, draws: d.draws.filter((draw) => draw.ref !== ref) };
+      validate(proposed, data.lines.filter((line) => line.dealId === dealId), data.clawbacks.filter((clawback) => clawback.dealId === dealId));
+      d.draws = proposed.draws;
     },
     async deleteRun(id) {
       const i = data.runs.findIndex((r) => r.id === id);
@@ -520,22 +569,25 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
       data.reps[i] = { ...data.reps[i]!, ...patch };
     },
     async commitPayout(c: PayoutCommit) {
-      for (const l of c.lines) if (data.lines.some((x) => x.key === l.key)) throw new Error(`Ledger key ${l.key} already exists`);
-      data.lines.push(...c.lines);
-      for (const u of c.clawbackUpdates) {
-        const i = data.clawbacks.findIndex((x) => x.id === u.id);
-        if (i >= 0) data.clawbacks[i] = { ...data.clawbacks[i]!, recovered: u.recovered, status: u.status };
-      }
-      for (const id of c.dealsFullyPaid) {
-        const i = data.deals.findIndex((d) => d.id === id);
-        if (i >= 0 && !data.deals[i]!.repPaid) data.deals[i] = { ...data.deals[i]!, repPaid: c.paidAt };
-      }
-      for (const id of c.dealsUnstamped ?? []) {
-        const i = data.deals.findIndex((d) => d.id === id);
-        if (i >= 0) data.deals[i] = { ...data.deals[i]!, repPaid: null };
-      }
+      await serializePayouts(c.lines.map((line) => line.repId), () => {
+        for (const l of c.lines) if (data.lines.some((x) => x.key === l.key)) throw new Error(`Ledger key ${l.key} already exists`);
+        data.lines.push(...c.lines);
+        for (const u of c.clawbackUpdates) {
+          const i = data.clawbacks.findIndex((x) => x.id === u.id);
+          if (i >= 0) data.clawbacks[i] = { ...data.clawbacks[i]!, recovered: u.recovered, status: u.status };
+        }
+        for (const id of c.dealsFullyPaid) {
+          const i = data.deals.findIndex((d) => d.id === id);
+          if (i >= 0 && !data.deals[i]!.repPaid) data.deals[i] = { ...data.deals[i]!, repPaid: c.paidAt };
+        }
+        for (const id of c.dealsUnstamped ?? []) {
+          const i = data.deals.findIndex((d) => d.id === id);
+          if (i >= 0) data.deals[i] = { ...data.deals[i]!, repPaid: null };
+        }
+      });
     },
     async commitPayoutForOpenRun(runId, c, validateDeals) {
+      return serializePayouts(c.lines.map((line) => line.repId), () => {
       // This check and append have no await between them: the memory repo models
       // the same conditional claim that the SQL implementation locks in one tx.
       if (!data.runs.some((r) => r.id === runId && (r.status === 'draft' || r.status === 'approved'))) return false;
@@ -560,8 +612,10 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
         if (i >= 0) data.deals[i] = { ...data.deals[i]!, repPaid: null };
       }
       return true;
+      });
     },
     async commitPayoutForUnarchivedRun(runId, c) {
+      return serializePayouts(c.lines.map((line) => line.repId), () => {
       // Kept separate from the open-run path because paid runs intentionally
       // support Void corrections, while archived runs are immutable.
       if (!data.runs.some((r) => r.id === runId && r.status !== 'archived')) return false;
@@ -580,6 +634,35 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
         if (i >= 0) data.deals[i] = { ...data.deals[i]!, repPaid: null };
       }
       return true;
+      });
+    },
+    async planPayoutForRun(runId, repId, allowed, plan) {
+      return serializePayout(repId, () => {
+        // Keep planning and applying in one synchronous critical section. This
+        // mirrors the database's rep advisory lock and locked context reload.
+        if (!data.runs.some((r) => r.id === runId && allowed.includes(r.status as 'draft' | 'approved' | 'paid'))) return null;
+        const planned = plan({
+          deals: data.deals.map((deal) => ({ ...deal, draws: deal.draws.map((draw) => ({ ...draw })) })),
+          lines: data.lines.map((line) => ({ ...line })),
+          clawbacks: data.clawbacks.map((clawback) => ({ ...clawback })),
+        });
+        const c = planned.commit;
+        for (const l of c.lines) if (data.lines.some((x) => x.key === l.key)) throw new Error(`Ledger key ${l.key} already exists`);
+        data.lines.push(...c.lines);
+        for (const u of c.clawbackUpdates) {
+          const i = data.clawbacks.findIndex((x) => x.id === u.id);
+          if (i >= 0) data.clawbacks[i] = { ...data.clawbacks[i]!, recovered: u.recovered, status: u.status };
+        }
+        for (const id of c.dealsFullyPaid) {
+          const i = data.deals.findIndex((d) => d.id === id);
+          if (i >= 0 && !data.deals[i]!.repPaid) data.deals[i] = { ...data.deals[i]!, repPaid: c.paidAt };
+        }
+        for (const id of c.dealsUnstamped ?? []) {
+          const i = data.deals.findIndex((d) => d.id === id);
+          if (i >= 0) data.deals[i] = { ...data.deals[i]!, repPaid: null };
+        }
+        return planned.result;
+      });
     },
   };
 }

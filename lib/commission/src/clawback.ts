@@ -25,6 +25,11 @@ export function clawbackRecovered(lines: PayoutLine[], clawbackId: string): numb
   return cents(-sum(recoveryLines(lines, clawbackId).map((l) => l.amount)));
 }
 
+/** A rep's actual standing recovery, without the display cap applied by `repClawback`. */
+export function repClawbackRecovered(lines: PayoutLine[], clawbackId: string, repId: string): number {
+  return cents(-sum(recoveryLines(lines, clawbackId, repId).map((l) => l.amount)));
+}
+
 /**
  * SINGLE definition of one rep's slice of a clawback. Policy: the rep repays
  * their full share of that deal's commission, pro-rata to the amount clawed:
@@ -42,8 +47,18 @@ export function repClawback(clawback: Clawback, deal: Deal | undefined, repId: s
   const gross = totalGross(deal);
   if (mine <= 0 || gross <= 0) return { share: 0, recovered: 0, remaining: 0 };
   const share = cents(mine * (Math.min(clawback.amount, gross) / gross));
-  const recovered = Math.min(share, cents(-sum(recoveryLines(lines, clawback.id, repId).map((l) => l.amount))));
+  const recovered = Math.min(share, repClawbackRecovered(lines, clawback.id, repId));
   return { share, recovered, remaining: cents(Math.max(0, share - recovered)) };
+}
+
+/** Standing recoveries that the proposed economics can no longer attribute to their rep. */
+export function clawbackRecoveryExcesses(clawback: Clawback, deal: Deal, lines: PayoutLine[]): Array<{ repId: string; recovered: number; share: number }> {
+  const repIds = new Set(recoveryLines(lines, clawback.id).map((line) => line.repId));
+  return [...repIds].sort().flatMap((repId) => {
+    const recovered = repClawbackRecovered(lines, clawback.id, repId);
+    const share = repClawback(clawback, deal, repId, lines).share;
+    return recovered > share ? [{ repId, recovered, share }] : [];
+  });
 }
 
 /** Every rep's slice, for the deal's roles. */

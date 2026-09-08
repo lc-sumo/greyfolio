@@ -12,7 +12,17 @@ export function adminPayrollRouter(repo: Repo, notify?: Omit<NotifyDeps, 'repo'>
 
   r.get('/payroll', async (_req, res) => {
     const [ctx, reps, runs] = await Promise.all([repo.loadContext(), repo.listReps(), repo.listRuns()]);
-    res.json({ runs: [...runs].sort((a, b) => b.start.localeCompare(a.start)).map((run) => runSummary(run, ctx)), reps: payrollReps(ctx, reps), outstanding: payrollReps(ctx, reps).reduce((s, x) => s + x.owed, 0) });
+    const payroll = payrollReps(ctx, reps);
+    // `outstanding` remains the legacy signed total; `payable` is the
+    // nonnegative payout-action amount. `balance` is the explicit name for
+    // that same signed operational figure.
+    res.json({
+      runs: [...runs].sort((a, b) => b.start.localeCompare(a.start)).map((run) => runSummary(run, ctx)),
+      reps: payroll,
+      outstanding: payroll.reduce((s, x) => s + x.balance, 0),
+      balance: payroll.reduce((s, x) => s + x.balance, 0),
+      payable: payroll.reduce((s, x) => s + x.payable, 0),
+    });
   });
 
   r.post('/payroll/runs', async (req, res) => {

@@ -60,9 +60,25 @@ describe('repLedger — invariant #1: one definition of a rep\'s money', () => {
     expect(l.owed).toBe(1_050 - 0 - 150);
   });
 
-  it('owed never goes negative', () => {
+  it('the signed balance is not clamped when payouts exceed accrual', () => {
     const rows = [line('F1|Opener|base', 'rep-07', 350), line('F1|Opener|base', 'rep-07', 350, { key: 'F1|Opener|base#dup', runId: 'run-9' })];
-    expect(repLedger(ctx([F1], rows), 'rep-07').owed).toBe(0);
+    expect(repLedger(ctx([F1], rows), 'rep-07')).toMatchObject({ balance: -350, owed: -350, payable: 0 });
+  });
+
+  it('carries a $10k attributable clawback as a signed liability and pays only the surplus future earnings', () => {
+    // The existing $5k is collected/owed. The clawed deal creates a $10k
+    // rep-attributable liability but has no current lender accrual itself.
+    const owed = makeDeal({ id: 'owed', funded: 50_000, commRate: .1, openerId: 'rep-07', openerRate: 1, closerId: null, overrideId: null, commCollected: 5_000 });
+    const clawed = makeDeal({ id: 'clawed', funded: 100_000, commRate: .1, openerId: 'rep-07', openerRate: 1, closerId: null, overrideId: null, commCollected: 0 });
+    const cb = makeClawback('cb-10k', 'clawed', 10_000);
+    const base = ctx([owed, clawed], [], [cb]);
+    expect(repLedger(base, 'rep-07')).toMatchObject({ accrued: 5_000, held: 10_000, balance: -5_000, payable: 0 });
+
+    const plus2 = makeDeal({ id: 'plus2', funded: 20_000, commRate: .1, openerId: 'rep-07', openerRate: 1, closerId: null, overrideId: null, commCollected: 2_000 });
+    expect(repLedger(ctx([owed, clawed, plus2], [], [cb]), 'rep-07')).toMatchObject({ balance: -3_000, payable: 0 });
+
+    const plus6 = makeDeal({ id: 'plus6', funded: 60_000, commRate: .1, openerId: 'rep-07', openerRate: 1, closerId: null, overrideId: null, commCollected: 6_000 });
+    expect(repLedger(ctx([owed, clawed, plus6], [], [cb]), 'rep-07')).toMatchObject({ balance: 1_000, payable: 1_000 });
   });
 
   it('a clawback on a deal the rep is not on does not touch their ledger', () => {

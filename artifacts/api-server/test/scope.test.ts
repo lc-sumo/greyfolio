@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { assertRepSafe, leaderboard, repClawbackViews, repDashboard, repDealView, repPayHistory, repRenewals, repStatements, repWallet } from '../src/scope.js';
+import { payrollReps } from '../src/payroll-views.js';
 import { clawbacks, deals, lines, reps, runs } from './memory-repo.js';
 
 const ctx = { deals, lines, clawbacks };
@@ -30,9 +31,9 @@ describe('rep projections never leak', () => {
 describe('repDealView', () => {
   it('shows the rep only their own role, rate, share and payment state', () => {
     const v = repDealView(deals[0]!, JULIAN, lines, clawbacks);
-    expect(v).toMatchObject({ id: 'F1', funded: 10_000, roles: ['Opener'], share: 350, paid: 350, owed: 0, payoutStatus: 'Paid', commissionStatus: 'YES - Paid In Full', lenderPaidLabel: 'Collected' });
+    expect(v).toMatchObject({ id: 'F1', funded: 10_000, roles: ['Opener'], share: 350, paid: 350, owed: -250, balance: -250, payable: 0, payoutStatus: 'Paid', commissionStatus: 'YES - Paid In Full', lenderPaidLabel: 'Collected' });
     expect(v.lines).toEqual([{ role: 'Opener', rate: 0.35, amount: 350, segment: 'Initial', segmentKey: 'base', paid: true, paidAmount: 350, units: null }]);
-    expect(v.clawback).toEqual({ amount: 350, remaining: 250, status: 'open' });
+    expect(v.clawback).toEqual({ amount: 350, recovered: 100, remaining: 250, status: 'open' });
   });
   it('a referral fee on the deal reduces the share but is never shown', () => {
     const v = repDealView(deals[1]!, JULIAN, lines, clawbacks);
@@ -51,11 +52,31 @@ describe('repDealView', () => {
 
 describe('repWallet', () => {
   it('reads repLedger and adds the awaiting-lender figure', () => {
-    // Julian: earned 350 + 700 = 1,050; accrued 350 (F2 uncollected); paid 350 (gross); cash 250; held 250 (350 − 100 recovered); owed max(0, 350 − 350 − 250) = 0; 700 awaits MBC.
-    expect(repWallet(ctx, JULIAN)).toEqual({ earned: 1_050, paid: 350, cash: 250, held: 250, recovered: 100, owed: 0, dealCount: 2, awaitingLender: 700 });
+    // Julian: accrued 350, paid 350, and retains a $250 clawback liability;
+    // the signed balance is debt while cash payable is zero.
+    expect(repWallet(ctx, JULIAN)).toEqual({ earned: 1_050, paid: 350, cash: 250, held: 250, recovered: 100, balance: -250, payable: 0, owed: -250, dealCount: 2, awaitingLender: 700 });
     // once MBC pays F2 the 700 accrues and, net of the 250 still held, 450 is owed
     const collected = { ...ctx, deals: ctx.deals.map((d) => (d.id === 'F2' ? { ...d, commCollected: 2_000 } : d)) };
     expect(repWallet(collected, JULIAN)).toMatchObject({ earned: 1_050, owed: 450, awaitingLender: 0 });
+  });
+});
+
+describe('signed clawback balance across API projections', () => {
+  it('agrees in deal scope, wallet, and payroll for $5k owed, a $10k clawback, and future earnings', () => {
+    const onlyJulian = { openerId: JULIAN, openerRate: 1, closerId: null, closerRate: 0, overrideId: null, overrideRate: 0 };
+    const owed = { ...deals[0]!, ...onlyJulian, id: 'owed-5', opportunityId: 'owed-5', funded: 50_000, gross: 5_000, net: 5_000, commCollected: 5_000 };
+    const clawed = { ...deals[0]!, ...onlyJulian, id: 'clawed-10', opportunityId: 'clawed-10', funded: 100_000, gross: 10_000, net: 10_000, commCollected: 0 };
+    const cb = { ...clawbacks[0]!, id: 'cb-10', dealId: clawed.id, amount: 10_000, recovered: 0, status: 'open' as const };
+    const initial = { deals: [owed, clawed], lines: [], clawbacks: [cb] };
+    expect(repDealView(owed, JULIAN, [], [cb])).toMatchObject({ balance: 5_000, payable: 5_000 });
+    expect(repDealView(clawed, JULIAN, [], [cb])).toMatchObject({ balance: -10_000, payable: 0, clawback: { amount: 10_000, recovered: 0, remaining: 10_000 } });
+    expect(repWallet(initial, JULIAN)).toMatchObject({ balance: -5_000, owed: -5_000, payable: 0, held: 10_000, recovered: 0 });
+    expect(payrollReps(initial, reps).find((r) => r.id === JULIAN)).toMatchObject({ balance: -5_000, owed: -5_000, payable: 0 });
+
+    const plus2 = { ...owed, id: 'plus-2', opportunityId: 'plus-2', funded: 20_000, gross: 2_000, net: 2_000, commCollected: 2_000 };
+    expect(repWallet({ ...initial, deals: [...initial.deals, plus2] }, JULIAN)).toMatchObject({ balance: -3_000, payable: 0 });
+    const plus6 = { ...owed, id: 'plus-6', opportunityId: 'plus-6', funded: 60_000, gross: 6_000, net: 6_000, commCollected: 6_000 };
+    expect(repWallet({ ...initial, deals: [...initial.deals, plus6] }, JULIAN)).toMatchObject({ balance: 1_000, payable: 1_000 });
   });
 });
 
@@ -90,13 +111,13 @@ describe('repDashboard', () => {
   it('buckets earned by funded date and paid by cleared date, ranks within the period, and lists what is owed', () => {
     const d = repDashboard(ctx, reps, runs, JULIAN, '2026-07-01', '2026-09-02');
     assertRepSafe(d);
-    expect(d.period).toMatchObject({ earned: 700, paid: 350, recovered: 100, owed: 0, funded: 20_000, dealCount: 1, rank: 2, repCount: 4 });
+    expect(d.period).toMatchObject({ earned: 700, paid: 350, recovered: 100, owed: -250, funded: 20_000, dealCount: 1, rank: 2, repCount: 4 });
     expect(d.nextPayout).toEqual({ date: '2026-09-15', runLabel: 'Sep 1 – Sep 15, 2026', cycle: 'Twice monthly' });
     expect(d.monthly.map((m) => m.month)).toEqual(['2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08', '2026-09']);
     expect(d.monthly.find((m) => m.month === '2026-06')).toEqual({ month: '2026-06', earned: 350, paid: 0 });
     expect(d.monthly.find((m) => m.month === '2026-08')).toEqual({ month: '2026-08', earned: 0, paid: 350 });
     expect(d.owedToMe).toEqual([]); // F2 is not collected yet — it waits with the lender, not in "owed to me"
-    expect(d.wallet.owed).toBe(0);
+    expect(d.wallet).toMatchObject({ balance: -250, payable: 0, owed: -250, held: 250, recovered: 100 });
     const collected = { ...ctx, deals: ctx.deals.map((x) => (x.id === 'F2' ? { ...x, commCollected: 2_000 } : x)) };
     expect(repDashboard(collected, reps, runs, JULIAN, '2026-07-01', '2026-09-02').owedToMe.map((v) => v.id)).toEqual(['F2']);
   });

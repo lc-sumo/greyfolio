@@ -1,4 +1,5 @@
 import { scheduleEvents } from './collection.js';
+import { clawbackSlices } from './clawback.js';
 import { cents, sum } from './money.js';
 import { segments } from './segments.js';
 import { dealLines } from './splits.js';
@@ -168,16 +169,14 @@ export function projectAccounting(input: AccountingProjectionInput): AccountingP
   const dealsById = new Map(input.deals.map((d) => [d.id, d]));
   for (const cb of [...input.clawbacks].sort((a, b) => a.id.localeCompare(b.id))) if (cb.amount > 0) {
     const deal = dealsById.get(cb.dealId);
-    const gross = deal ? sum(segments(deal).map((s) => s.gross)) : 0;
     const dimensions = { dealId: cb.dealId };
     out.push(journal({
       sourceKey: `clawback:${cb.id}`, sourceType: 'clawback', date: cb.date, memo: `Lender clawback — ${cb.dealId}`,
       lines: [asLine('4090', cb.amount, 0, undefined, dimensions), asLine('1100', 0, cb.amount, undefined, dimensions)], metadata: { dealId: cb.dealId, reason: cb.reason },
     }));
-    const byRep = new Map<string, number>();
-    for (const line of deal ? dealLines(deal) : []) byRep.set(line.repId, cents((byRep.get(line.repId) ?? 0) + line.amount));
-    for (const [repId, share] of [...byRep].sort(([a], [b]) => a.localeCompare(b))) {
-      const recoverable = gross > 0 ? cents(Math.min(cb.amount, cb.amount * share / gross)) : 0;
+    for (const { repId, share: recoverable } of (deal ? clawbackSlices(cb, deal, []) : []).sort((a, b) => a.repId.localeCompare(b.repId))) {
+      // Use the operational slice directly so account 1200 cannot diverge by
+      // a cent from the liability shown and withheld for this rep.
       if (recoverable) out.push(journal({
         sourceKey: `clawback-recovery-accrual:${cb.id}:${repId}`, sourceType: 'rep_recovery_accrual', date: cb.date, memo: `Rep recovery receivable — ${cb.dealId}`,
         lines: [asLine('1200', recoverable, 0, undefined, { dealId: cb.dealId, repId }), asLine('4090', 0, recoverable, undefined, { dealId: cb.dealId, repId })],

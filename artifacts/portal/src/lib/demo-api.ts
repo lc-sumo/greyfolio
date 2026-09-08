@@ -397,7 +397,9 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
   try {
     if (p === '/api/admin/payroll') {
       const rows = payrollReps(ctx, d.reps);
-      return json({ runs: [...d.runs].sort((a, b) => b.start.localeCompare(a.start)).map((run) => runSummary(run, ctx)), reps: rows, outstanding: rows.reduce((s2, x) => s2 + x.owed, 0) });
+      const payable = rows.reduce((s2, x) => s2 + x.payable, 0);
+      const balance = rows.reduce((s2, x) => s2 + x.balance, 0);
+      return json({ runs: [...d.runs].sort((a, b) => b.start.localeCompare(a.start)).map((run) => runSummary(run, ctx)), reps: rows, outstanding: balance, payable, balance });
     }
     if (p === '/api/admin/payroll/runs' && method === 'POST') return json(await createRun(repo, me.repId, body.start && body.end ? { start: String(body.start), end: String(body.end) } : undefined));
     const archive = p.match(/^\/api\/admin\/payroll\/runs\/([^/]+)\/archive$/);

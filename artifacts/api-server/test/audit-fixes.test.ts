@@ -19,10 +19,11 @@ async function harness() {
 
 describe('payroll runs: close out and reopen', () => {
   it('removes an empty draft, refuses a run with payouts, and reopens an approved run', async () => {
-    const { admin } = await harness();
+    const { admin, repo } = await harness();
     // run-4 is a draft with nothing paid in it → removable; run-3 is paid → locked.
     expect((await admin.delete('/api/admin/payroll/runs/run-3')).status).toBe(400);
-    await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: ['F2|Opener|base'] });
+    await repo.updateDeal('F2', { commCollected: 2_000 });
+    expect((await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: ['F2|Opener|base'] })).status).toBe(201);
     const busy = await admin.delete('/api/admin/payroll/runs/run-4');
     expect(busy.status).toBe(400);
     expect(busy.body.error).toMatch(/payouts recorded/);
@@ -70,8 +71,19 @@ describe('draws: edit and remove', () => {
   it('refuses to touch a draw that has been paid on', async () => {
     const { admin } = await harness();
     const id = await withDraw(admin);
-    await admin.post(`/api/admin/deals/${id}/collection`).send({ segmentKey: 'D1', status: 'YES - Paid In Full' });
-    const pay = await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: [`${id}|Opener|D1`] });
+    // Make this draw's collected share exceed the fixture rep's existing
+    // clawback balance, then record the exact draw economics as collected.
+    expect((await admin.patch(`/api/admin/deals/${id}/draws/D1`).send({ amount: 20_000, commRate: 5 })).status).toBe(200);
+    const collection = await admin.post(`/api/admin/deals/${id}/collection`).send({ segmentKey: 'D1', dollars: 1_000 });
+    expect(collection.status).toBe(200);
+    expect(collection.body.segments.find((segment: { sk: string }) => segment.sk === 'D1')).toMatchObject({ collected: 1_000 });
+
+    // Select the authoritative domain unit exposed after collection rather
+    // than assuming the whole-segment key under changing collection semantics.
+    const detail = (await admin.get('/api/admin/payroll/runs/run-4/reps/rep-julian-ribak')).body;
+    const drawUnit = detail.payableUnits.find((unit: { dealId: string; segmentKey: string; collected: boolean }) => unit.dealId === id && unit.segmentKey === 'D1' && unit.collected);
+    expect(drawUnit).toMatchObject({ amount: 350, collected: true });
+    const pay = await admin.post('/api/admin/payroll/runs/run-4/pay').send({ repId: 'rep-julian-ribak', selectedKeys: [drawUnit.key] });
     expect(pay.status).toBe(201);
     expect((await admin.delete(`/api/admin/deals/${id}/draws/D1`)).body.error).toMatch(/paid on/);
     expect((await admin.patch(`/api/admin/deals/${id}/draws/D1`).send({ amount: 1 })).body.error).toMatch(/paid on/);

@@ -1,6 +1,7 @@
 import { nextRowKey } from './void.js';
 import { cents, sum } from './money.js';
 import { clawbackRecovered, clawbackStatus, clawbacksFor, repClawback } from './clawback.js';
+import { repLedger } from './ledger.js';
 import { isDealFullyPaid, payableLines, type RepLine } from './splits.js';
 import type { Clawback, LedgerContext, PayoutLine } from './types.js';
 
@@ -38,7 +39,7 @@ export interface PayoutPlan {
 
 export class PayoutError extends Error {}
 
-/** Recovery row key: one per clawback per run per rep. */
+/** Base recovery row key; repeated partial recoveries receive an append-only suffix. */
 export function recoveryKey(clawbackId: string, runId: string, repId: string): string {
   return `cbrec|${clawbackId}|${runId}|${repId}`;
 }
@@ -47,7 +48,6 @@ export function recoveryKey(clawbackId: string, runId: string, repId: string): s
 export function clawbackQueue(ctx: LedgerContext, repId: string): Array<{ clawback: Clawback; remaining: number }> {
   const byId = new Map(ctx.deals.map((d) => [d.id, d]));
   return clawbacksFor(ctx.clawbacks, ctx.deals, repId)
-    .filter((c) => c.status === 'open')
     .map((c) => ({ clawback: c, remaining: repClawback(c, byId.get(c.dealId), repId, ctx.lines).remaining }))
     .filter((x) => x.remaining > 0)
     .sort((a, b) => a.clawback.date.localeCompare(b.clawback.date) || a.clawback.id.localeCompare(b.clawback.id));
@@ -56,10 +56,7 @@ export function clawbackQueue(ctx: LedgerContext, repId: string): Array<{ clawba
 /** Preview of what a selection would pay — the dark selection footer. */
 export function payoutPreview(ctx: LedgerContext, repId: string, selectedKeys: string[]): { gross: number; withheld: number; net: number; outstandingClawback: number } {
   const selected = selectLines(ctx, repId, selectedKeys);
-  const gross = sum(selected.map((l) => l.amount));
-  const outstandingClawback = sum(clawbackQueue(ctx, repId).map((q) => q.remaining));
-  const withheld = cents(Math.min(outstandingClawback, gross));
-  return { gross, withheld, net: cents(gross - withheld), outstandingClawback };
+  return payoutMath(ctx, repId, selected);
 }
 
 function selectLines(ctx: LedgerContext, repId: string, selectedKeys: string[]): RepLine[] {
@@ -79,6 +76,28 @@ function selectLines(ctx: LedgerContext, repId: string, selectedKeys: string[]):
 }
 
 /**
+ * The single balance-aware calculation used by both preview and commit.
+ *
+ * `balance` is computed from the canonical ledger while holding the payout
+ * lock. It already includes any collected selected units. A selection may
+ * only produce cash to the extent the whole rep balance permits it; the
+ * remainder must be recovered against an actual standing clawback liability.
+ * This deliberately rejects an uncollected advance that cannot be offset,
+ * rather than silently paying cash or manufacturing a recovery row.
+ */
+function payoutMath(ctx: LedgerContext, repId: string, selected: RepLine[]): { gross: number; withheld: number; net: number; outstandingClawback: number } {
+  const gross = sum(selected.map((l) => l.amount));
+  const outstandingClawback = sum(clawbackQueue(ctx, repId).map((q) => q.remaining));
+  const balance = repLedger(ctx, repId).balance;
+  const net = cents(Math.min(gross, Math.max(0, balance)));
+  const withheld = cents(gross - net);
+  if (withheld > outstandingClawback) {
+    throw new PayoutError(`Selection requires ${withheld.toFixed(2)} of clawback recovery but only ${outstandingClawback.toFixed(2)} remains; uncollected advances cannot be paid as cash`);
+  }
+  return { gross, withheld, net, outstandingClawback };
+}
+
+/**
  * Plan a payout. Pure: returns the rows to append and the clawback roll-ups
  * to write; the caller commits them in one transaction and pins `repId` as
  * the payroll rep so the panel cannot re-target after the balance zeroes.
@@ -92,7 +111,8 @@ export function planPayout(ctx: LedgerContext, req: PayoutRequest): PayoutPlan {
   const selected = selectLines(ctx, req.repId, req.selectedKeys);
   if (selected.length === 0) throw new PayoutError('Select at least one deal line to pay');
 
-  const gross = sum(selected.map((l) => l.amount));
+  const math = payoutMath(ctx, req.repId, selected);
+  const { gross } = math;
   const existing = new Set(ctx.lines.map((l) => l.key));
   const lines: PayoutLine[] = selected.map((l) => ({
     key: nextRowKey(l.key, existing),
@@ -106,7 +126,7 @@ export function planPayout(ctx: LedgerContext, req: PayoutRequest): PayoutPlan {
     paidAt: req.paidAt,
   }));
 
-  let toWithhold = cents(Math.min(gross, sum(clawbackQueue(ctx, req.repId).map((q) => q.remaining))));
+  let toWithhold = math.withheld;
   const recoveries: PayoutLine[] = [];
   const clawbackUpdates: ClawbackUpdate[] = [];
   const byId = new Map(ctx.deals.map((d) => [d.id, d]));
@@ -116,8 +136,10 @@ export function planPayout(ctx: LedgerContext, req: PayoutRequest): PayoutPlan {
     const take = cents(Math.min(remaining, toWithhold));
     if (take <= 0) continue;
     toWithhold = cents(toWithhold - take);
+    const key = nextRowKey(recoveryKey(clawback.id, req.runId, req.repId), existing);
+    existing.add(key);
     recoveries.push({
-      key: recoveryKey(clawback.id, req.runId, req.repId),
+      key,
       dealId: clawback.dealId,
       segmentKey: null,
       role: 'Clawback recovery',
@@ -142,7 +164,9 @@ export function planPayout(ctx: LedgerContext, req: PayoutRequest): PayoutPlan {
   const dealsFullyPaid = ctx.deals.filter((d) => touched.has(d.id) && !d.repPaid && isDealFullyPaid(d, after)).map((d) => d.id);
   const uncollectedDealIds = [...new Set(selected.filter((l) => !l.collected).map((l) => l.dealId))];
 
-  return { repId: req.repId, runId: req.runId, lines, recoveries, clawbackUpdates, gross, withheld, net: cents(gross - withheld), dealsFullyPaid, uncollectedDealIds };
+  // Allocation must consume exactly the centralized required recovery.
+  if (toWithhold !== 0) throw new PayoutError('Could not allocate the required clawback recovery');
+  return { repId: req.repId, runId: req.runId, lines, recoveries, clawbackUpdates, gross, withheld, net: math.net, dealsFullyPaid, uncollectedDealIds };
 }
 
 /** Apply a plan to a context — what the database transaction does. Pure. */

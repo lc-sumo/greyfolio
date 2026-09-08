@@ -51,7 +51,12 @@ export function Payroll() {
   const rowSelected = (l: PayableLineView) => rowKeys(l).some((k) => selected[k]);
   const selLines = (d?.lines ?? []).filter(rowSelected);
   const selGross = Math.round(selectedKeys.reduce((s, k) => s + (amountOf.get(k) ?? 0), 0) * 100) / 100;
-  const withheld = Math.min(d?.outstandingClawback ?? 0, selGross);
+  // Mirrors the domain preview: the signed balance already includes selected
+  // collected units. A recovery can only cover the portion that cannot be
+  // paid as cash from that balance.
+  const previewCash = Math.min(selGross, Math.max(0, d?.balance ?? 0));
+  const withheld = selGross - previewCash;
+  const selectionRejected = withheld > (d?.outstandingClawback ?? 0);
   // These are API-provided domain records, the same records planPayout maps to committed lines.
   const selectedUnits = useMemo(() => (d?.payableUnits ?? []).filter((unit) => selected[unit.key]), [d, selected]);
   const selectedDealCount = new Set(selectedUnits.map((unit) => unit.dealId)).size;
@@ -110,7 +115,8 @@ export function Payroll() {
   async function pay() {
     if (!activeRun || !repId) { notify('Choose a rep before recording a payout'); return; }
     if (!selectedKeys.length) { notify('Select at least one ledger unit to pay'); return; }
-    if (!window.confirm(`Record payout for ${d?.rep.name ?? 'this rep'}: ${selectedDealCount} selected deal${selectedDealCount === 1 ? '' : 's'} / ${selectedUnits.length} ledger unit${selectedUnits.length === 1 ? '' : 's'}.\n\n${unitBreakdown}\n\nGross ${money(selGross)}\nClawback withholding ${money(withheld)}\nNet ${money(selGross - withheld)}\n\nRecord this payout?`)) return;
+    if (selectionRejected) { notify('This selection includes an uncollected advance that is not covered by the remaining clawback balance'); return; }
+    if (!window.confirm(`Record payout for ${d?.rep.name ?? 'this rep'}: ${selectedDealCount} selected deal${selectedDealCount === 1 ? '' : 's'} / ${selectedUnits.length} ledger unit${selectedUnits.length === 1 ? '' : 's'}.\n\n${unitBreakdown}\n\nGross ${money(selGross)}\nClawback withholding ${money(withheld)}\nNet ${money(previewCash)}\n\nRecord this payout?`)) return;
     setBusy(true);
     try {
       const r = await post<PayResult>(`/api/admin/payroll/runs/${activeRun.id}/pay`, { repId, selectedKeys });
@@ -224,7 +230,7 @@ export function Payroll() {
                   <button key={r.id} className={`run ${repId === r.id ? 'on' : ''}`} aria-pressed={repId === r.id} onClick={() => { setRepId(r.id); setSelected({}); }}>
                     <span className="avatar sm">{initials(r.name)}</span>
                     <span className="ellipsis"><b>{r.name}{!r.active && <span className="subtle"> (inactive)</span>}</b><span className="subtle">{r.lineCount ? `${r.lineCount} deal line${r.lineCount === 1 ? '' : 's'}` : 'nothing owed'}</span></span>
-                    <span className="num" style={{ color: r.owed ? 'var(--amber-deep)' : 'var(--ink-subtle)', fontWeight: 700 }}>{r.owed ? money(r.owed) : '—'}</span>
+                    <span className={`num ${r.balance < 0 ? 'neg' : ''}`} style={{ color: r.balance < 0 ? 'var(--red)' : r.payable ? 'var(--amber-deep)' : 'var(--ink-subtle)', fontWeight: 700 }}>{r.balance ? money(r.balance) : '—'}</span>
                   </button>
                 ))}
               </div>
@@ -253,15 +259,16 @@ export function Payroll() {
                     <label htmlFor="payroll-rep" style={{ fontWeight: 700 }}>Rep to pay</label>
                     <select id="payroll-rep" className="search" value={repId ?? ''} onChange={(e) => { setRepId(e.target.value || null); setSelected({}); }} style={{ minWidth: 300 }}>
                       <option value="">Choose a rep…</option>
-                      {reps.map((r) => <option key={r.id} value={r.id}>{r.name}{!r.active ? ' (inactive)' : ''} — owed {money(r.owed)}</option>)}
+                      {reps.map((r) => <option key={r.id} value={r.id}>{r.name}{!r.active ? ' (inactive)' : ''} — balance {money(r.balance)}, payable {money(r.payable)}</option>)}
                     </select>
-                    {selectedRep && <span className="count">Amount owed: {money(selectedRep.owed)} · selected in the rep rail</span>}
+                    {selectedRep && <span className="count">Balance: {money(selectedRep.balance)} · payable cash: {money(selectedRep.payable)} · selected in the rep rail</span>}
                   </div>
                   <div className="strip sunk">
                     <div><div className="label">Paid in this run</div><div className="metric">{money(activeRun.paidGross)}</div><div className="sub">{activeRun.lineCount} line{activeRun.lineCount === 1 ? '' : 's'} · {activeRun.repCount} rep{activeRun.repCount === 1 ? '' : 's'}</div></div>
                     <div><div className="label">Clawback recovered</div><div className={`metric ${activeRun.recovered ? 'neg' : ''}`}>{money(activeRun.recovered)}</div><div className="sub">netted from payouts</div></div>
                     <div><div className="label">Cash paid</div><div className="metric pos">{money(activeRun.cash)}</div><div className="sub">gross − recovered</div></div>
-                    <div><div className="label">Still owed to reps</div><div className="metric warn">{money(overview.data.outstanding)}</div><div className="sub">across every rep</div></div>
+                    <div><div className="label">Total rep balance</div><div className={`metric ${overview.data.balance < 0 ? 'neg' : 'warn'}`}>{money(overview.data.balance)}</div><div className="sub">signed accrued − payouts − clawback liability</div></div>
+                    <div><div className="label">Total rep payable</div><div className="metric warn">{money(overview.data.payable)}</div><div className="sub">cash currently payable across every rep</div></div>
                   </div>
                 </Card>
 
@@ -327,9 +334,10 @@ export function Payroll() {
                     <div><span className="label">Selected</span><b>{selLines.length} of {d?.lines.length ?? 0}</b></div>
                     <div><span className="label">Gross</span><b>{money(selGross)}</b></div>
                     <div><span className="label">Clawbacks netted</span><b style={{ color: withheld ? 'var(--red-bright)' : undefined }}>{withheld ? money(-withheld) : '$0'}</b></div>
-                    <div><span className="label">Net to pay</span><b style={{ color: 'var(--teal-bright)' }}>{money(selGross - withheld)}</b></div>
-                    </div><button className="btn primary big" disabled={busy || !repId || !selectedKeys.length || runClosed} onClick={() => void pay()}>{busy ? 'Recording…' : 'Pay selected & record'}</button>
+                    <div><span className="label">Net to pay</span><b style={{ color: 'var(--teal-bright)' }}>{money(previewCash)}</b></div>
+                    </div><button className="btn primary big" disabled={busy || !repId || !selectedKeys.length || runClosed || selectionRejected} onClick={() => void pay()}>{busy ? 'Recording…' : selectionRejected ? 'Selection cannot be paid' : 'Pay selected & record'}</button>
                   </div>
+                  {selectionRejected && <div className="band red">This selection requires {money(withheld)} recovery but only {money(d?.outstandingClawback ?? 0)} clawback liability remains. Remove uncollected advances or wait for lender collection.</div>}
                   {uncollected.length > 0 && <div className="band amber">{uncollected.length} selected deal line(s) sit on commission the lender has not paid yet ({uncollected.slice(0, 4).join(', ')}{uncollected.length > 4 ? '…' : ''}). Paying now advances the rep against uncollected commission.</div>}
                   {d && d.outstandingClawback > 0 && <div className="band red">Outstanding clawback balance for {d.rep.name}: <b>{money(d.outstandingClawback)}</b> across {d.clawbacks.length} deal(s){withheld ? <> — <b>{money(withheld)}</b> recovers on this payout, leaving {money(d.outstandingClawback - withheld)}.</> : '. It nets against the next payout that has gross to withhold from.'}</div>}
                 </>}</Card>

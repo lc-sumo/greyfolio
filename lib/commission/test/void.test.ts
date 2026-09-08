@@ -39,7 +39,7 @@ describe('voiding a payout', () => {
   });
   it('voiding a payout that withheld a clawback gives the clawback its balance back', () => {
     const cb = makeClawback('cb-1', 'F1', 1_000); // rep-07's slice: 350
-    let state = ctx([F1, F2], [], [cb]);
+    let state = ctx([{ ...F1, commCollected: 0 }, F2], [], [cb]);
     const plan = planPayout(state, { repId: 'rep-07', selectedKeys: ['F2|Opener|base'], runId: 'run-4', paidAt: '2026-09-02' });
     expect(plan).toMatchObject({ gross: 700, withheld: 350, net: 350 });
     state = applyPayout(state, plan);
@@ -50,6 +50,23 @@ describe('voiding a payout', () => {
     expect(v).toMatchObject({ reversed: 700, recoveriesReturned: 350 });
     state = applyVoid(state, v);
     expect(state.clawbacks[0]).toMatchObject({ recovered: 0, status: 'open' });
-    expect(repLedger(state, 'rep-07')).toMatchObject({ paid: 0, recovered: 0, held: 350, cash: 0, owed: 700 }); // both deals collected, nothing paid, 350 held
+    expect(repLedger(state, 'rep-07')).toMatchObject({ paid: 0, recovered: 0, held: 350, cash: 0, owed: 350 });
+  });
+  it('retains recovery source identity and allocates a new key after void and repay', () => {
+    const liability = makeDeal({ id: 'L', commCollected: 0, closerId: null, overrideId: null, openerRate: 1 });
+    const p1 = makeDeal({ id: 'P1', funded: 12_000, commCollected: 1_200, closerId: null, overrideId: null, openerRate: 1 });
+    const p2 = makeDeal({ id: 'P2', funded: 8_000, commCollected: 800, closerId: null, overrideId: null, openerRate: 1 });
+    let state = ctx([liability, p1, p2], [], [makeClawback('cb-repay', 'L', 1_000)]);
+    state = applyPayout(state, planPayout(state, { repId: 'rep-07', selectedKeys: ['P1|Opener|base'], runId: 'run-4', paidAt: '2026-09-02' }));
+    const recovery = state.lines.find((row) => row.role === 'Clawback recovery')!;
+    expect(recovery).toMatchObject({ key: 'cbrec|cb-repay|run-4|rep-07', clawbackId: 'cb-repay', amount: -200 });
+
+    state = applyVoid(state, planVoid(state, { repId: 'rep-07', runId: 'run-4', keys: [recovery.key], paidAt: '2026-09-03' }));
+    const repay = planPayout(state, { repId: 'rep-07', selectedKeys: ['P2|Opener|base'], runId: 'run-4', paidAt: '2026-09-04' });
+    expect(repay.recoveries).toEqual([expect.objectContaining({
+      key: 'cbrec|cb-repay|run-4|rep-07#2',
+      clawbackId: 'cb-repay',
+      amount: -800,
+    })]);
   });
 });

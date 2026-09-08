@@ -333,6 +333,10 @@ select.mini { height: 28px; border: 1px solid var(--border); border-radius: 6px;
 .master-primary { min-height: 62px; cursor: pointer; }
 .master-primary:hover, .master-item.is-open .master-primary { background: var(--surface-alt); }
 .master-item.at-risk .master-primary { background: var(--red-light-3); }
+.master-primary .master-cell:nth-child(4),
+.master-primary .master-cell:nth-child(5),
+.master-primary .master-cell:nth-child(6),
+.master-primary .master-cell:nth-child(7) { font-weight: 700; }
 .master-cell { min-width: 0; padding: 9px; font-size: 12px; }
 .master-cell > b, .master-cell > span { display: block; min-width: 0; }
 .master-cell.r { text-align: right; }

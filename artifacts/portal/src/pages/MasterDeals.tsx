@@ -10,12 +10,32 @@ import { useSession } from '../lib/session';
 
 const PRIMARY_COLS = 'minmax(92px, .75fr) minmax(180px, 1.8fr) minmax(130px, 1.05fr) minmax(100px, .8fr) minmax(92px, .8fr) minmax(92px, .8fr) minmax(92px, .8fr) minmax(120px, 1fr) 32px';
 const statusOptions = ['Waiting for payment', 'Partially Paid', 'YES - Paid In Full', 'Performing', 'Prospecting', 'Refi Ready', 'Refinanced', 'Default', 'Slow Pay', 'Paid In Full'];
+type DateFilter = '' | 'this-week' | 'last-week' | 'this-month' | 'last-30' | 'custom';
+const iso = (d: Date) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+const addDays = (d: Date, days: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + days, 12);
+function presetRange(filter: DateFilter): [string, string] {
+  const today = new Date();
+  const monday = addDays(today, -((today.getDay() + 6) % 7));
+  if (filter === 'this-week') return [iso(monday), iso(addDays(monday, 6))];
+  if (filter === 'last-week') return [iso(addDays(monday, -7)), iso(addDays(monday, -1))];
+  if (filter === 'this-month') return [iso(new Date(today.getFullYear(), today.getMonth(), 1, 12)), iso(today)];
+  if (filter === 'last-30') return [iso(addDays(today, -29)), iso(today)];
+  return ['', ''];
+}
 
 export function MasterDeals() {
   const { notify } = useSession();
   const [search, setSearch] = useState('');
   const [rep, setRep] = useState('');
   const [status, setStatus] = useState('');
+  const [dateFilter, setDateFilter] = useState<DateFilter>('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -23,8 +43,14 @@ export function MasterDeals() {
   const board = useQuery({ queryKey: ['master', rep, status], queryFn: () => api<MasterBoard>(`/api/admin/deals${qs({ rep, status })}`) });
   const rows = useMemo(() => {
     const s = search.trim().toLowerCase();
-    return (board.data?.deals ?? []).filter((d) => !s || `${d.id} ${d.crmId ?? ''} ${d.business} ${d.merchantContact} ${d.merchantEmail} ${d.merchantPhone} ${d.lender} ${d.product}`.toLowerCase().includes(s));
-  }, [board.data, search]);
+    const [presetFrom, presetTo] = presetRange(dateFilter);
+    const from = dateFilter === 'custom' ? dateFrom : presetFrom;
+    const to = dateFilter === 'custom' ? dateTo : presetTo;
+    return (board.data?.deals ?? []).filter((d) => {
+      const matchesSearch = !s || `${d.id} ${d.crmId ?? ''} ${d.business} ${d.merchantContact} ${d.merchantEmail} ${d.merchantPhone} ${d.lender} ${d.product}`.toLowerCase().includes(s);
+      return matchesSearch && (!from || d.date >= from) && (!to || d.date <= to);
+    });
+  }, [board.data, search, dateFilter, dateFrom, dateTo]);
   const totals = rows.reduce((t, d) => ({ funded: t.funded + d.funded, gross: t.gross + d.gross, net: t.net + d.net, payout: t.payout + d.totalRepPayout, house: t.house + d.houseNet }), { funded: 0, gross: 0, net: 0, payout: 0, house: 0 });
   const collect = async (id: string, body: Record<string, unknown>, label: string) => {
     try { await post(`/api/admin/deals/${id}/collection`, body); await board.refetch(); notify(label); }
@@ -48,6 +74,20 @@ export function MasterDeals() {
             <option value="">All statuses</option>
             {statusOptions.map((s) => <option key={s}>{s}</option>)}
           </select>
+          <select className="filter" value={dateFilter} onChange={(e) => setDateFilter(e.target.value as DateFilter)}>
+            <option value="">All dates</option>
+            <option value="this-week">This week</option>
+            <option value="last-week">Last week</option>
+            <option value="this-month">This month</option>
+            <option value="last-30">Last 30 days</option>
+            <option value="custom">Custom range</option>
+          </select>
+          {dateFilter === 'custom' && (
+            <>
+              <input className="filter" type="date" aria-label="Deals from date" value={dateFrom} max={dateTo || undefined} onChange={(e) => setDateFrom(e.target.value)} />
+              <input className="filter" type="date" aria-label="Deals through date" value={dateTo} min={dateFrom || undefined} onChange={(e) => setDateTo(e.target.value)} />
+            </>
+          )}
           <span className="count">{rows.length} of {board.data?.count ?? 0} deals</span>
           <button className="btn primary" onClick={() => setCreating(true)} disabled={!settings.data || !board.data}>+ New deal</button>
         </div>

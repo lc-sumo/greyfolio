@@ -9,6 +9,22 @@ import { Drawer, Pill, toneFor } from './ui';
 
 type F = Record<string, string>;
 const BASIS: Record<string, string> = { funded: 'funded amount', draw: 'draw amount', payback: 'payback amount' };
+const DEAL_PRODUCTS = [
+  { label: 'MCA', names: ['MCA'] },
+  { label: 'Line of Credit', names: ['LINE OF CREDIT', 'LOC - INITIAL'] },
+  { label: 'Consolidation', names: ['CONSOLIDATION', 'CONSOLIDATION - UPFRONT COMM'] },
+  { label: 'Term Loan', names: ['TERM LOAN'] },
+  { label: 'Equipment', names: ['EQUIPMENT'] },
+  { label: 'Real Estate', names: ['REAL ESTATE'] },
+  { label: 'SBA', names: ['SBA'] },
+] as const;
+
+function dealProductOptions(products: Settings['products']) {
+  return DEAL_PRODUCTS.flatMap(({ label, names }) => {
+    const product = names.map((name) => products.find((p) => p.name.toUpperCase() === name)).find(Boolean);
+    return product && product.active !== false ? [{ label, product }] : [];
+  });
+}
 
 function Field({ label, hint, children, span }: { label: React.ReactNode; hint?: string; children: React.ReactNode; span?: boolean }) {
   return (
@@ -27,7 +43,8 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
   const qc = useQueryClient();
   const roster = useQuery({ queryKey: ['roster-reps'], queryFn: () => api<{ reps: Array<{ id: string; name: string; teamId: string | null; openerRate: number; closerRate: number; overrideRate: number | null; active: boolean }> }>('/api/admin/reps') });
   const teams = useQuery({ queryKey: ['teams'], queryFn: () => api<{ teams: Array<{ id: string; leaderRepId: string | null; overrideRate: number }> }>('/api/admin/teams').catch(() => ({ teams: [] })) });
-  const first = settings.products[0];
+  const productOptions = dealProductOptions(settings.products);
+  const first = productOptions[0]?.product;
   const seed = (): F | null => {
     if (!existing) return null;
     const base = existing.segments[0];
@@ -53,7 +70,14 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
   const [busy, setBusy] = useState(false);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF((s) => ({ ...s, [k]: e.target.value }));
 
-  const rule = settings.products.find((p) => p.name === f.product);
+  const configuredRule = settings.products.find((p) => p.name === f.product);
+  const isConsolidation = DEAL_PRODUCTS[2].names.includes((f.product ?? '').toUpperCase() as typeof DEAL_PRODUCTS[2]['names'][number]);
+  // Consolidation is entered as one funded deal. Legacy settings may still mark
+  // it as multi-draw/incremental for historical records, but those mechanics
+  // belong to the deal's own entry rather than separate product choices.
+  const rule = configuredRule && isConsolidation
+    ? { ...configuredRule, multiDraw: false, incremental: false, drawInitial: null, drawSubsequent: null }
+    : configuredRule;
   const lender = settings.lenders.find((l) => l.name === f.lender);
   // Increments are a consolidation thing: the structure block only shows (and only saves) on incremental products.
   const canIncrement = !!rule?.incremental;
@@ -169,7 +193,9 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
       <div className="drawer-cols">
       <div className="form">
         <Field label="Product" span>
-          <select value={f.product} onChange={set('product')}>{settings.products.filter((p) => p.active !== false || p.name === f.product).map((p) => <option key={p.name}>{p.name}</option>)}</select>
+          <select value={f.product} onChange={set('product')}>
+            {productOptions.map(({ label, product }) => <option key={product.name} value={product.name}>{label}</option>)}
+          </select>
           <span className="muted" style={{ fontSize: 14 }}>{explainer}</span>
         </Field>
         {rule?.parent && (

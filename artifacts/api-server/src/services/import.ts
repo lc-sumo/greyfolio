@@ -87,6 +87,7 @@ export interface ImportPreview {
 }
 
 const MANUAL_STATUSES = ['Refinanced', 'Default', 'Slow Pay', 'Paid In Full'];
+const isStableDealId = (id: string) => /^F\d+$/.test(id) || /^GS-[A-Za-z0-9-]{8,}$/.test(id);
 
 /** What a re-exported row would change on a deal already in the portal: the ops-typed status and the lender-paid date, never money or the ledger. */
 function existingChanges(deal: Deal, r: SheetRow, settings: Settings): string[] {
@@ -162,7 +163,7 @@ export async function previewImport(repo: Repo, csv: string, opts: ImportOptions
       }
     }
     if (!isDraw) {
-      if (r.id && !/^F\d+$/.test(r.id)) problems.push(`Deal ID "${r.id}" is not an F-number; leave it blank to let the portal assign one`);
+      if (r.id && !isStableDealId(r.id)) problems.push(`Deal ID "${r.id}" is not a supported stable deal ID`);
       if (r.id && existing.has(r.id)) {
         if (opts.skipExisting) {
           skip = true;
@@ -242,7 +243,7 @@ export async function commitImport(repo: Repo, csv: string, actorRepId: string, 
   const known: Deal[] = [...ctx.deals];
   const created: Deal[] = [];
   // The sheet's F-series counts draw rows too, so every id in the file is reserved before new ones are issued.
-  let ids = [...known.map((d) => d.id), ...read.rows.map((r) => r.id).filter((id) => /^F\d+$/.test(id))];
+  let ids = [...known.map((d) => d.id), ...read.rows.map((r) => r.id).filter(isStableDealId)];
   const rule = (name: string) => settings.products.find((p) => p.name.toLowerCase() === name.toLowerCase())!;
   const lenderOf = (name: string) => settings.lenders.find((l) => l.name.toLowerCase() === name.toLowerCase());
   const partnerOf = (name: string) => settings.partners.find((p) => p.name.toLowerCase() === name.toLowerCase());
@@ -260,7 +261,7 @@ export async function commitImport(repo: Repo, csv: string, actorRepId: string, 
   // Deals first (parents before draws), in file order.
   for (const row of preview.rows.filter((x) => x.action === 'deal')) {
     const r = byLine.get(row.line)!;
-    const id = r.id && /^F\d+$/.test(r.id) && !created.some((d) => d.id === r.id) ? r.id : nextDealId(ids);
+    const id = r.id && isStableDealId(r.id) && !created.some((d) => d.id === r.id) ? r.id : nextDealId(ids);
     ids = [...ids, id];
     const pr = rule(r.product);
     // The sheet's gross is G × L + N (PSF $). The PSF % cell is a note the sheet never adds in, so only N counts here.

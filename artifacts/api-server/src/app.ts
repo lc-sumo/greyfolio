@@ -18,6 +18,7 @@ import { calendarForToken } from './services/calendar.js';
 import { createGeo, type Geo } from './services/geo.js';
 import { meRouter } from './routes/me.js';
 import { mailerFor, type Mailer } from './services/mail.js';
+import { sheetsSyncRouter } from './routes/sheets-sync.js';
 
 export interface AppDeps {
   /** Override the mailer (tests record instead of sending). */
@@ -63,6 +64,7 @@ export function createApp(config: AppConfig, repo: Repo, deps: AppDeps = {}): ex
   });
   app.use('/auth', rateLimit({ windowMs: 60_000, max: 30, keyPrefix: 'auth:' }), authRouter(config, repo, mailer));
   app.use('/api', rateLimit({ windowMs: 60_000, max: 600 }), refreshSession(repo));
+  app.use('/api/sync', sheetsSyncRouter(repo, config));
   app.use('/api/me', meRouter(repo, config.appName, notify, { geo, secureCookies: config.secureCookies }));
   app.use('/api/admin', adminRouter(repo, geo));
   app.use('/api/admin', adminDealsRouter(repo, notify));

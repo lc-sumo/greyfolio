@@ -1,5 +1,5 @@
 import { assertBalanced, cents, journalFingerprint, projectAccounting, type AccountingJournal, type Clawback, type Deal, type DealDraw, type LedgerContext, type PayoutLine, type PayrollRun, type Rep, type Team, type WeeklySchedule } from '@greystone/commission';
-import { NOTIFICATION_DEFAULTS, PERMISSION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AccountingPeriod, type AuditEntry, type ClawbackMutationContext, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Reconciliation, type Repo, type RepFile, type RepTask, type Settings, type StoredJournal, type TotpState, type TrustedDevice } from './repo.js';
+import { NOTIFICATION_DEFAULTS, PERMISSION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AccountingPeriod, type AuditEntry, type ClawbackMutationContext, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Reconciliation, type Repo, type RepFile, type RepTask, type Settings, type StoredJournal, type SyncIdempotencyRecord, type TotpState, type TrustedDevice } from './repo.js';
 import { requestMeta } from './auth/request-context.js';
 
 export interface MemoryData {
@@ -35,6 +35,8 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
   const periods: AccountingPeriod[] = [];
   const reconciliations: Reconciliation[] = [];
   const chains = new Map<string, { version: number; effectiveId: string | null; fingerprint: string | null }>();
+  const syncIdempotency = new Map<string, SyncIdempotencyRecord>();
+  const syncQueues = new Map<string, Promise<void>>();
   let bookId = 0;
   let initialAccountingSyncCompleted = false;
   let accountingQueue: Promise<void> = Promise.resolve();
@@ -440,6 +442,59 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
     },
     async writeAudit(e) {
       audit.push({ ...e, ip: e.ip ?? requestMeta()?.ip ?? null, at: new Date().toISOString() });
+    },
+    async getSyncIdempotency(operation, key) { return syncIdempotency.get(`${operation}\0${key}`) ?? null; },
+    async putSyncIdempotency(record) { syncIdempotency.set(`${record.operation}\0${record.key}`, record); },
+    async runSyncIdempotent<T>(operation: string, key: string, payloadHash: string, work: () => Promise<{ status: number; response: T }>) {
+      const id = `${operation}\0${key}`;
+      const previous = syncQueues.get(id) ?? Promise.resolve();
+      let release!: () => void;
+      const current = new Promise<void>((resolve) => { release = resolve; });
+      const tail = previous.catch(() => undefined).then(() => current);
+      syncQueues.set(id, tail);
+      await previous.catch(() => undefined);
+      try {
+        const prior = syncIdempotency.get(id);
+        if (prior) {
+          if (prior.payloadHash !== payloadHash) throw new Error('Idempotency key was used with a different payload');
+          return { status: prior.status ?? 500, response: prior.response as T, replayed: true };
+        }
+        const result = await work();
+        syncIdempotency.set(id, { operation, key, payloadHash, state: 'completed', status: result.status, response: result.response });
+        return { ...result, replayed: false };
+      } finally {
+        release();
+        if (syncQueues.get(id) === tail) syncQueues.delete(id);
+      }
+    },
+    async runSyncAtMostOnce<T>(operation: string, key: string, payloadHash: string, work: () => Promise<{ status: number; response: T }>) {
+      const id = `${operation}\0${key}`;
+      const previous = syncQueues.get(`claim:${id}`) ?? Promise.resolve();
+      let releaseClaim!: () => void;
+      const claim = new Promise<void>((resolve) => { releaseClaim = resolve; });
+      const tail = previous.catch(() => undefined).then(() => claim);
+      syncQueues.set(`claim:${id}`, tail);
+      await previous.catch(() => undefined);
+      const prior = syncIdempotency.get(id);
+      if (prior) {
+        releaseClaim();
+        if (prior.payloadHash !== payloadHash) throw new Error('Idempotency key was used with a different payload');
+        if (prior.state === 'processing') throw new Error('Sync operation is processing or uncertain; reconcile before retrying');
+        return { status: prior.status ?? 500, response: prior.response as T, replayed: true };
+      }
+      syncIdempotency.set(id, { operation, key, payloadHash, state: 'processing', status: null, response: null });
+      try {
+        const result = await work();
+        syncIdempotency.set(id, { operation, key, payloadHash, state: 'completed', status: result.status, response: result.response });
+        return { ...result, replayed: false };
+      } catch (error) {
+        const response = { error: error instanceof Error ? error.message : 'Sync operation failed' };
+        syncIdempotency.set(id, { operation, key, payloadHash, state: 'failed', status: 500, response });
+        throw error;
+      } finally {
+        releaseClaim();
+        if (syncQueues.get(`claim:${id}`) === tail) syncQueues.delete(`claim:${id}`);
+      }
     },
     async listAudit(limit = 100, offset = 0) {
       const all = [...audit].reverse();

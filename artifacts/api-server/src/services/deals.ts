@@ -367,6 +367,29 @@ export async function setCollection(repo: Repo, id: string, input: CollectionInp
   return requireDeal(repo, id);
 }
 
+/** Atomically add an exact lender receipt without using a stale absolute target. */
+export async function addCollectionDelta(repo: Repo, id: string, segmentKey: SegmentKey, delta: number, actorRepId: string): Promise<number> {
+  const amount = Math.round(Number(delta) * 100) / 100;
+  if (!Number.isFinite(amount) || amount <= 0) throw new HttpError(400, 'Collection delta must be positive');
+  let applied = 0;
+  await repo.updateSegmentLocked(id, segmentKey, (current, lockedLines, lockedClawbacks) => {
+    const seg = segmentOf(current, segmentKey);
+    if (!seg) throw new HttpError(404, `Segment ${segmentKey} not found on ${id}`);
+    const have = collectedOf(seg);
+    const outstanding = Math.round((seg.gross - have) * 100) / 100;
+    if (amount > outstanding + 0.005) throw new HttpError(409, `Receipt ${amount.toFixed(2)} exceeds current outstanding ${outstanding.toFixed(2)}`);
+    const patch = withCollection(seg, Math.round((have + amount) * 100) / 100);
+    const nextCollected = collectedOf({ ...seg, ...patch });
+    applied = Math.round((nextCollected - have) * 100) / 100;
+    if (Math.abs(applied - amount) > 0.005) throw new HttpError(409, `Receipt ${amount.toFixed(2)} cannot be represented exactly by this collection schedule`);
+    const proposed = proposedSegmentDeal(current, segmentKey, patch);
+    guardDealClawbacks(proposed, lockedLines, lockedClawbacks);
+    return { ...patch, ...(segmentKey === 'base' ? { lenderPaid: current.lenderPaid ?? today() } : {}) };
+  });
+  await repo.writeAudit({ actorRepId, action: 'deal.collection', targetRepId: null, path: `/api/sync/remittance`, detail: { segmentKey, delta: applied } });
+  return applied;
+}
+
 /** The CRM's deal ID (the F-number is only the sheet row). */
 export async function setCrmId(repo: Repo, id: string, crmId: string | null, actorRepId: string): Promise<Deal> {
   const deal = await requireDeal(repo, id);

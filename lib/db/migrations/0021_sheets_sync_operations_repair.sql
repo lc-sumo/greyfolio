@@ -1,0 +1,10 @@
+ALTER TABLE commission_sheets_sync_operations ADD COLUMN IF NOT EXISTS state text;
+ALTER TABLE commission_sheets_sync_operations ADD COLUMN IF NOT EXISTS status integer;
+ALTER TABLE commission_sheets_sync_operations ADD COLUMN IF NOT EXISTS response jsonb;
+ALTER TABLE commission_sheets_sync_operations ALTER COLUMN state SET DEFAULT 'processing';
+UPDATE commission_sheets_sync_operations SET state = 'completed' WHERE state IS NULL AND response IS NOT NULL;
+UPDATE commission_sheets_sync_operations SET state = 'failed' WHERE state IS NULL;
+ALTER TABLE commission_sheets_sync_operations ALTER COLUMN state SET NOT NULL;
+ALTER TABLE commission_sheets_sync_operations ALTER COLUMN status DROP NOT NULL;
+ALTER TABLE commission_sheets_sync_operations ALTER COLUMN response DROP NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS commission_sheets_sync_operations_key_idx ON commission_sheets_sync_operations(operation, key);

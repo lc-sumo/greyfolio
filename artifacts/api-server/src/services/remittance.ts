@@ -11,7 +11,7 @@ import { collectedOf, outstandingOf, scheduleEvents, segments, type Deal, type S
 import { isoDate, num, parseCsv } from '@greystone/db/seed/csv';
 import { HttpError } from '../http-error.js';
 import type { Repo } from '../repo.js';
-import { setCollection } from './deals.js';
+import { addCollectionDelta, setCollection } from './deals.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const cents = (n: number) => Math.round(n * 100) / 100;
@@ -217,4 +217,16 @@ export async function commitRemittance(repo: Repo, csv: string, actorRepId: stri
   }
   await repo.writeAudit({ actorRepId, action: 'deal.remittance', targetRepId: null, path: '/api/admin/remittance', detail: { lines: preview.rows.length, applied, deals: [...deals] } });
   return { applied, amount: preview.summary.amount, deals: [...deals] };
+}
+
+/** Sync-safe single receipt: exact positive delta under the segment row lock. */
+export async function commitSyncRemittance(repo: Repo, csv: string, actorRepId: string): Promise<RemittanceResult> {
+  const preview = await previewRemittance(repo, csv);
+  if (preview.rows.length !== 1 || preview.summary.problems > 0 || Math.abs(preview.summary.unapplied) > 0.005) throw new HttpError(400, 'A sync receipt must be one clean, fully applicable row');
+  const row = preview.rows[0]!;
+  if (!row.dealId || row.steps.length !== 1) throw new HttpError(400, 'Sync receipts must resolve to exactly one deal segment step');
+  const applied = await addCollectionDelta(repo, row.dealId, row.steps[0]!.segmentKey as never, row.amount, actorRepId);
+  if (Math.abs(applied - row.amount) > 0.005) throw new HttpError(409, 'Receipt was not applied in full');
+  await repo.writeAudit({ actorRepId, action: 'deal.remittance', targetRepId: null, path: '/api/sync/remittance', detail: { lines: 1, applied, deals: [row.dealId] } });
+  return { applied, amount: row.amount, deals: [row.dealId] };
 }

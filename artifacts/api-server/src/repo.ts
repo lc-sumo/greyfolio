@@ -154,6 +154,7 @@ export interface PeriodCloseResult {
   checklist: { projected: number; inserted: number; existing: number; corrected: number; removed: number; unresolved: number; journalCount: number; debit: number; credit: number; balanced: true };
 }
 export interface Reconciliation { id: string; accountCode: string; statementStart: string; statementDate: string; openingBalance: number; statementBalance: number; status: 'open' | 'completed'; note: string | null; createdBy: string | null; matches: Array<{ journalLineId: string; amount: number }> }
+export interface SyncIdempotencyRecord { operation: string; key: string; payloadHash: string; state: 'processing' | 'completed' | 'failed'; status: number | null; response: unknown }
 
 /** Stored deal columns that a service may patch (never draws — those have their own methods). */
 export type DealPatch = Partial<Omit<Deal, 'id' | 'draws'>>;
@@ -175,6 +176,10 @@ export interface Repo {
   claimSettingOnce(key: string, value?: unknown): Promise<boolean>;
   getSettings(): Promise<Settings>;
   writeAudit(entry: AuditEntry): Promise<void>;
+  getSyncIdempotency(operation: string, key: string): Promise<SyncIdempotencyRecord | null>;
+  putSyncIdempotency(record: SyncIdempotencyRecord): Promise<void>;
+  runSyncIdempotent<T>(operation: string, key: string, payloadHash: string, work: () => Promise<{ status: number; response: T }>): Promise<{ status: number; response: T; replayed: boolean }>;
+  runSyncAtMostOnce<T>(operation: string, key: string, payloadHash: string, work: () => Promise<{ status: number; response: T }>): Promise<{ status: number; response: T; replayed: boolean }>;
   listAudit(limit?: number, offset?: number): Promise<AuditEntry[]>;
   /* Unified books. Source journals are append-only and keyed by sourceKey. */
   listJournals(filter?: { from?: string; to?: string; accountCode?: string; sourceKey?: string }): Promise<StoredJournal[]>;

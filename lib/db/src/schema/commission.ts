@@ -328,6 +328,17 @@ export const commissionSheetsSync = pgTable('commission_sheets_sync', {
   updatedAt: updatedAt(),
 });
 
+/** Durable replay protection for machine-to-machine sheet mutations. */
+export const commissionSheetsSyncOperations = pgTable('commission_sheets_sync_operations', {
+  operation: text('operation').notNull(),
+  key: text('key').notNull(),
+  payloadHash: text('payload_hash').notNull(),
+  state: text('state').notNull().default('processing'),
+  status: integer('status'),
+  response: jsonb('response'),
+  createdAt: createdAt(),
+}, (t) => [uniqueIndex('commission_sheets_sync_operations_key_idx').on(t.operation, t.key)]);
+
 /** Audit trail. Phase 2 writes one row per request served under admin/manager View-as. */
 export const commissionAuditLog = pgTable(
   'commission_audit_log',

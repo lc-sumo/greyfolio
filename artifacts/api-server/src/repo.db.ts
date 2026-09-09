@@ -23,6 +23,7 @@ import {
   commissionReps,
   commissionTasks,
   commissionSettings,
+  commissionSheetsSyncOperations,
   commissionTeams,
   commissionTrustedDevices,
   toClawback,
@@ -863,6 +864,49 @@ export function dbRepo(db: Database): Repo {
         path: entry.path,
         detail: entry.detail ?? null,
       });
+    },
+    async getSyncIdempotency(operation, key) {
+      const rows = await db.select().from(commissionSheetsSyncOperations).where(and(eq(commissionSheetsSyncOperations.operation, operation), eq(commissionSheetsSyncOperations.key, key))).limit(1);
+      const row = rows[0];
+      return row ? { operation: row.operation, key: row.key, payloadHash: row.payloadHash, state: row.state as 'processing' | 'completed' | 'failed', status: row.status, response: row.response } : null;
+    },
+    async putSyncIdempotency(record) {
+      await db.insert(commissionSheetsSyncOperations).values({ operation: record.operation, key: record.key, payloadHash: record.payloadHash, status: record.status, response: record.response }).onConflictDoNothing({ target: [commissionSheetsSyncOperations.operation, commissionSheetsSyncOperations.key] });
+    },
+    async runSyncIdempotent<T>(operation: string, key: string, payloadHash: string, work: () => Promise<{ status: number; response: T }>) {
+      return db.transaction(async (tx) => {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'sheets-sync:' + operation + ':' + key}))`);
+        const prior = await tx.select().from(commissionSheetsSyncOperations).where(and(eq(commissionSheetsSyncOperations.operation, operation), eq(commissionSheetsSyncOperations.key, key))).limit(1);
+        if (prior[0]) {
+          if (prior[0].payloadHash !== payloadHash) throw new Error('Idempotency key was used with a different payload');
+          return { status: prior[0].status ?? 500, response: prior[0].response as T, replayed: true };
+        }
+        const result = await work();
+        await tx.insert(commissionSheetsSyncOperations).values({ operation, key, payloadHash, status: result.status, response: result.response });
+        return { ...result, replayed: false };
+      });
+    },
+    async runSyncAtMostOnce<T>(operation: string, key: string, payloadHash: string, work: () => Promise<{ status: number; response: T }>) {
+      const claimed = await db.insert(commissionSheetsSyncOperations)
+        .values({ operation, key, payloadHash, state: 'processing', status: null, response: null })
+        .onConflictDoNothing({ target: [commissionSheetsSyncOperations.operation, commissionSheetsSyncOperations.key] })
+        .returning({ operation: commissionSheetsSyncOperations.operation });
+      if (!claimed.length) {
+        const rows = await db.select().from(commissionSheetsSyncOperations).where(and(eq(commissionSheetsSyncOperations.operation, operation), eq(commissionSheetsSyncOperations.key, key))).limit(1);
+        const prior = rows[0]!;
+        if (prior.payloadHash !== payloadHash) throw new Error('Idempotency key was used with a different payload');
+        if (prior.state === 'processing') throw new Error('Sync operation is processing or uncertain; reconcile before retrying');
+        return { status: prior.status ?? 500, response: prior.response as T, replayed: true };
+      }
+      try {
+        const result = await work();
+        await db.update(commissionSheetsSyncOperations).set({ state: 'completed', status: result.status, response: result.response }).where(and(eq(commissionSheetsSyncOperations.operation, operation), eq(commissionSheetsSyncOperations.key, key)));
+        return { ...result, replayed: false };
+      } catch (error) {
+        const response = { error: error instanceof Error ? error.message : 'Sync operation failed' };
+        await db.update(commissionSheetsSyncOperations).set({ state: 'failed', status: 500, response }).where(and(eq(commissionSheetsSyncOperations.operation, operation), eq(commissionSheetsSyncOperations.key, key)));
+        throw error;
+      }
     },
     async listAudit(limit = 100, offset = 0) {
       const rows = await db.select().from(commissionAuditLog).orderBy(desc(commissionAuditLog.at)).limit(limit).offset(offset);

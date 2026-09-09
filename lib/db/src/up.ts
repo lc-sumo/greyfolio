@@ -71,6 +71,11 @@ const FINGERPRINTS: Record<string, Fingerprint> = {
   ] },
   '0018_reconciliation_statements': { table: 'commission_reconciliations', column: 'opening_balance' },
   '0019_clawback_forgiveness': { table: 'commission_clawbacks', column: 'forgiven_at' },
+  '0020_sheets_sync_operations': { table: 'commission_sheets_sync_operations' },
+  '0021_sheets_sync_operations_repair': { checks: [
+    { kind: 'column', table: 'commission_sheets_sync_operations', name: 'state' },
+    { kind: 'index', table: 'commission_sheets_sync_operations', name: 'commission_sheets_sync_operations_key_idx', unique: true },
+  ] },
 };
 
 interface JournalEntry { idx: number; when: number; tag: string }

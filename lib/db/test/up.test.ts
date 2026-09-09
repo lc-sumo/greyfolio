@@ -12,4 +12,12 @@ describe('db:up baseline', () => {
     expect(entries.map((e) => e.idx)).toEqual(entries.map((_, i) => i));
     expect(migrationHash(MIGRATIONS_DIR, entries[0]!.tag)).toMatch(/^[0-9a-f]{64}$/);
   });
+
+  it('repairs sheets sync claims with state and a unique operation key', () => {
+    const sql = readFileSync(path.join(MIGRATIONS_DIR, '0021_sheets_sync_operations_repair.sql'), 'utf8');
+    expect(sql).toContain('ADD COLUMN IF NOT EXISTS state');
+    expect(sql).toContain('ALTER COLUMN status DROP NOT NULL');
+    expect(sql).toContain('commission_sheets_sync_operations_key_idx');
+    expect(sql).toContain('UNIQUE INDEX');
+  });
 });

@@ -123,6 +123,7 @@ export function disbursementOf(plannedAmount: number, s: WeeklySchedule | null |
   const total = effectiveIncrements(s);
   const count = clamp(s.received, 0, total);
   const grid = gridOf(s);
+  const uneven = !!grid && grid.some((amount) => Math.abs(amount - grid[0]!) > 0.005);
   const manual = isStopped(s) && s.stoppedFundingRatio !== null && s.stoppedFundingRatio !== undefined;
   return {
     planned: plannedAmount,
@@ -132,7 +133,7 @@ export function disbursementOf(plannedAmount: number, s: WeeklySchedule | null |
     count,
     total,
     stopped: isStopped(s),
-    uneven: !!grid,
+    uneven,
     ...(manual ? { manual: true as const } : {}),
   };
 }

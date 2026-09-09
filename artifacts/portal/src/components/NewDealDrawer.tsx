@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api, post, type AdminDealDetail, type MasterBoard, type RepOption, type Settings } from '../lib/api';
 import { compact, day, fullDay, money, pct, todayIso } from '../lib/format';
 import { addBusinessDays, liveMath, num, rate } from '../lib/math';
-import { parseIncrementGrid } from '@greystone/commission';
+import { isConsolidationParentProduct, parseIncrementGrid } from '@greystone/commission';
 import { useSession } from '../lib/session';
 import { Drawer, Pill, toneFor } from './ui';
 
@@ -13,6 +13,7 @@ const DEAL_PRODUCTS = [
   { label: 'MCA', names: ['MCA'] },
   { label: 'Line of Credit', names: ['LINE OF CREDIT', 'LOC - INITIAL'] },
   { label: 'Consolidation', names: ['CONSOLIDATION', 'CONSOLIDATION - UPFRONT COMM'] },
+  { label: 'Reverse', names: ['REVERSE - TOTAL FUNDING'] },
   { label: 'Term Loan', names: ['TERM LOAN'] },
   { label: 'Equipment', names: ['EQUIPMENT'] },
   { label: 'Real Estate', names: ['REAL ESTATE'] },
@@ -71,7 +72,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF((s) => ({ ...s, [k]: e.target.value }));
 
   const configuredRule = settings.products.find((p) => p.name === f.product);
-  const isConsolidation = DEAL_PRODUCTS[2].names.includes((f.product ?? '').toUpperCase() as typeof DEAL_PRODUCTS[2]['names'][number]);
+  const isConsolidation = isConsolidationParentProduct(f.product);
   // Consolidation is entered as one funded deal with a commission-disbursement
   // schedule. It is incremental, but it is not a line of credit/multi-draw product.
   const rule = configuredRule && isConsolidation
@@ -80,7 +81,9 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
   const lender = settings.lenders.find((l) => l.name === f.lender);
   // Increments are a consolidation thing: the structure block only shows (and only saves) on incremental products.
   const canIncrement = !!rule?.incremental;
-  const incremental = canIncrement && (f.payout === 'increments' || (f.payout === 'lender' && lender?.terms === 'weekly'));
+  // Consolidations always use their own deal-specific grid. Lender terms only
+  // seed cadence/upfront/remainder; they never choose the count or amounts.
+  const incremental = canIncrement;
   const partner = settings.partners.find((p) => p.name === f.referralPartner);
   const reps = roster.data?.reps ?? [];
   const assign: RepOption[] = board.repOptions.assign;
@@ -96,7 +99,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
   useEffect(() => {
     if (!lender) return;
     if (skipDefaults.current) return;
-    setF((s) => ({ ...s, lineRate: lender.locLineRate ? String(Math.round(lender.locLineRate * 10000) / 100) : '', commIncrements: lender.terms === 'weekly' ? String(lender.weeks) : s.commIncrements ?? '', commUpfrontPct: lender.upfrontPct ? String(lender.upfrontPct * 100) : s.payout === 'lender' ? '' : s.commUpfrontPct ?? '', commRemainder: lender.remainder ?? 'spread', commCadenceDays: String(lender.cadenceDays ?? 7) }));
+    setF((s) => ({ ...s, lineRate: lender.locLineRate ? String(Math.round(lender.locLineRate * 10000) / 100) : '', commUpfrontPct: lender.upfrontPct ? String(lender.upfrontPct * 100) : s.commUpfrontPct ?? '', commRemainder: lender.remainder ?? 'spread', commCadenceDays: String(lender.cadenceDays ?? 7) }));
   }, [lender?.name]); // eslint-disable-line react-hooks/exhaustive-deps
   // Partner change → prefill its rate.
   useEffect(() => { setF((s) => ({ ...s, referralRate: partner ? String(partner.pct * 100) : '0' })); }, [partner?.name]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -126,9 +129,12 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
     return board.deals.filter((d) => d.referralPartner === partner.name && d.date.startsWith(month)).reduce((s, d) => s + d.referralFee, 0);
   }, [board.deals, partner, f.fundedDate]);
   // Increment grid: uneven disbursements typed or pasted ("12500 x15, 8000 x3, 5000 x2"). It defines the increment count and must total the funded amount.
-  const grid = useMemo(() => (incremental && f.commGrid?.trim() ? parseIncrementGrid(f.commGrid) : []), [incremental, f.commGrid]);
+  const gridRaw = f.commGrid ?? '';
+  const grid = useMemo(() => (incremental && gridRaw.trim() ? parseIncrementGrid(gridRaw) : []), [incremental, gridRaw]);
+  const legacyGridMissing = editing && incremental && !existing?.segments[0]?.schedule?.amounts?.length;
   const gridTotal = grid.reduce((a, b) => a + b, 0);
-  const gridMismatch = grid.length > 0 && Math.abs(gridTotal - num(f.amount)) > 1;
+  const gridInvalid = incremental && (!validIncrementGrid(gridRaw) || grid.length === 0);
+  const gridMismatch = incremental && (gridInvalid || Math.abs(gridTotal - num(f.amount)) > 0.005);
   useEffect(() => { if (grid.length) setF((s) => ({ ...s, commIncrements: String(grid.length) })); }, [grid.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const m = useMemo(() => liveMath(f, rule, partner, referralPaidThisMonth), [f, rule, partner, referralPaidThisMonth]);
   const upfrontShare = incremental ? Math.min(1, Math.max(0, num(f.commUpfrontPct) / 100)) : 1;
@@ -171,12 +177,12 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
         frequency: f.frequency, commRate: num(f.commRate), psfPct: m.psfRate * 100, originationFee: num(f.originationFee), referralPartner: f.referralPartner === 'None' ? null : f.referralPartner,
         creditLine: rule?.multiDraw ? num(f.creditLine) || null : null, lineRate: rule?.multiDraw ? num(f.lineRate) : null, drawInitialPct: rule?.multiDraw ? num(f.drawInitialPct) : null, drawSubsequentPct: rule?.multiDraw ? num(f.drawSubsequentPct) : null,
         openerId: f.openerId || null, openerRate: num(f.openerRate), closerId: f.closerId || null, closerRate: num(f.closerRate), overrideId: f.overrideId || null, overrideRate: num(f.overrideRate),
-        commIncrements: f.payout === 'upfront' ? 0 : incremental ? num(f.commIncrements) || null : null,
+         commIncrements: incremental ? grid.length : null,
         commUpfrontPct: incremental ? num(f.commUpfrontPct) : null,
         commRemainder: incremental ? (num(f.commUpfrontPct) > 0 ? 'at-end' : f.commRemainder as 'spread' | 'at-end') : null,
         commCadenceDays: incremental ? num(f.commCadenceDays) || 7 : null,
         commStartDate: incremental && f.commStartDate ? f.commStartDate : null,
-        commAmounts: incremental && grid.length ? grid : null,
+         commAmounts: incremental ? grid : null,
       }, editing ? 'PATCH' : 'POST');
       await qc.invalidateQueries();
       notify(editing ? `${saved.id} — terms updated and re-priced` : `${saved.id} saved — ${saved.roles.filter((r) => r.repId).length} rep portal(s) updated`);
@@ -250,7 +256,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
         <Field label="Lender">
           <select value={f.lender} onChange={set('lender')}>
             <option value="">— select —</option>
-            {settings.lenders.filter((l) => (l.active !== false || l.name === f.lender) && (!l.products?.length || l.products.includes(f.product ?? ''))).map((l) => <option key={l.name} value={l.name}>{l.name}{canIncrement && l.terms === 'weekly' ? ` · ${l.weeks} increments` : ''}</option>)}
+             {settings.lenders.filter((l) => (l.active !== false || l.name === f.lender) && (!l.products?.length || l.products.includes(f.product ?? ''))).map((l) => <option key={l.name} value={l.name}>{l.name}</option>)}
           </select>
           <span className="subtle" style={{ fontSize: 13 }}>Only lenders set up for {f.product} (Settings › Lenders).</span>
         </Field>
@@ -278,17 +284,11 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
         </Field>
         <div className="label" style={{ gridColumn: '1 / -1', marginTop: 6 }}>Commission payout from the lender</div>
         {!canIncrement && rule && <div className="note" style={{ gridColumn: '1 / -1' }}>{rule.name} commission is paid upfront by the lender. Increment structures (upfront share, number of increments, cadence) apply to consolidations only — not LOCs or LOC draws.</div>}
-        {canIncrement && <Field label="Payout structure" span>
-          <select value={f.payout} onChange={set('payout')}>
-            <option value="lender">{lender ? (lender.terms === 'weekly' ? `Lender default — ${lender.weeks} increments${lender.upfrontPct ? `, ${Math.round(lender.upfrontPct * 100)}% upfront` : ''}${lender.remainder === 'at-end' ? ', rest when done' : ''}` : 'Lender default — all upfront at funding') : 'Lender default'}</option>
-            <option value="upfront">All upfront at funding</option>
-            <option value="increments">In increments (consolidation-style)</option>
-          </select>
-        </Field>}
         {incremental && (
           <>
+             {legacyGridMissing && !(f.commGrid ?? '').trim() && <div className="note" style={{ gridColumn: '1 / -1', background: 'var(--amber-light)', color: 'var(--amber)' }}>This legacy consolidation has no stored increment breakdown. Enter the real funding breakdown below before saving; equal amounts will not be manufactured.</div>}
             <Field label="Upfront share %" hint="e.g. 50 → half at funding; the remaining half is due only after every increment clears"><input inputMode="decimal" placeholder="0" value={f.commUpfrontPct} onChange={(e) => setF((s) => ({ ...s, commUpfrontPct: e.target.value, commRemainder: num(e.target.value) > 0 ? 'at-end' : s.commRemainder ?? 'spread' }))} /></Field>
-            <Field label="Number of increments" hint={grid.length ? 'from the grid below' : undefined}><input inputMode="numeric" readOnly={grid.length > 0} className={grid.length ? 'ro' : undefined} value={f.commIncrements} onChange={set('commIncrements')} /></Field>
+             <Field label="Number of increments" hint="Derived from the increment breakdown"><input inputMode="numeric" readOnly className="ro" value={grid.length || ''} /></Field>
             <Field label="Remainder">
               <select value={num(f.commUpfrontPct) > 0 ? 'at-end' : f.commRemainder} disabled={num(f.commUpfrontPct) > 0} onChange={set('commRemainder')}>
                 <option value="spread">Spread evenly across the increments</option>
@@ -299,7 +299,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
               <select value={f.commCadenceDays} onChange={set('commCadenceDays')}><option value="7">Weekly</option><option value="14">Bi-weekly</option><option value="30">Monthly</option></select>
             </Field>
             <Field label="First increment expected" hint="defaults to one cadence after funding"><input type="date" value={f.commStartDate} onChange={set('commStartDate')} /></Field>
-            <Field label="Increment grid (optional)" span hint={grid.length ? `${grid.length} increments totalling ${money(gridTotal)}${gridMismatch ? ` — does not match the funded amount ${money(num(f.amount))}; fix one or the other` : ' — matches the funded amount'}` : 'Only when the disbursements are not equal. One amount per line or comma-separated; "12500 x15" repeats an amount. Commission per increment follows the same proportions.'}>
+             <Field label="Increment breakdown (required)" span hint={gridInvalid ? 'Enter positive, finite dollar amounts in exact cents. Use one per line/comma/semicolon or amount x count (for example, 12500 x15).' : grid.length ? `${grid.length} increments totalling ${money(gridTotal)}${gridMismatch ? ` — remaining/over amount ${money(num(f.amount) - gridTotal)}` : ' — matches the funded amount'}` : 'Enter one amount per line or comma-separated; "12500 x15" repeats an amount. This deal-specific breakdown is required.'}>
               <textarea rows={3} value={f.commGrid} onChange={(e) => setF((s) => ({ ...s, commGrid: e.target.value }))} placeholder={'12500 x15\n8000 x3\n5000 x2'} style={{ border: '1px solid var(--border-strong)', borderRadius: 8, padding: '8px 10px', background: 'var(--input-bg)', color: 'inherit', font: 'inherit', fontFamily: 'var(--mono)', fontSize: 13.5, resize: 'vertical', outline: 'none', borderColor: gridMismatch ? 'var(--red)' : undefined }} />
             </Field>
             {grid.length > 0 && (
@@ -367,7 +367,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
       </div>
       {err && <div className="note" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>{err}</div>}
       <div style={{ display: 'flex', gap: 9 }}>
-        <button className="btn primary big" disabled={busy || gridMismatch} title={gridMismatch ? 'The increment grid must total the funded amount' : undefined} onClick={() => void save()}>{busy ? 'Saving…' : editing ? 'Save terms' : 'Save deal'}</button>
+         <button className="btn primary big" disabled={busy || gridMismatch} title={gridMismatch ? 'A valid increment breakdown totaling the funded amount is required' : undefined} onClick={() => void save()}>{busy ? 'Saving…' : editing ? 'Save terms' : 'Save deal'}</button>
         <button className="btn big" onClick={onClose}>Cancel</button>
       </div>
       <div className="subtle" style={{ fontSize: 13 }}>Rates: {pct(0.2)} means 20 — type either.</div>
@@ -385,4 +385,24 @@ function structureNote(gross: number, f: Record<string, string>): string {
   const start = f.commStartDate || `one ${cadence} after funding`;
   if (up > 0 || f.commRemainder === 'at-end') return `Expect ${money(upfront)} at funding${up ? '' : ' (nothing upfront)'}, then ${n} merchant increments every ${cadence} starting ${start}, and the remaining ${money(rest)} once they are done.`;
   return `Expect ${up ? `${money(upfront)} at funding, then ` : ''}${n} receipts of ${money(rest / n)} every ${cadence} starting ${start} (${money(rest)} in total).`;
+}
+
+/** Validate the raw grid as well as its parsed values; the parser intentionally
+ * skips malformed tokens for import convenience, but a save must not. */
+function validIncrementGrid(raw: string): boolean {
+  if (!raw.trim()) return false;
+  const flat = raw.replace(/,(?=\d{3}(?!\d))/g, '');
+  const tokens = flat.split(/[\n,;]+/).map((x) => x.trim().replace(/\$/g, ''));
+  if (!tokens.length || tokens.some((token) => !token)) return false;
+  return tokens.every((token) => {
+    const repeated = /^([\d.,]+)\s*[x×*]\s*(\d+)$/i.exec(token.replace(/,/g, ''));
+    if (repeated) {
+      const amount = Number(repeated[1]);
+      const count = Number(repeated[2]);
+      return Number.isFinite(amount) && amount > 0 && Number.isInteger(count) && count > 0 && count <= 520 && Math.abs(amount * 100 - Math.round(amount * 100)) <= 1e-7;
+    }
+    if (!/^[\d.,]+$/.test(token)) return false;
+    const amount = Number(token.replace(/,/g, ''));
+    return Number.isFinite(amount) && amount > 0 && Math.abs(amount * 100 - Math.round(amount * 100)) <= 1e-7;
+  });
 }

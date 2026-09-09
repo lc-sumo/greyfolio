@@ -246,7 +246,7 @@ describe('re-import, remittance and year-end', () => {
   it('walks an incremental schedule in order', async () => {
     const { admin } = await harness();
     // A consolidation on a weekly lender: 4 increments of gross/4 on a 10,000 gross.
-    const created = await admin.post('/api/admin/deals').send({ business: 'Weekly Co', fundedDate: '2026-08-01', lender: 'Lendini', product: 'CONSOLIDATION - UPFRONT COMM', amount: 100_000, factor: 1.3, termDays: 120, frequency: 'Weekly', commRate: 0.1, openerId: 'rep-julian-ribak', openerRate: 0.35, commIncrements: 4, commUpfrontPct: 0, commRemainder: 'spread' });
+    const created = await admin.post('/api/admin/deals').send({ business: 'Weekly Co', fundedDate: '2026-08-01', lender: 'Lendini', product: 'CONSOLIDATION - UPFRONT COMM', amount: 100_000, factor: 1.3, termDays: 120, frequency: 'Weekly', commRate: 0.1, openerId: 'rep-julian-ribak', openerRate: 0.35, commAmounts: Array(4).fill(25_000), commUpfrontPct: 0, commRemainder: 'spread' });
     expect(created.status).toBe(201);
     const id = created.body.id;
     const perInc = created.body.segments[0].schedule.events.find((e: { kind: string }) => e.kind === 'increment').amount;

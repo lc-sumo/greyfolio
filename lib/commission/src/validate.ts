@@ -8,6 +8,11 @@ export class ValidationError extends Error {
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** Parent products whose funding is entered as one deal-owned increment grid. */
+export function isConsolidationParentProduct(name: string | null | undefined): boolean {
+  return ['CONSOLIDATION', 'CONSOLIDATION - UPFRONT COMM', 'REVERSE - TOTAL FUNDING'].includes((name ?? '').trim().toUpperCase());
+}
+
 export function isIsoDate(v: string): boolean {
   if (!ISO_DATE.test(v)) return false;
   const d = new Date(`${v}T00:00:00Z`);

@@ -20,6 +20,7 @@ import {
   type Deal,
   type NewDealDraft,
   type SegmentKey,
+  isConsolidationParentProduct,
 } from '@greystone/commission';
 import { clawbackRecovered, clawbackRecoveryExcesses, clawbackRepTotal, lenderClawbackBase, type Clawback, type DealDraw, type PayoutLine } from '@greystone/commission';
 import { HttpError } from '../http-error.js';
@@ -38,6 +39,26 @@ function bad(e: unknown): never {
   if (e instanceof ValidationError) throw new HttpError(400, e.message);
   if (e instanceof Error && !(e instanceof HttpError)) throw new HttpError(400, e.message);
   throw e;
+}
+
+/** Portal/API consolidation entries must carry their deal-specific funding grid.
+ * Importers can continue calling priceDeal directly without a grid for legacy data. */
+function requireConsolidationGrid(draft: NewDealDraft): NewDealDraft {
+  const incremental = isConsolidationParentProduct(draft.product);
+  if (!incremental) return draft;
+  const amounts = draft.commAmounts;
+  if (!Array.isArray(amounts) || amounts.length === 0) {
+    throw new HttpError(400, 'Consolidation increment breakdown is required; enter one positive amount per increment');
+  }
+  if (amounts.some((a) => !Number.isFinite(a) || Math.abs(a * 100 - Math.round(a * 100)) > 1e-7 || a <= 0)) {
+    throw new HttpError(400, 'Every consolidation increment amount must be finite, use exact cents, and be greater than zero');
+  }
+  const total = amounts.reduce((sum, a) => sum + Math.round(a * 100), 0);
+  const funded = Math.round(draft.amount * 100);
+  if (total !== funded) {
+    throw new HttpError(400, `Consolidation increment grid totals ${(total / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}; it must equal the funded amount ${(funded / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}`);
+  }
+  return { ...draft, commAmounts: amounts, commIncrements: amounts.length };
 }
 
 function guardRecoveredAttribution(clawback: Clawback, proposedDeal: Deal, lines: PayoutLine[]): void {
@@ -74,6 +95,7 @@ export function referralPaidInMonth(deals: Deal[], partner: string | null | unde
 
 export async function createDeal(repo: Repo, draft: NewDealDraft, actorRepId: string): Promise<Deal> {
   const [settings, ctx, reps] = await Promise.all([repo.getSettings(), repo.loadContext(), repo.listReps()]);
+  draft = requireConsolidationGrid(draft);
   for (const [label, id] of [['Opener', draft.openerId], ['Closer', draft.closerId], ['Override', draft.overrideId]] as const) {
     if (id && !reps.some((r) => r.id === id)) throw new HttpError(400, `${label} rep ${id} does not exist`);
     const rep = id ? reps.find((r) => r.id === id) : null;
@@ -88,7 +110,10 @@ export async function createDeal(repo: Repo, draft: NewDealDraft, actorRepId: st
     deal = priceDeal(draft, {
       id: nextDealId(ctx.deals.map((d) => d.id)),
       today: today(),
-      rule: settings.products.find((p) => p.name === draft.product),
+      rule: (() => {
+         const configured = settings.products.find((p) => p.name === draft.product);
+         return isConsolidationParentProduct(draft.product) && configured ? { ...configured, incremental: true, multiDraw: false, drawInitial: null, drawSubsequent: null } : configured;
+       })(),
       lender: settings.lenders.find((l) => l.name === draft.lender),
       partner: settings.partners.find((p) => p.name === draft.referralPartner),
       referralPaidThisMonth: referralPaidInMonth(ctx.deals, draft.referralPartner, draft.fundedDate),
@@ -139,7 +164,7 @@ export async function updateTerms(repo: Repo, id: string, input: Partial<NewDeal
   const [settings, ctx] = await Promise.all([repo.getSettings(), repo.loadContext()]);
   if (ctx.lines.some((l) => l.dealId === id)) throw new HttpError(400, `${id} has payouts in the ledger — void them before changing its terms`);
   const s = deal.commSchedule;
-  const draft: NewDealDraft = {
+  let draft: NewDealDraft = {
     business: input.business ?? deal.business,
     merchantContact: input.merchantContact ?? deal.merchantContact,
     merchantEmail: input.merchantEmail ?? deal.merchantEmail,
@@ -171,13 +196,17 @@ export async function updateTerms(repo: Repo, id: string, input: Partial<NewDeal
     leadSource: input.leadSource === undefined ? deal.leadSource ?? null : input.leadSource,
     notes: input.notes === undefined ? deal.notes ?? null : input.notes,
   };
+  draft = requireConsolidationGrid(draft);
   if (draft.parentId && draft.parentId !== deal.parentId && !ctx.deals.some((d) => d.id === draft.parentId)) throw new HttpError(400, `Parent deal ${draft.parentId} does not exist`);
   let priced: Deal;
   try {
     priced = priceDeal(draft, {
       id,
       today: today(),
-      rule: settings.products.find((p) => p.name === draft.product),
+      rule: (() => {
+         const configured = settings.products.find((p) => p.name === draft.product);
+         return isConsolidationParentProduct(draft.product) && configured ? { ...configured, incremental: true, multiDraw: false, drawInitial: null, drawSubsequent: null } : configured;
+       })(),
       lender: settings.lenders.find((l) => l.name === draft.lender),
       partner: settings.partners.find((p) => p.name === draft.referralPartner),
       referralPaidThisMonth: referralPaidInMonth(ctx.deals.filter((d) => d.id !== id), draft.referralPartner, draft.fundedDate),

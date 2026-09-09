@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ValidationError, assertFundedDate, validateNewDeal } from '../src/validate.js';
+import { ValidationError, assertFundedDate, isConsolidationParentProduct, validateNewDeal } from '../src/validate.js';
 import type { ProductRule } from '../src/types.js';
 import { TODAY } from './fixtures.js';
 
@@ -42,5 +42,15 @@ describe('validateNewDeal', () => {
   });
   it('rejects an unknown product', () => {
     expect(validateNewDeal({ ...ok, product: 'WIDGET' }, undefined, TODAY)).toEqual(['Unknown product "WIDGET"']);
+  });
+});
+
+describe('isConsolidationParentProduct', () => {
+  it('recognizes parent products case-insensitively but not child disbursements', () => {
+    expect(isConsolidationParentProduct('consolidation')).toBe(true);
+    expect(isConsolidationParentProduct('CONSOLIDATION - UPFRONT COMM')).toBe(true);
+    expect(isConsolidationParentProduct('reverse - total funding')).toBe(true);
+    expect(isConsolidationParentProduct('CONSOLIDATION DISBURSEMENT')).toBe(false);
+    expect(isConsolidationParentProduct('REVERSE - DISBURSEMENT')).toBe(false);
   });
 });

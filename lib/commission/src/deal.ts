@@ -75,9 +75,10 @@ export function priceDeal(draft: NewDealDraft, ctx: PricingContext): Deal {
   if (!ctx.lender && draft.lender?.trim()) errors.push(`Unknown lender "${draft.lender}"`);
   if (draft.referralPartner && draft.referralPartner !== 'None' && !ctx.partner) errors.push(`Unknown referral partner "${draft.referralPartner}"`);
   if (draft.commAmounts && draft.commAmounts.length && rule0?.incremental) {
-    const total = draft.commAmounts.reduce((a, b) => a + b, 0);
-    if (Math.abs(total - draft.amount) > 1) errors.push(`The increment grid totals ${total.toLocaleString('en-US', { maximumFractionDigits: 2 })} but the funded amount is ${draft.amount.toLocaleString('en-US', { maximumFractionDigits: 2 })}`);
-    if (draft.commAmounts.some((a) => !(a >= 0))) errors.push('Every increment amount must be zero or more');
+    const totalCents = draft.commAmounts.reduce((a, b) => a + Math.round(b * 100), 0);
+    const amountCents = Math.round(draft.amount * 100);
+    if (draft.commAmounts.some((a) => !Number.isFinite(a) || Math.abs(a * 100 - Math.round(a * 100)) > 1e-7 || a <= 0)) errors.push('Every increment amount must be finite, use exact cents, and be greater than zero');
+    if (totalCents !== amountCents) errors.push(`The increment grid totals ${(totalCents / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })} but the funded amount is ${draft.amount.toLocaleString('en-US', { maximumFractionDigits: 2 })}`);
   }
   if (rule0?.multiDraw && draft.creditLine !== null && draft.creditLine !== undefined && (!(draft.creditLine > 0) || draft.amount > draft.creditLine + 0.005)) {
     errors.push(`Initial funding of ${draft.amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} cannot exceed the credit line of ${Number(draft.creditLine).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}`);

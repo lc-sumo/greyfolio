@@ -124,6 +124,8 @@ export interface WeeklySchedule {
    * (funded, gross, referral, net, rep shares) scales down to what was disbursed.
    */
   stoppedAfter?: number | null;
+  /** Exact final funded share for a manual opt-out when no increment grid exists. */
+  stoppedFundingRatio?: number | null;
   /**
    * The increment grid: what the merchant is disbursed at each increment,
    * when the increments are not equal (e.g. 15 weeks at 12,500, then 8,000,

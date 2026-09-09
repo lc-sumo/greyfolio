@@ -44,7 +44,10 @@ export function shareThrough(s: WeeklySchedule, n: number): number {
 /** Share of the plan that stands: 1 while the plan is intact, the increments taken once stopped. */
 export function disbursedRatio(s: WeeklySchedule | null | undefined): number {
   if (!s || s.weeks <= 0) return 1;
-  return isStopped(s) ? shareThrough(s, effectiveIncrements(s)) : 1;
+  if (!isStopped(s)) return 1;
+  return s.stoppedFundingRatio === null || s.stoppedFundingRatio === undefined
+    ? shareThrough(s, effectiveIncrements(s))
+    : clamp(s.stoppedFundingRatio, 0, 1);
 }
 
 /** Parse a pasted grid: one amount per line or comma-separated, with `25000 x15` shorthand. */
@@ -86,13 +89,17 @@ export function incrementParts(plannedGross: number, s: WeeklySchedule): Increme
   const rest = cents(plannedGross - upfront);
   const spread = (s.remainder ?? 'spread') === 'spread';
   const ratio = disbursedRatio(s);
-  const restEffective = cents(rest * ratio);
+  // Once a merchant opts out, total commission is repriced from the funding
+  // actually received. The upfront payment is a credit against that amount,
+  // not an additional fixed fee on top of prorated commission.
+  const effectiveGross = cents(plannedGross * ratio);
+  const restEffective = cents(Math.max(0, effectiveGross - upfront));
   return {
     upfront,
     rest,
     perIncrement: spread && s.weeks > 0 ? cents(rest / s.weeks) : 0,
     remainder: spread ? 0 : restEffective,
-    effectiveGross: cents(upfront + restEffective),
+    effectiveGross,
   };
 }
 
@@ -111,20 +118,22 @@ export function incrementFunding(plannedAmount: number, s: WeeklySchedule, i: nu
 }
 
 /** Funding progress of an incremental segment: how much has gone out to the merchant so far. */
-export function disbursementOf(plannedAmount: number, s: WeeklySchedule | null | undefined): { planned: number; perIncrement: number; disbursed: number; final: number; count: number; total: number; stopped: boolean; uneven: boolean } | null {
+export function disbursementOf(plannedAmount: number, s: WeeklySchedule | null | undefined): { planned: number; perIncrement: number; disbursed: number; final: number; count: number; total: number; stopped: boolean; uneven: boolean; manual?: true } | null {
   if (!s || s.weeks <= 0) return null;
   const total = effectiveIncrements(s);
   const count = clamp(s.received, 0, total);
   const grid = gridOf(s);
+  const manual = isStopped(s) && s.stoppedFundingRatio !== null && s.stoppedFundingRatio !== undefined;
   return {
     planned: plannedAmount,
-    perIncrement: grid ? incrementFunding(plannedAmount, s, count + 1) || incrementFunding(plannedAmount, s, count) : cents(plannedAmount / s.weeks),
-    disbursed: cents(plannedAmount * shareThrough(s, count)),
+    perIncrement: manual ? 0 : grid ? incrementFunding(plannedAmount, s, count + 1) || incrementFunding(plannedAmount, s, count) : cents(plannedAmount / s.weeks),
+    disbursed: cents(plannedAmount * (isStopped(s) ? disbursedRatio(s) : shareThrough(s, count))),
     final: cents(plannedAmount * disbursedRatio(s)),
     count,
     total,
     stopped: isStopped(s),
     uneven: !!grid,
+    ...(manual ? { manual: true as const } : {}),
   };
 }
 

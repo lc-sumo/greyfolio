@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { collectedOf, collectionLabel, scheduleEvents, scheduleFor, segmentStatus, withAmounts, withStopped } from '../src/collection.js';
-import { disbursementOf, parseIncrementGrid } from '../src/increments.js';
+import { collectedOf, collectionLabel, scheduleEvents, scheduleFor, segmentStatus, withAmounts, withRemainder, withStopped } from '../src/collection.js';
+import { disbursementOf, incrementParts, parseIncrementGrid } from '../src/increments.js';
 import { repLedger } from '../src/ledger.js';
 import { segments, totalFunded, totalGross, totalNet } from '../src/segments.js';
 import { dealLines, payableLines, repShare } from '../src/splits.js';
@@ -48,6 +48,58 @@ describe('a consolidation is funded in increments', () => {
     expect(withStopped(segments(plan(7, 7))[0]!, false)!.schedule!.stoppedAfter).toBeNull();
     expect(collectionLabel(segments({ ...plan(7, 7) })[0]!)).toBe('7/7 wks · opted out');
     expect(collectionLabel(segments({ ...plan(7, 7), commSchedule: withStopped(segments(plan(7, 7))[0]!, false)!.schedule })[0]!)).toBe('7/20 wks');
+  });
+  it('accepts the actual funded amount when no grid exists', () => {
+    const seg = segments(plan(12))[0]!;
+    const patch = withStopped(seg, true, 57_500)!;
+    const stopped = segments({ ...plan(12), commSchedule: patch.schedule })[0]!;
+    expect(disbursementOf(500_000, stopped.schedule)).toMatchObject({ disbursed: 57_500, final: 57_500, count: 12, stopped: true, manual: true, perIncrement: 0 });
+    expect(totalFunded({ ...plan(12), commSchedule: patch.schedule })).toBe(57_500);
+    expect(totalGross({ ...plan(12), commSchedule: patch.schedule })).toBe(5_750);
+  });
+});
+
+describe('partial upfront consolidation commission', () => {
+  const halfUpfront = (received: number, stoppedAfter: number | null = null) =>
+    makeDeal({
+      id: 'F10',
+      funded: 100_000,
+      commRate: 0.12,
+      lender: 'ROWAN',
+      commCollected: null,
+      commSchedule: { ...scheduleFor(rowan, '2026-06-01', { upfrontPct: 50, remainder: 'at-end' })!, upfrontReceived: true, received, stoppedAfter },
+      closerId: null,
+      overrideId: null,
+    });
+
+  it('pays half at funding and holds the other half until all increments clear', () => {
+    const d = halfUpfront(12);
+    const seg = segments(d)[0]!;
+    expect(incrementParts(seg.gross, seg.schedule!)).toMatchObject({ upfront: 6_000, remainder: 6_000, effectiveGross: 12_000 });
+    expect(collectedOf(seg)).toBe(6_000);
+    expect(seg.gross - collectedOf(seg)).toBe(6_000);
+    expect(() => withRemainder(seg, true)).toThrow(/until every funding increment clears/);
+  });
+
+  it('reprices an opt-out from actual funding and treats upfront as a credit', () => {
+    const d = halfUpfront(12, 12);
+    const seg = segments(d)[0]!;
+    expect(totalFunded(d)).toBe(60_000);
+    expect(totalGross(d)).toBe(7_200);
+    expect(incrementParts(seg.planned!.gross, seg.schedule!)).toMatchObject({ upfront: 6_000, remainder: 1_200, effectiveGross: 7_200 });
+    expect(collectedOf(seg)).toBe(6_000);
+    expect(seg.gross - collectedOf(seg)).toBe(1_200);
+    expect(withRemainder(seg, true)?.schedule?.remainderReceived).toBe(true);
+  });
+
+  it('makes upfront above final earned commission recoverable', () => {
+    const d = halfUpfront(6, 6);
+    const seg = segments(d)[0]!;
+    const parts = incrementParts(seg.planned!.gross, seg.schedule!);
+    expect(totalFunded(d)).toBe(30_000);
+    expect(totalGross(d)).toBe(3_600);
+    expect(parts).toMatchObject({ upfront: 6_000, remainder: 0, effectiveGross: 3_600 });
+    expect(parts.upfront - seg.gross).toBe(2_400);
   });
 });
 

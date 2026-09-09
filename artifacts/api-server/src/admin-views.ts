@@ -187,6 +187,8 @@ export interface SegmentView {
     cadenceDays: number;
     upfrontPct: number;
     upfrontAmount: number;
+    /** Upfront commission already received above commission earned on final funding. */
+    overpayment: number;
     upfrontReceived: boolean;
     remainder: 'spread' | 'at-end';
     remainderAmount: number;
@@ -273,6 +275,7 @@ function scheduleView(s: Segment, today: string, deal: Deal, ctx: LedgerContext,
     cadenceDays: sch.cadenceDays ?? 7,
     upfrontPct: sch.upfrontPct ?? 0,
     upfrontAmount: parts.upfront,
+    overpayment: sch.upfrontReceived ? Math.max(0, parts.upfront - s.gross) : 0,
     upfrontReceived: !!sch.upfrontReceived,
     remainder: sch.remainder ?? 'spread',
     remainderAmount: parts.remainder,

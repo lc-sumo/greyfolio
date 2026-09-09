@@ -132,6 +132,7 @@ export function withUpfront(seg: Pick<Segment, 'gross' | 'collected' | 'schedule
 export function withRemainder(seg: Pick<Segment, 'gross' | 'collected' | 'schedule'>, received: boolean): CollectionPatch | null {
   const s = schedOf(seg);
   if (!s || (s.remainder ?? 'spread') !== 'at-end') return null;
+  if (received && s.received < effectiveIncrements(s)) throw new Error('The final commission is not payable until every funding increment clears');
   return { collected: null, schedule: { ...s, remainderReceived: received } };
 }
 
@@ -171,7 +172,7 @@ export function scheduleEvents(seg: Pick<Segment, 'gross' | 'collected' | 'sched
     const expected = at(i - 1);
     const received = i <= s.received;
     const amount = gridOf(s) ? incrementCommission(plannedGrossOf(seg), s, i) : parts.perIncrement;
-    out.push({ kind: 'increment', n: i, label: `Increment ${i}`, expected, amount, received, overdue: !received && expected !== null && expected < today, funding: plannedAmount !== undefined ? incrementFunding(plannedAmount, s, i) : undefined });
+    out.push({ kind: 'increment', n: i, label: `Increment ${i}`, expected, amount, received, overdue: !received && expected !== null && expected < today, funding: plannedAmount !== undefined && (s.stoppedFundingRatio === null || s.stoppedFundingRatio === undefined) ? incrementFunding(plannedAmount, s, i) : undefined });
   }
   if (parts.remainder > 0) {
     const expected = at(eff);
@@ -243,11 +244,18 @@ export function withAmounts(seg: Pick<Segment, 'gross' | 'collected' | 'schedule
  * The merchant opted out of the rest of the plan: the increments received so
  * far are the increments there will be. `false` reopens the full plan.
  */
-export function withStopped(seg: Pick<Segment, 'gross' | 'collected' | 'schedule'>, stopped: boolean): CollectionPatch | null {
+export function withStopped(seg: Pick<Segment, 'gross' | 'collected' | 'schedule'> & { amount?: number; planned?: Segment['planned'] }, stopped: boolean, fundingReceived?: number | null): CollectionPatch | null {
   const s = schedOf(seg);
   if (!s) return null;
-  if (!stopped) return { collected: null, schedule: { ...s, stoppedAfter: null } };
-  return { collected: null, schedule: { ...s, stoppedAfter: clamp(s.received || 0, 0, s.weeks) } };
+  if (!stopped) return { collected: null, schedule: { ...s, stoppedAfter: null, stoppedFundingRatio: null } };
+  const plannedAmount = seg.planned?.amount ?? seg.amount;
+  let stoppedFundingRatio: number | null = null;
+  if (fundingReceived !== null && fundingReceived !== undefined) {
+    if (plannedAmount === undefined || !(plannedAmount > 0)) throw new Error('The planned funding amount is required');
+    if (!(fundingReceived >= 0) || fundingReceived > plannedAmount + 0.005) throw new Error('Funding received must be between zero and the original funding amount');
+    stoppedFundingRatio = fundingReceived / plannedAmount;
+  }
+  return { collected: null, schedule: { ...s, stoppedAfter: clamp(s.received || 0, 0, s.weeks), stoppedFundingRatio } };
 }
 
 export interface ScheduleOptions {

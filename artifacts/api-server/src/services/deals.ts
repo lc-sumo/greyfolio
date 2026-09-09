@@ -306,7 +306,7 @@ export type CollectionInput =
   | { segmentKey: SegmentKey; toggle: true }
   | { segmentKey: SegmentKey; markUpfront: boolean }
   | { segmentKey: SegmentKey; markRemainder: boolean }
-  | { segmentKey: SegmentKey; stopIncrements: boolean }
+  | { segmentKey: SegmentKey; stopIncrements: boolean; fundingReceived?: number | null }
   | { segmentKey: SegmentKey; amounts: number[] | null };
 
 /**
@@ -339,7 +339,11 @@ export async function setCollection(repo: Repo, id: string, input: CollectionInp
       }
       if (!patch) throw new HttpError(400, `${id} ${currentSeg.sk} is not funded in increments`);
     } else if ('stopIncrements' in input) {
-      patch = withStopped(currentSeg, !!input.stopIncrements);
+      try {
+        patch = withStopped(currentSeg, !!input.stopIncrements, input.fundingReceived === undefined ? null : Number(input.fundingReceived));
+      } catch (e) {
+        throw new HttpError(400, e instanceof Error ? e.message : 'Bad final funding amount');
+      }
       if (!patch) throw new HttpError(400, `${id} ${currentSeg.sk} is not funded in increments`);
     } else {
       const schedule = currentSeg.schedule;

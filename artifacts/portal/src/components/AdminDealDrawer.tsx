@@ -129,7 +129,8 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
                   </select>
                 )}
               </dd>
-              <dt>Funded amount</dt><dd>{money(d.funded)}{d.drawCount ? ` (${d.drawCount} draw${d.drawCount > 1 ? 's' : ''})` : ''}</dd>
+              <dt>{d.increments ? 'Original funding amount' : 'Funded amount'}</dt><dd>{money(d.increments?.planned ?? d.funded)}{d.drawCount ? ` (${d.drawCount} draw${d.drawCount > 1 ? 's' : ''})` : ''}</dd>
+              {d.increments && <><dt>Funding received</dt><dd><b>{money(d.increments.disbursed)}</b> <span className="subtle">· locked · {d.increments.lenderPaid}/{d.increments.total} increments{d.increments.stopped ? ' · final funded amount' : ''}</span></dd></>}
                {d.creditLine !== null && <><dt>LOC facility</dt><dd>{money(d.creditLine)} <span className="subtle">· {money(d.creditLineUsed ?? 0)} used · <b className="pos">{money(d.creditLineAvailable ?? 0)} available</b></span></dd></>}
               {d.factor !== null && <><dt>Factor rate</dt><dd>{d.factor.toFixed(2)}</dd></>}
               {d.apr !== null && <><dt>APR</dt><dd>{d.apr}%</dd></>}
@@ -163,7 +164,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
                 {s.schedule.amounts ? <> in the grid's proportions (disbursements step from <b className="num">{money(s.schedule.amounts[0]!)}</b> to <b className="num">{money(s.schedule.amounts[s.schedule.amounts.length - 1]!)}</b>)</> : s.schedule.remainder === 'spread' ? <> of <b className="num">{money(s.schedule.perWeek)}</b></> : <>, and <b className="num">{money(s.schedule.remainderAmount)}</b> once they are done</>}{s.schedule.startDate ? `, starting ${day(s.schedule.startDate)}` : ''}.
               </div>
               <div className="fundprog">
-                <div className="head"><span className="label">Funding progress</span><span className="num"><b>{money(s.schedule.disbursement.disbursed)}</b> <span className="subtle">of {money(s.schedule.disbursement.stopped ? s.schedule.disbursement.final : s.schedule.disbursement.planned)} · {s.schedule.disbursement.count}/{s.schedule.disbursement.total} increments × {money(s.schedule.disbursement.perIncrement)}</span></span></div>
+                 <div className="head"><span className="label">Funding progress</span><span className="num"><b>{money(s.schedule.disbursement.disbursed)}</b> <span className="subtle">of {money(s.schedule.disbursement.stopped ? s.schedule.disbursement.final : s.schedule.disbursement.planned)} · {s.schedule.disbursement.count}/{s.schedule.disbursement.total} increments{s.schedule.disbursement.manual ? ' · manually finalized' : ` × ${money(s.schedule.disbursement.perIncrement)}`}</span></span></div>
                 <div className="paidin wide"><i style={{ width: `${Math.round((s.schedule.disbursement.count / Math.max(1, s.schedule.disbursement.total)) * 100)}%`, background: 'var(--teal)' }} /></div>
                 {s.schedule.planned && <div className="subtle" style={{ fontSize: 12.5, marginTop: 4 }}>Merchant opted out after {s.schedule.disbursement.total} of {s.schedule.planned.increments} — entered as {money(s.schedule.planned.amount)}, now a {money(s.schedule.disbursement.final)} deal; commission {money(s.schedule.planned.gross)} → {money(s.gross)}.</div>}
               </div>
@@ -172,6 +173,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
                 {s.schedule.upfrontPct > 0 && <><dt>Upfront {money(s.schedule.upfrontAmount)}</dt><dd style={{ fontFamily: 'var(--sans)' }}>{s.schedule.upfrontReceived ? <span className="pos">received <button className="linkish" style={{ color: 'var(--ink-subtle)', padding: '0 4px' }} title="Recorded by mistake? Mark the upfront as not yet received" onClick={() => void collect({ segmentKey: s.sk, markUpfront: false }, `${d.id} — upfront marked not received`)}>undo</button></span> : <button className="btn" style={{ height: 26, padding: '0 8px', fontSize: 13.5 }} onClick={() => void collect({ segmentKey: s.sk, markUpfront: true }, `${d.id} — upfront ${money(s.schedule!.upfrontAmount)} received`)}>Record upfront received</button>}</dd></>}
                 <dt>Lender paid</dt><dd>{s.schedule.received}/{s.schedule.weeks} increments{s.schedule.remainder === 'spread' ? ` · ${money(s.schedule.perWeek * s.schedule.received)}` : ''}</dd>
                 <dt>Collected so far</dt><dd>{money(s.collected)} <span className="subtle">of {money(s.gross)}</span></dd>
+                {s.schedule.overpayment > 0 && <><dt className="neg">Upfront recovery due</dt><dd className="neg"><b>{money(s.schedule.overpayment)}</b> <span className="subtle">received above commission earned on final funding</span></dd></>}
                 {s.schedule.paidToReps.length > 0 && <><dt>Rep paid</dt><dd style={{ fontFamily: 'var(--sans)' }}>{s.schedule.paidToReps.map((r) => <div key={r.role}><span className="num">{r.paid}/{r.total}</span> <span className="subtle">{r.name} · {r.role}</span></div>)}</dd></>}
                 <dt>Still to come</dt><dd>{money(s.outstanding)}</dd>
                 <dt>Next expected</dt><dd>{s.schedule.nextExpected ? <>{s.schedule.nextExpected.expected ? day(s.schedule.nextExpected.expected) : '—'} <span className="subtle" style={{ fontFamily: 'var(--sans)' }}>· {s.schedule.nextExpected.label}{s.schedule.nextExpected.amount ? ` · ${money(s.schedule.nextExpected.amount)}` : ''}{s.schedule.nextExpected.overdue ? <b className="neg"> · overdue</b> : ''}</span></> : <span className="pos">Complete</span>}</dd>
@@ -200,7 +202,16 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
                 <button className="btn" disabled={s.schedule.received <= 0} onClick={() => { const n = s.schedule!.received; const event = s.schedule!.events.filter((e) => e.kind === 'increment')[n - 1]; if (window.confirm(`Remove collected increment ${n} of ${s.schedule!.weeks}${event ? ` (${money(event.amount)} · expected ${event.expected ? fullDay(event.expected) : 'no date'})` : ''}? This only reverses the most recently recorded lender collection.`)) void collect({ segmentKey: s.sk, recordWeeks: -1 }, `${d.id} — removed collected increment ${n} of ${s.schedule!.weeks}`); }}>Remove last increment</button>
                 {s.schedule.disbursement.stopped
                   ? <button className="btn" onClick={() => void collect({ segmentKey: s.sk, stopIncrements: false }, `${d.id} — plan reopened to ${s.schedule!.planned?.increments ?? s.schedule!.weeks} increments`)}>Reopen full plan</button>
-                  : <button className="btn" disabled={s.schedule.received >= s.schedule.weeks} title="The merchant is not taking the rest: the deal becomes what was disbursed so far" onClick={() => void collect({ segmentKey: s.sk, stopIncrements: true }, `${d.id} — merchant opted out after ${s.schedule!.received} increments`)}>Merchant opted out</button>}
+                  : <button className="btn" disabled={s.schedule.received >= s.schedule.weeks} title="The merchant is not taking the rest: the deal becomes what was disbursed so far" onClick={() => {
+                    let fundingReceived: number | undefined;
+                    if (!s.schedule!.amounts) {
+                      const entered = window.prompt('No increment grid is set. Enter the total funding the merchant actually received ($):', String(s.schedule!.disbursement.disbursed));
+                      if (entered === null) return;
+                      fundingReceived = Number(entered.replace(/[^0-9.]/g, ''));
+                      if (!(fundingReceived >= 0) || fundingReceived > s.schedule!.disbursement.planned) { setErr(`Funding received must be between $0 and ${money(s.schedule!.disbursement.planned)}`); return; }
+                    }
+                    void collect({ segmentKey: s.sk, stopIncrements: true, ...(fundingReceived === undefined ? {} : { fundingReceived }) }, `${d.id} — merchant opted out after ${s.schedule!.received} increments`);
+                  }}>Merchant opted out</button>}
               </div>
             </section>
           ))}

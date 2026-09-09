@@ -131,6 +131,8 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
   const gridMismatch = grid.length > 0 && Math.abs(gridTotal - num(f.amount)) > 1;
   useEffect(() => { if (grid.length) setF((s) => ({ ...s, commIncrements: String(grid.length) })); }, [grid.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const m = useMemo(() => liveMath(f, rule, partner, referralPaidThisMonth), [f, rule, partner, referralPaidThisMonth]);
+  const upfrontShare = incremental ? Math.min(1, Math.max(0, num(f.commUpfrontPct) / 100)) : 1;
+  const dueAtFunding = incremental ? upfrontShare : 1;
   const email = (f.merchantEmail ?? '').trim().toLowerCase();
   const priorDeals = useMemo(() => (email ? board.deals.filter((d) => d.merchantEmail && d.merchantEmail.toLowerCase() === email).sort((a, b) => b.date.localeCompare(a.date)) : []), [board.deals, email]);
   const client = priorDeals[0];
@@ -171,7 +173,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
         openerId: f.openerId || null, openerRate: num(f.openerRate), closerId: f.closerId || null, closerRate: num(f.closerRate), overrideId: f.overrideId || null, overrideRate: num(f.overrideRate),
         commIncrements: f.payout === 'upfront' ? 0 : incremental ? num(f.commIncrements) || null : null,
         commUpfrontPct: incremental ? num(f.commUpfrontPct) : null,
-        commRemainder: incremental ? (f.commRemainder as 'spread' | 'at-end') : null,
+        commRemainder: incremental ? (num(f.commUpfrontPct) > 0 ? 'at-end' : f.commRemainder as 'spread' | 'at-end') : null,
         commCadenceDays: incremental ? num(f.commCadenceDays) || 7 : null,
         commStartDate: incremental && f.commStartDate ? f.commStartDate : null,
         commAmounts: incremental && grid.length ? grid : null,
@@ -285,12 +287,12 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
         </Field>}
         {incremental && (
           <>
-            <Field label="Upfront share %" hint="e.g. 50 → half at funding, the rest per the structure below"><input inputMode="decimal" placeholder="0" value={f.commUpfrontPct} onChange={set('commUpfrontPct')} /></Field>
+            <Field label="Upfront share %" hint="e.g. 50 → half at funding; the remaining half is due only after every increment clears"><input inputMode="decimal" placeholder="0" value={f.commUpfrontPct} onChange={(e) => setF((s) => ({ ...s, commUpfrontPct: e.target.value, commRemainder: num(e.target.value) > 0 ? 'at-end' : s.commRemainder ?? 'spread' }))} /></Field>
             <Field label="Number of increments" hint={grid.length ? 'from the grid below' : undefined}><input inputMode="numeric" readOnly={grid.length > 0} className={grid.length ? 'ro' : undefined} value={f.commIncrements} onChange={set('commIncrements')} /></Field>
             <Field label="Remainder">
-              <select value={f.commRemainder} onChange={set('commRemainder')}>
+              <select value={num(f.commUpfrontPct) > 0 ? 'at-end' : f.commRemainder} disabled={num(f.commUpfrontPct) > 0} onChange={set('commRemainder')}>
                 <option value="spread">Spread evenly across the increments</option>
-                <option value="at-end">Paid once, when the increments are done</option>
+                <option value="at-end">Paid once, after all funding increments clear</option>
               </select>
             </Field>
             <Field label="Increment cadence">
@@ -322,7 +324,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
               </select>
             </Field>
             <Field label="Rate %"><input inputMode="decimal" value={f[`${role}Rate`]} onChange={set(`${role}Rate`)} /></Field>
-            <div><span className="label">Payout</span><div className="num" style={{ paddingTop: 8 }}>{money(role === 'opener' ? m.openerPayout : role === 'closer' ? m.closerPayout : m.overridePayout)}</div></div>
+             <div><span className="label">{incremental ? 'Payout due at funding' : 'Payout'}</span><div className="num" style={{ paddingTop: 8 }}>{money((role === 'opener' ? m.openerPayout : role === 'closer' ? m.closerPayout : m.overridePayout) * dueAtFunding)}</div></div>
           </div>
         ))}
       </div>
@@ -335,11 +337,12 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
           <dt>Payback{rule?.factor && num(f.factor) ? ` (×${num(f.factor)})` : ''}</dt><dd>{m.payback === null ? '—' : money(m.payback)}</dd>
           <dt>Payment · {f.frequency || 'Daily'}</dt><dd>{m.payment === null ? '—' : money(m.payment)}</dd>
           <dt>Term</dt><dd>{m.termDays ? `${m.termDays} business days` : '—'}</dd>
-          <dt className="grp">Commission</dt><dd />
-          <dt>Commission {num(f.commRate) ? `${num(f.commRate)}%` : ''}</dt><dd>{money(m.commission)}</dd>
+          <dt className="grp">{incremental ? 'Commission due at funding' : 'Commission'}</dt><dd />
+          <dt>Commission {num(f.commRate) ? `${num(f.commRate)}%` : ''}</dt><dd>{money(m.commission * dueAtFunding)}</dd>
           <dt>PSF {m.psfRate ? `${(m.psfRate * 100).toFixed(2).replace(/\.?0+$/, '')}%` : ''}</dt><dd>{money(m.psf)}</dd>
           <dt>Origination fee</dt><dd>{money(m.originationFee)}</dd>
-          <dt className="sum">Gross (comm + PSF + orig)</dt><dd className="sum">{money(m.gross)}</dd>
+          <dt className="sum">{incremental ? 'Gross due at funding' : 'Gross (comm + PSF + orig)'}</dt><dd className="sum">{money(m.gross * dueAtFunding)}</dd>
+          {incremental && <><dt>Planned gross after all increments</dt><dd>{money(m.gross)}</dd></>}
           <dt className="grp">Referral{partner && partner.name !== 'None' ? ` · ${partner.name} ${Math.round(partner.pct * 100)}%` : ''}</dt><dd />
           {partner && partner.name !== 'None' && partner.monthlyCap ? (
             <>
@@ -354,11 +357,11 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
           {(['opener', 'closer', 'override'] as const).map((role) => {
             const id = f[`${role}Id`];
             const who = assign.find((o) => o.id === id)?.label ?? '—';
-            const amt = role === 'opener' ? m.openerPayout : role === 'closer' ? m.closerPayout : m.overridePayout;
+            const amt = (role === 'opener' ? m.openerPayout : role === 'closer' ? m.closerPayout : m.overridePayout) * dueAtFunding;
             return <React.Fragment key={role}><dt>{role === 'override' ? 'Override' : role[0]!.toUpperCase() + role.slice(1)} · {who}{id ? ` ${num(f[`${role}Rate`])}% of gross` : ''}</dt><dd>{money(amt)}</dd></React.Fragment>;
           })}
-          <dt>Total rep payout</dt><dd style={{ color: 'var(--amber-bright)' }}>{money(m.totalRepPayout)}</dd>
-          <dt className="sum">House net</dt><dd className="sum" style={{ color: 'var(--teal-bright)' }}>{money(m.houseNet)}</dd>
+          <dt>{incremental ? 'Rep payout due at funding' : 'Total rep payout'}</dt><dd style={{ color: 'var(--amber-bright)' }}>{money(m.totalRepPayout * dueAtFunding)}</dd>
+          <dt className="sum">{incremental ? 'House net due at funding' : 'House net'}</dt><dd className="sum" style={{ color: 'var(--teal-bright)' }}>{money(m.houseNet * dueAtFunding)}</dd>
         </dl>
       </section>
       </div>
@@ -380,6 +383,6 @@ function structureNote(gross: number, f: Record<string, string>): string {
   const cadence = { '7': 'week', '14': 'two weeks', '30': 'month' }[f.commCadenceDays ?? '7'] ?? 'increment';
   if (!n) return 'Enter the number of increments to project the receipts.';
   const start = f.commStartDate || `one ${cadence} after funding`;
-  if (f.commRemainder === 'at-end') return `Expect ${money(upfront)} at funding${up ? '' : ' (nothing upfront)'}, then ${n} merchant increments every ${cadence} starting ${start}, and the remaining ${money(rest)} once they are done.`;
+  if (up > 0 || f.commRemainder === 'at-end') return `Expect ${money(upfront)} at funding${up ? '' : ' (nothing upfront)'}, then ${n} merchant increments every ${cadence} starting ${start}, and the remaining ${money(rest)} once they are done.`;
   return `Expect ${up ? `${money(upfront)} at funding, then ` : ''}${n} receipts of ${money(rest / n)} every ${cadence} starting ${start} (${money(rest)} in total).`;
 }

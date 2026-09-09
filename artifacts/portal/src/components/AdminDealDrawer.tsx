@@ -15,6 +15,9 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['admin-deal', id], queryFn: () => api<AdminDealDetail>(`/api/admin/deals/${encodeURIComponent(id)}`) });
   const d = q.data;
+  const clawbackRepTotal = d?.clawbacks.reduce((total, clawback) => total + clawback.slices.reduce((sum, slice) => sum + slice.share, 0), 0) ?? 0;
+  const clawbackRepRemaining = d?.clawbacks.reduce((total, clawback) => total + clawback.slices.reduce((sum, slice) => sum + slice.remaining, 0), 0) ?? 0;
+  const clawbackTotal = d?.clawbacks.reduce((total, clawback) => total + clawback.amount, 0) ?? 0;
   const [drawAmount, setDrawAmount] = useState('');
   const [drawTerm, setDrawTerm] = useState('');
   const [drawFactor, setDrawFactor] = useState('');
@@ -85,7 +88,11 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
             <div className={`big ${d.repBalance < 0 ? 'neg' : ''}`}>{money(d.repBalance)}</div>
             <div className="share-stats">
               <div><span>Currently payable</span><b>{money(d.repPayable)}</b></div>
-              <div><span>Contractual rep payout</span><b>{money(d.totalRepPayout)}</b></div>
+              <div>
+                <span>{clawbackRepTotal ? 'Rep commission after clawback' : 'Contractual rep payout'}</span>
+                <b className={clawbackRepTotal ? 'neg' : ''}>{money(d.totalRepPayout - clawbackRepTotal)}</b>
+                {clawbackRepTotal > 0 && <small className="subtle">original {money(d.totalRepPayout)} · clawback −{money(clawbackRepTotal)}</small>}
+              </div>
               <div><span>Gross</span><b>{money(d.gross)}</b></div>
               <div><span>Net after referral</span><b>{money(d.net)}</b></div>
               <div><span>House net</span><b style={{ color: 'var(--teal-bright)' }}>{money(d.houseNet)}</b></div>
@@ -130,12 +137,13 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
               {d.payback !== null && <><dt>Payback</dt><dd>{money(d.payback)}</dd></>}
               <dt>Clawback</dt><dd style={{ fontFamily: 'var(--sans)' }}>{d.clawbackWindow.cleared ? <span className="cleared"><i>✓</i> {d.clawbackWindow.label}</span> : <Pill tone={d.atRisk && (d.dealStatus === 'Default' || d.dealStatus === 'Slow Pay') ? 'red' : 'amber'}>{d.clawbackWindow.label}</Pill>}{d.clawbackWindow.clearsOn && <div style={{ display: 'grid', justifyItems: 'end', gap: 4, marginTop: 6 }}><ClawbackBar fundedDate={d.date} win={d.clawbackWindow} />{!d.clawbackWindow.cleared && <div className="subtle" style={{ fontSize: 13 }}>clears {fullDay(d.clawbackWindow.clearsOn)} · {d.clawbackWindow.source === 'lender' ? `${d.lender} policy` : 'default window'}</div>}</div>}</dd>
               {d.segments[0]?.payment != null && <><dt>Payment</dt><dd>{money(d.segments[0].payment)} <span className="subtle">/ {d.frequency.toLowerCase()}</span></dd></>}
-              <dt>Commission</dt><dd>{pct(d.commRate)}{d.psfPct ? ` + PSF ${pct(d.psfPct)}` : ''}{d.originationFee ? ` + ${money(d.originationFee)} orig.` : ''}{d.lineRate ? ` + ${pct(d.lineRate)} of the line (${money(d.lineFee)})` : ''}</dd>
+              <dt>Commission</dt><dd>{pct(d.commRate)}{d.psfPct ? ` + PSF ${pct(d.psfPct)}` : ''}{d.originationFee ? ` + ${money(d.originationFee)} orig.` : ''}{d.lineRate ? ` + ${pct(d.lineRate)} of the line (${money(d.lineFee)})` : ''}{clawbackTotal > 0 && <div className="neg" style={{ marginTop: 4 }}>Clawback −{money(clawbackTotal)} · rep commission adjusted −{money(clawbackRepTotal)}{clawbackRepRemaining > 0 ? ` · ${money(clawbackRepRemaining)} still owed` : ' · recovered'}</div>}</dd>
               <dt>Referral</dt><dd>{d.referralPartner ? `${d.referralPartner} ${pct(d.referralRate)} · ${money(d.referralFee)}` : '—'}</dd>
-              <dt>Commission status</dt><dd style={{ fontFamily: 'var(--sans)' }}>
+              <dt>{d.hasClawback ? 'Original lender payment' : 'Commission status'}</dt><dd style={{ fontFamily: 'var(--sans)' }}>
                 <select className="mini" value={d.commissionStatus} onChange={(e) => void statusChange('base', e.target.value, `${d.id} — commission ${e.target.value.toLowerCase()}`)}>
                   {['Waiting for payment', 'Partially Paid', 'YES - Paid In Full'].map((s) => <option key={s}>{s}</option>)}
                 </select>
+                {d.hasClawback && <div style={{ marginTop: 5 }}><Pill tone="red">Clawed back</Pill> <span className="subtle">The lender originally paid in full, then reversed {money(clawbackTotal)}.</span></div>}
               </dd>
               <dt>Deal status</dt><dd style={{ fontFamily: 'var(--sans)' }}>
                 <select className="mini" value={['Performing', 'Prospecting', 'Refi Ready'].includes(d.storedDealStatus) ? 'Performing' : d.storedDealStatus} onChange={(e) => run(`${d.id} — ${e.target.value}`, () => post(`/api/admin/deals/${id}/status`, { dealStatus: e.target.value }, 'PATCH'))}>

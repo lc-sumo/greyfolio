@@ -4,3 +4,4 @@
 - [Accounting mutation locks](accounting-mutation-locks.md) — Revalidate payout economics under the same deal locks used by monetary edits before writing ledger rows.
 - [Accounting sync serialization](accounting-sync-serialization.md) — Queue locally before reserving a cross-process advisory-lock connection, then open the accounting snapshot transaction.
 - [Lender-only clawbacks](lender-only-clawbacks.md) — Exclude merchant-paid PSF; post-payout defaults create separate rep debt without rewriting payouts.
+- [Consolidation commission schedule](consolidation-commission-schedule.md) — Base commission on funding increments, not the merchant’s longer repayment term.

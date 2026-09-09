@@ -72,11 +72,10 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
 
   const configuredRule = settings.products.find((p) => p.name === f.product);
   const isConsolidation = DEAL_PRODUCTS[2].names.includes((f.product ?? '').toUpperCase() as typeof DEAL_PRODUCTS[2]['names'][number]);
-  // Consolidation is entered as one funded deal. Legacy settings may still mark
-  // it as multi-draw/incremental for historical records, but those mechanics
-  // belong to the deal's own entry rather than separate product choices.
+  // Consolidation is entered as one funded deal with a commission-disbursement
+  // schedule. It is incremental, but it is not a line of credit/multi-draw product.
   const rule = configuredRule && isConsolidation
-    ? { ...configuredRule, multiDraw: false, incremental: false, drawInitial: null, drawSubsequent: null }
+    ? { ...configuredRule, multiDraw: false, incremental: true, drawInitial: null, drawSubsequent: null }
     : configuredRule;
   const lender = settings.lenders.find((l) => l.name === f.lender);
   // Increments are a consolidation thing: the structure block only shows (and only saves) on incremental products.

@@ -1,7 +1,8 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
-import { assertBalanced, cents, journalFingerprint, projectAccounting, type AccountingJournal, type Clawback, type Deal, type DealDraw, type LedgerContext, type PayrollRun, type Rep, type Team, type WeeklySchedule } from '@greystone/commission';
+import { assertBalanced, cents, journalFingerprint, projectAccounting, SYSTEM_CHART, type AccountingJournal, type Clawback, type Deal, type DealDraw, type LedgerContext, type PayrollRun, type Rep, type Team, type WeeklySchedule } from '@greystone/commission';
 import {
   commissionAuditLog,
+  commissionAccounts,
   commissionAccountingPeriods,
   commissionAccountingSourceChains,
   commissionJournalLines,
@@ -103,6 +104,9 @@ export function dbRepo(db: Database): Repo {
             // begins only after serialization, so its repeatable-read snapshot
             // cannot predate a wait on another accounting sync.
             return await db.transaction(async (tx) => {
+        // Publish synchronizes schema, not reference-data rows. Keep the fixed
+        // system chart complete before any projected journal line references it.
+        await tx.insert(commissionAccounts).values(SYSTEM_CHART.map((account) => ({ ...account, system: true, active: true }))).onConflictDoNothing();
         const initialSyncRows = await tx.select({ key: commissionSettings.key }).from(commissionSettings).where(eq(commissionSettings.key, 'accounting.initialSyncCompleted')).limit(1);
         const initialSyncCompleted = initialSyncRows.length > 0;
         let projectionResult: ReturnType<typeof projectAccounting> | null = null;

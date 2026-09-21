@@ -6,3 +6,4 @@
 - [Lender-only clawbacks](lender-only-clawbacks.md) — Exclude merchant-paid PSF; post-payout defaults create separate rep debt without rewriting payouts.
 - [Consolidation commission schedule](consolidation-commission-schedule.md) — Base commission on funding increments, not the merchant’s longer repayment term.
 - [Dedicated Sheets sync](dedicated-sheets-sync.md) — Bind one spreadsheet and favor at-most-once receipt handling over duplicate monetary mutations.
+- [pnpm filtered scripts](pnpm-filtered-scripts.md) — Include `run` when invoking filtered package scripts; otherwise pnpm may update dependencies instead.

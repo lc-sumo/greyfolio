@@ -73,7 +73,7 @@ export interface LenderClawbackPolicy { basis: ClawbackBasis; count: number; not
 export interface Lender { name: string; terms: 'upfront' | 'weekly'; weeks: number; upfrontPct?: number; remainder?: 'spread' | 'at-end'; cadenceDays?: number; products?: string[]; clawback?: LenderClawbackPolicy; locLineRate?: number; paymentTermsDays?: number; active?: boolean; renamedFrom?: string }
 export interface ClawbackWindow { basis: ClawbackBasis; count: number; source: 'lender' | 'product' | 'default'; clearsOn: string | null; cleared: boolean; daysLeft: number | null; label: string }
 export interface ReferralPartner { name: string; pct: number; monthlyCap: number | null; active?: boolean; renamedFrom?: string }
-export interface ProductRule { name: string; basis: 'funded' | 'draw' | 'payback'; factor: boolean; term: boolean; parent: boolean; comm: number; clawback: boolean; renewal: boolean; multiDraw: boolean; drawInitial: number | null; drawSubsequent: number | null; incremental?: boolean; active?: boolean; renamedFrom?: string }
+export interface ProductRule { name: string; kind?: 'consolidation-upfront' | 'consolidation-backend'; basis: 'funded' | 'draw' | 'payback'; factor: boolean; term: boolean; parent: boolean; comm: number; clawback: boolean; renewal: boolean; multiDraw: boolean; drawInitial: number | null; drawSubsequent: number | null; incremental?: boolean; active?: boolean; renamedFrom?: string }
 export interface Settings {
   lenders: Lender[]; partners: ReferralPartner[]; products: ProductRule[];
   thresholds: { clawbackWindowDays: number; paymentOverdueDays: number; renewalMark: number; additionalCapitalAfterDays: number };

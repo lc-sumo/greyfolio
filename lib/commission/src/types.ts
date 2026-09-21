@@ -15,6 +15,8 @@ export type LedgerRole = Role | 'Clawback recovery' | 'Void';
 export type SegmentKey = 'base' | `D${number}`;
 
 export type CommissionBasis = 'funded' | 'draw' | 'payback';
+/** Stable behavior classification. Display names are editable and are not identifiers. */
+export type ProductKind = 'consolidation-upfront' | 'consolidation-backend';
 
 export type CommissionStatus =
   | 'Waiting for payment'
@@ -72,6 +74,8 @@ export interface ReferralPartner {
 
 export interface ProductRule {
   name: string;
+  /** Canonical kind for products whose display name may be renamed. */
+  kind?: ProductKind;
   basis: CommissionBasis;
   /** Product carries a factor rate (else APR). */
   factor: boolean;

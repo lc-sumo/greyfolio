@@ -58,8 +58,13 @@ export function dealLines(deal: Deal, today = '9999-12-31'): RepLine[] {
     for (const r of roles) {
       if (events.length) {
         // Incremental segment: one unit per lender receipt, priced on that receipt's GROSS.
-        for (const e of events) {
-          const amount = cents(e.amount * r.rate);
+        let priorRole = 0;
+        for (let ei = 0; ei < events.length; ei++) {
+          const e = events[ei]!;
+          const amount = ei === events.length - 1
+            ? cents(cents(events.reduce((sum, x) => sum + x.amount, 0) * r.rate) - priorRole)
+            : cents(e.amount * r.rate);
+          priorRole += amount;
           if (amount <= 0) continue;
           out.push({
             key: unitKey(deal.id, r.role, seg.sk, e.n),

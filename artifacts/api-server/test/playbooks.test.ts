@@ -66,6 +66,8 @@ describe('deal facts', () => {
 describe('running playbooks', () => {
   it('fires once per deal, opens tasks, rolls rep emails up, logs firings, and honours repeat and closed tasks', async () => {
     const { repo, deps, mailer, admin } = await harness();
+    const evaluationDay = new Date().toISOString().slice(0, 10);
+    const repeatDay = new Date(Date.parse(`${evaluationDay}T00:00:00Z`) + 15 * 86_400_000).toISOString().slice(0, 10);
     const created = await admin.post('/api/admin/playbooks').send({ name: 'Half paid', rule: { trigger: { kind: 'paidInPct', atLeast: 25 }, actions: [{ kind: 'task', title: 'Call {{merchant}}', dueInDays: 3 }, { kind: 'emailRep', subject: '{{merchant}} at {{paidIn}}', body: 'Hi {{rep.first}}, {{merchant}} is {{paidIn}} in.' }, { kind: 'emailAdmins', subject: 'FYI {{merchant}}', body: '{{rep.name}} owns it' }], repeatDays: 14 } });
     expect(created.status).toBe(201);
     const pb = created.body;
@@ -73,7 +75,7 @@ describe('running playbooks', () => {
     expect(dry.body.matched).toBeGreaterThanOrEqual(2);
     expect(dry.body.wouldFire).toBe(dry.body.matched);
     expect(dry.body.preview.subject).toMatch(/at \d+%/);
-    const run1 = await runPlaybooks(deps, '2026-09-06', 'rep-leor');
+    const run1 = await runPlaybooks(deps, evaluationDay, 'rep-leor');
     expect(run1.fired).toBe(dry.body.matched);
     expect(run1.tasks).toBe(run1.fired);
     // Every matched deal is owned by Zach (closer): one rolled-up email to him, one to the admins.
@@ -83,7 +85,7 @@ describe('running playbooks', () => {
     expect(mailer.sent.some((m) => Array.isArray(m.to) && m.to.includes('leor@greystoneus.com') && /playbook alerts|FYI/.test(m.subject))).toBe(true);
     expect((await repo.listFirings()).length).toBe(run1.fired);
     // Same day again: nothing (open tasks hold it).
-    expect((await runPlaybooks(deps, '2026-09-06')).fired).toBe(0);
+    expect((await runPlaybooks(deps, evaluationDay)).fired).toBe(0);
     const dry2 = await admin.post('/api/admin/playbooks/dry-run').send({ rule: pb.rule, playbookId: pb.id });
     expect(dry2.body.wouldFire).toBe(0);
     expect(dry2.body.rows[0].held).toBe('open task');
@@ -100,9 +102,9 @@ describe('running playbooks', () => {
     expect((await repo.listTasks()).find((x) => x.id === t.id)!.status).toBe('done');
     // Two weeks later the rule may repeat — except on the deal whose task closed with "funded".
     for (const x of await repo.listTasks({ status: 'open' })) await repo.updateTask(x.id, { status: 'done', outcome: 'called', doneAt: new Date().toISOString() });
-    const run2 = await runPlaybooks(deps, '2026-09-21');
+    const run2 = await runPlaybooks(deps, repeatDay);
     expect(run2.fired).toBeGreaterThanOrEqual(1);
-    const later = (await repo.listFirings()).filter((f) => f.firedAt.startsWith('2026-09-21'));
+    const later = (await repo.listFirings()).filter((f) => f.firedAt.startsWith(repeatDay));
     expect(later.some((f) => f.dealId === t.dealId)).toBe(false);
     expect(later.some((f) => f.dealId !== t.dealId)).toBe(true);
     const log = await admin.get('/api/admin/playbooks/log');

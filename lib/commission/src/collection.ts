@@ -226,16 +226,22 @@ export function recordWeek(seg: Pick<Segment, 'gross' | 'collected' | 'schedule'
   return { collected: null, schedule: { ...s, received: clamp((s.received || 0) + delta, 0, effectiveIncrements(s)) } };
 }
 
-/** Replace the increment grid. The grid must total the plan's funded amount (within a dollar) and cover the increments already received. */
+/** Replace the increment grid. Exact cents and the received prefix are immutable. */
 export function withAmounts(seg: Pick<Segment, 'gross' | 'collected' | 'schedule'> & { amount?: number; planned?: Segment['planned'] }, amounts: number[] | null): CollectionPatch | null {
   const s = schedOf(seg);
   if (!s) return null;
-  if (!amounts || amounts.length === 0) return { collected: null, schedule: { ...s, amounts: null } };
+  if (!amounts || amounts.length === 0) throw new Error('The increment grid is required and cannot be cleared');
   const planned = seg.planned?.amount ?? seg.amount;
   const total = amounts.reduce((a, b) => a + b, 0);
-  if (planned !== undefined && Math.abs(total - planned) > 1) throw new Error(`The increment grid totals ${total.toFixed(2)} but the deal was entered at ${planned.toFixed(2)}`);
+  if (planned !== undefined && Math.round(total * 100) !== Math.round(planned * 100)) throw new Error(`The increment grid totals ${total.toFixed(2)} but the deal was entered at ${planned.toFixed(2)}`);
   if (amounts.length < (s.received || 0)) throw new Error(`The grid has ${amounts.length} increments but ${s.received} were already received`);
-  if (amounts.some((a) => !(a >= 0))) throw new Error('Every increment amount must be zero or more');
+  if (amounts.some((a) => !Number.isFinite(a) || a <= 0 || Math.abs(a * 100 - Math.round(a * 100)) > 1e-7)) throw new Error('Every increment amount must be a positive exact-cent amount');
+  // Legacy schedules may have received rows without an explicit grid. Their
+  // historical amounts are the equal schedule that was in force at receipt.
+  const old = s.amounts ?? (planned !== undefined && s.weeks > 0
+    ? Array.from({ length: s.weeks }, () => cents(planned / s.weeks))
+    : []);
+  for (let i = 0; i < (s.received || 0); i++) if (Math.round((old[i] ?? 0) * 100) !== Math.round(amounts[i]! * 100)) throw new Error(`Received increment ${i + 1} is immutable`);
   const stoppedAfter = s.stoppedAfter === null || s.stoppedAfter === undefined ? s.stoppedAfter : Math.min(s.stoppedAfter, amounts.length);
   return { collected: null, schedule: { ...s, weeks: amounts.length, amounts: amounts.map((a) => cents(a)), stoppedAfter } };
 }

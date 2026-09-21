@@ -1,4 +1,4 @@
-import { asRate, type Lender, type ProductRule, type ReferralPartner, type Rep, type Team } from '@greystone/commission';
+import { asRate, productKind, type Lender, type ProductRule, type ReferralPartner, type Rep, type Team, type ProductKind } from '@greystone/commission';
 import { HttpError } from '../http-error.js';
 import { actorOf, requireSuper } from './superadmin.js';
 import { NOTIFICATION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, type Repo, type Settings, type Thresholds } from '../repo.js';
@@ -112,7 +112,10 @@ export async function savePartners(repo: Repo, input: unknown, actorRepId: strin
   const partners: ReferralPartner[] = input.map((p: Record<string, unknown>) => {
     const cap = p.monthlyCap === null || p.monthlyCap === '' || p.monthlyCap === undefined ? null : Number(p.monthlyCap);
     if (cap !== null && !(cap >= 0)) throw new HttpError(400, `Partner "${p.name}" has an invalid cap`);
-    const partner: ReferralPartner = { name: cleanName(p.name, 'Referral partner'), pct: asRate(Number(p.pct) || 0), monthlyCap: cap };
+    const rawPct = Number(p.pct);
+    const pct = rawPct > 1 ? rawPct / 100 : rawPct;
+    if (!Number.isFinite(rawPct) || pct < 0 || pct > 1) throw new HttpError(400, `Partner "${p.name}" has an invalid referral rate`);
+    const partner: ReferralPartner = { name: cleanName(p.name, 'Referral partner'), pct, monthlyCap: cap };
     if (p.active === false) partner.active = false;
     return partner;
   });
@@ -127,11 +130,26 @@ export async function savePartners(repo: Repo, input: unknown, actorRepId: strin
 
 export async function saveProducts(repo: Repo, input: unknown, actorRepId: string): Promise<ProductRule[]> {
   if (!Array.isArray(input)) throw new HttpError(400, 'products must be a list');
+  const [settings, u] = await Promise.all([repo.getSettings(), usage(repo)]);
   const products: ProductRule[] = input.map((p: Record<string, unknown>) => {
     const basis = p.basis === 'draw' || p.basis === 'payback' ? p.basis : 'funded';
+    const inferred = productKind(typeof p.name === 'string' ? p.name : null);
+    const renamedFrom = typeof p.renamedFrom === 'string' ? p.renamedFrom : '';
+    const prior = settings.products.find((candidate) => candidate.name === renamedFrom)
+      ?? settings.products.find((candidate) => candidate.name === p.name);
+    const preserved = productKind(prior);
+    const supplied = p.kind === undefined || p.kind === null || p.kind === '' ? inferred ?? preserved : p.kind;
+    if (supplied !== undefined && supplied !== null && supplied !== 'consolidation-upfront' && supplied !== 'consolidation-backend') {
+      throw new HttpError(400, `Product "${String(p.name)}" has an invalid kind`);
+    }
+    // A legacy alias is never allowed to be silently reclassified.
+    if ((inferred && supplied && inferred !== supplied) || (preserved && supplied && preserved !== supplied)) {
+      throw new HttpError(400, `Product "${String(p.name)}" cannot change the consolidation kind`);
+    }
     const multiDraw = !!p.multiDraw;
     return {
       name: cleanName(p.name, 'Product'),
+      ...(supplied ? { kind: supplied as ProductKind } : {}),
       basis,
       factor: !!p.factor,
       term: !!p.term,
@@ -142,12 +160,11 @@ export async function saveProducts(repo: Repo, input: unknown, actorRepId: strin
       multiDraw,
       drawInitial: multiDraw ? asRate(Number(p.drawInitial) || 0) : null,
       drawSubsequent: multiDraw ? asRate(Number(p.drawSubsequent) || 0) : null,
-      incremental: !!p.incremental,
+      incremental: supplied === 'consolidation-upfront',
       ...(p.active === false ? { active: false } : {}),
     };
   });
   uniqueNames(products, 'product');
-  const [settings, u] = await Promise.all([repo.getSettings(), usage(repo)]);
   const renamedPr = await applyRenames(repo, 'product', settings.products.map((x) => x.name), input as Array<Record<string, unknown>>, actorRepId);
   guardRemovals(settings.products.map((x) => x.name), products.map((x) => x.name), u.products, 'Products', renamedPr);
   await repo.putSetting('products', products);

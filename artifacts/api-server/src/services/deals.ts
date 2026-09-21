@@ -19,8 +19,10 @@ import {
   type CommissionStatus,
   type Deal,
   type NewDealDraft,
+  type ProductRule,
   type SegmentKey,
   isConsolidationParentProduct,
+  lenderSupportsProduct,
 } from '@greystone/commission';
 import { clawbackRecovered, clawbackRecoveryExcesses, clawbackRepTotal, lenderClawbackBase, type Clawback, type DealDraw, type PayoutLine } from '@greystone/commission';
 import { HttpError } from '../http-error.js';
@@ -43,8 +45,8 @@ function bad(e: unknown): never {
 
 /** Portal/API consolidation entries must carry their deal-specific funding grid.
  * Importers can continue calling priceDeal directly without a grid for legacy data. */
-function requireConsolidationGrid(draft: NewDealDraft): NewDealDraft {
-  const incremental = isConsolidationParentProduct(draft.product);
+function requireConsolidationGrid(draft: NewDealDraft, rule?: ProductRule): NewDealDraft {
+  const incremental = isConsolidationParentProduct(rule ?? draft.product);
   if (!incremental) return draft;
   const amounts = draft.commAmounts;
   if (!Array.isArray(amounts) || amounts.length === 0) {
@@ -95,7 +97,12 @@ export function referralPaidInMonth(deals: Deal[], partner: string | null | unde
 
 export async function createDeal(repo: Repo, draft: NewDealDraft, actorRepId: string): Promise<Deal> {
   const [settings, ctx, reps] = await Promise.all([repo.getSettings(), repo.loadContext(), repo.listReps()]);
-  draft = requireConsolidationGrid(draft);
+  const configuredRule = settings.products.find((p) => p.name === draft.product);
+  const configuredLender = settings.lenders.find((l) => l.name === draft.lender);
+  if (!configuredRule) throw new HttpError(400, `Unknown product "${draft.product}"`);
+  if (!configuredLender) throw new HttpError(400, `Unknown lender "${draft.lender}"`);
+  if (!lenderSupportsProduct(configuredLender, configuredRule)) throw new HttpError(400, `Lender "${draft.lender}" is not configured for product "${draft.product}"`);
+  draft = requireConsolidationGrid(draft, configuredRule);
   for (const [label, id] of [['Opener', draft.openerId], ['Closer', draft.closerId], ['Override', draft.overrideId]] as const) {
     if (id && !reps.some((r) => r.id === id)) throw new HttpError(400, `${label} rep ${id} does not exist`);
     const rep = id ? reps.find((r) => r.id === id) : null;
@@ -112,7 +119,7 @@ export async function createDeal(repo: Repo, draft: NewDealDraft, actorRepId: st
       today: today(),
       rule: (() => {
          const configured = settings.products.find((p) => p.name === draft.product);
-         return isConsolidationParentProduct(draft.product) && configured ? { ...configured, incremental: true, multiDraw: false, drawInitial: null, drawSubsequent: null } : configured;
+         return isConsolidationParentProduct(configured) && configured ? { ...configured, incremental: true, multiDraw: false, drawInitial: null, drawSubsequent: null } : configured;
        })(),
       lender: settings.lenders.find((l) => l.name === draft.lender),
       partner: settings.partners.find((p) => p.name === draft.referralPartner),
@@ -162,6 +169,11 @@ export interface SplitsInput {
 export async function updateTerms(repo: Repo, id: string, input: Partial<NewDealDraft>, actorRepId: string): Promise<Deal> {
   const deal = await requireDeal(repo, id);
   const [settings, ctx] = await Promise.all([repo.getSettings(), repo.loadContext()]);
+  const selectedProduct = settings.products.find((p) => p.name === (input.product ?? deal.product));
+  const selectedLender = settings.lenders.find((l) => l.name === (input.lender ?? deal.lender));
+  if (!selectedProduct) throw new HttpError(400, `Unknown product "${input.product ?? deal.product}"`);
+  if (!selectedLender) throw new HttpError(400, `Unknown lender "${input.lender ?? deal.lender}"`);
+  if (!lenderSupportsProduct(selectedLender, selectedProduct)) throw new HttpError(400, `Lender "${selectedLender.name}" is not configured for product "${selectedProduct.name}"`);
   if (ctx.lines.some((l) => l.dealId === id)) throw new HttpError(400, `${id} has payouts in the ledger — void them before changing its terms`);
   const s = deal.commSchedule;
   let draft: NewDealDraft = {
@@ -196,7 +208,7 @@ export async function updateTerms(repo: Repo, id: string, input: Partial<NewDeal
     leadSource: input.leadSource === undefined ? deal.leadSource ?? null : input.leadSource,
     notes: input.notes === undefined ? deal.notes ?? null : input.notes,
   };
-  draft = requireConsolidationGrid(draft);
+  draft = requireConsolidationGrid(draft, selectedProduct);
   if (draft.parentId && draft.parentId !== deal.parentId && !ctx.deals.some((d) => d.id === draft.parentId)) throw new HttpError(400, `Parent deal ${draft.parentId} does not exist`);
   let priced: Deal;
   try {
@@ -205,7 +217,7 @@ export async function updateTerms(repo: Repo, id: string, input: Partial<NewDeal
       today: today(),
       rule: (() => {
          const configured = settings.products.find((p) => p.name === draft.product);
-         return isConsolidationParentProduct(draft.product) && configured ? { ...configured, incremental: true, multiDraw: false, drawInitial: null, drawSubsequent: null } : configured;
+         return isConsolidationParentProduct(configured) && configured ? { ...configured, incremental: true, multiDraw: false, drawInitial: null, drawSubsequent: null } : configured;
        })(),
       lender: settings.lenders.find((l) => l.name === draft.lender),
       partner: settings.partners.find((p) => p.name === draft.referralPartner),
@@ -217,7 +229,19 @@ export async function updateTerms(repo: Repo, id: string, input: Partial<NewDeal
   // Carry collection progress across the re-price.
   let commSchedule = priced.commSchedule;
   let commCollected = priced.commCollected;
+  const receivedActivity = !!s && (s.received > 0 || !!s.upfrontReceived || !!s.remainderReceived);
+  if (s && receivedActivity && !commSchedule) {
+    throw new HttpError(400, 'The incremental schedule has received commission history and cannot be removed');
+  }
   if (commSchedule && s) {
+    if (commSchedule.weeks < s.received) throw new HttpError(400, `The grid has ${commSchedule.weeks} increments but ${s.received} were already received`);
+    const oldAmounts = s.amounts ?? (s.weeks > 0 ? Array.from({ length: s.weeks }, () => Math.round((deal.funded / s.weeks) * 100) / 100) : []);
+    const nextAmounts = commSchedule.amounts ?? [];
+    for (let i = 0; i < s.received; i++) {
+      if (Math.round((oldAmounts[i] ?? 0) * 100) !== Math.round((nextAmounts[i] ?? 0) * 100)) {
+        throw new HttpError(400, `Received increment ${i + 1} is immutable`);
+      }
+    }
     commSchedule = { ...commSchedule, received: Math.min(s.received, commSchedule.weeks), upfrontReceived: commSchedule.upfrontPct ? !!s.upfrontReceived : undefined, remainderReceived: commSchedule.remainder === 'at-end' ? !!s.remainderReceived : undefined, stoppedAfter: s.stoppedAfter === null || s.stoppedAfter === undefined ? s.stoppedAfter : Math.min(s.stoppedAfter, commSchedule.weeks) };
   } else if (!commSchedule && typeof deal.commCollected === 'number') {
     commCollected = Math.min(deal.commCollected, priced.gross);
@@ -225,6 +249,9 @@ export async function updateTerms(repo: Repo, id: string, input: Partial<NewDeal
   const { id: _id, draws: _draws, opportunityId: _opp, dealStatus: _st, repPaid: _rp, lenderPaid: _lp, crmId: _crm, ...pricedFields } = priced as Deal & { crmId?: string | null };
   const patch = { ...pricedFields, commSchedule, commCollected, parentId: draft.parentId || null, opportunityId: draft.parentId || id };
   await repo.updateDealLocked(id, patch, (current, lockedLines, lockedClawbacks) => {
+    if (JSON.stringify(current.commSchedule) !== JSON.stringify(deal.commSchedule) || current.commCollected !== deal.commCollected) {
+      throw new HttpError(409, `${id} collection changed while its terms were being edited — reload and try again`);
+    }
     const proposed = { ...current, ...patch };
     guardDealClawbacks(proposed, lockedLines, lockedClawbacks);
     if (lockedLines.length) throw new HttpError(400, `${id} has payouts in the ledger — void them before changing its terms`);
@@ -305,7 +332,6 @@ export async function addDraw(repo: Repo, id: string, input: { amount: number; d
   if (date > today()) throw new HttpError(400, `Draw date ${date} is in the future`);
   const lender = settings.lenders.find((l) => l.name === deal.lender);
   const partner = settings.partners.find((p) => p.name === deal.referralPartner) ?? null;
-  const incremental = !!settings.products.find((p) => p.name === deal.product)?.incremental;
   let draw: DealDraw;
   try {
     draw = await repo.insertDrawLocked(id, (current, lockedLines, lockedClawbacks) => {
@@ -315,8 +341,8 @@ export async function addDraw(repo: Repo, id: string, input: { amount: number; d
         partner,
         termDays: input.termDays ? Number(input.termDays) : null,
         factor: input.factor ? Number(input.factor) : null,
-        // LOC draws are paid upfront; only an incremental (consolidation) product schedules its draws.
-        schedule: incremental ? scheduleFor(lender, date) : null,
+        // Draw rows never own a nested consolidation funding schedule.
+        schedule: null,
       });
       guardDealClawbacks({ ...current, draws: [...current.draws, proposedDraw] }, lockedLines, lockedClawbacks);
       return proposedDraw;

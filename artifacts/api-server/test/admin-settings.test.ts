@@ -88,6 +88,16 @@ describe('lists with in-use guards', () => {
     expect(res.body.products.find((p: { name: string }) => p.name === 'MEGA LOC')).toMatchObject({ multiDraw: true, drawInitial: 0.07, drawSubsequent: 0.035 });
     expect((await admin.put('/api/admin/settings/products').send({ products: current.filter((p: { name: string }) => p.name !== 'MCA') })).body.error).toMatch(/MCA \(3 deals\)/);
   });
+  it('products: a legacy consolidation keeps its canonical kind when renamed', async () => {
+    const { admin } = await harness();
+    const current = (await admin.get('/api/admin/settings')).body.products;
+    const products = current.map((p: { name: string; kind?: string }) => p.name === 'CONSOLIDATION - UPFRONT COMM'
+      ? { ...p, name: 'CUSTOM CONSOLIDATION', kind: undefined, renamedFrom: p.name }
+      : p);
+    const res = await admin.put('/api/admin/settings/products').send({ products });
+    expect(res.status).toBe(200);
+    expect(res.body.products.find((p: { name: string }) => p.name === 'CUSTOM CONSOLIDATION')).toMatchObject({ kind: 'consolidation-upfront', incremental: true });
+  });
   it('thresholds and CRM validate and take effect', async () => {
     const { admin } = await harness();
     const t = await admin.put('/api/admin/settings/thresholds').send({ clawbackWindowDays: 45, paymentOverdueDays: 21, renewalMark: 50, additionalCapitalAfterDays: 30 });

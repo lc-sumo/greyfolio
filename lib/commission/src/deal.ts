@@ -2,7 +2,7 @@ import { commissionFor } from './commission.js';
 import { scheduleFor } from './collection.js';
 import { asRate, cents } from './money.js';
 import type { Deal, Lender, ProductRule, ReferralPartner } from './types.js';
-import { ValidationError, validateNewDeal } from './validate.js';
+import { ValidationError, isConsolidationParentProduct, lenderSupportsProduct, validateNewDeal } from './validate.js';
 
 /** What the new-deal form submits. Rates may be fractions (0.12) or percents (12). */
 export interface NewDealDraft {
@@ -68,13 +68,18 @@ export interface PricingContext {
 export function priceDeal(draft: NewDealDraft, ctx: PricingContext): Deal {
   const rule0 = ctx.rule;
   const errors = validateNewDeal(
-    { business: draft.business, fundedDate: draft.fundedDate, lender: draft.lender, amount: draft.amount, product: draft.product, parentId: draft.parentId ?? null },
+    { business: draft.business, fundedDate: draft.fundedDate, lender: draft.lender, amount: draft.amount, product: draft.product, parentId: draft.parentId ?? null, factor: draft.factor, termDays: draft.termDays, creditLine: draft.creditLine, commRate: draft.commRate ?? (rule0?.comm ?? null), psfPct: draft.psfPct, lineRate: draft.lineRate, openerId: draft.openerId, openerRate: draft.openerRate, closerId: draft.closerId, closerRate: draft.closerRate, overrideId: draft.overrideId, overrideRate: draft.overrideRate, originationFee: draft.originationFee },
     ctx.rule,
     ctx.today,
   );
   if (!ctx.lender && draft.lender?.trim()) errors.push(`Unknown lender "${draft.lender}"`);
+  if (ctx.lender && !lenderSupportsProduct(ctx.lender, rule0)) errors.push(`Lender "${ctx.lender.name}" is not configured for product "${draft.product}"`);
+  if (ctx.partner) {
+    const rr = ctx.partner.pct;
+    if (!Number.isFinite(rr) || rr < 0 || rr > 1) errors.push('Referral rate must be between 0% and 100%');
+  }
   if (draft.referralPartner && draft.referralPartner !== 'None' && !ctx.partner) errors.push(`Unknown referral partner "${draft.referralPartner}"`);
-  if (draft.commAmounts && draft.commAmounts.length && rule0?.incremental) {
+  if (draft.commAmounts && draft.commAmounts.length && isConsolidationParentProduct(rule0)) {
     const totalCents = draft.commAmounts.reduce((a, b) => a + Math.round(b * 100), 0);
     const amountCents = Math.round(draft.amount * 100);
     if (draft.commAmounts.some((a) => !Number.isFinite(a) || Math.abs(a * 100 - Math.round(a * 100)) > 1e-7 || a <= 0)) errors.push('Every increment amount must be finite, use exact cents, and be greater than zero');
@@ -84,7 +89,7 @@ export function priceDeal(draft: NewDealDraft, ctx: PricingContext): Deal {
     errors.push(`Initial funding of ${draft.amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} cannot exceed the credit line of ${Number(draft.creditLine).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}`);
   }
   if (errors.length) throw new ValidationError(errors);
-  const rule = ctx.rule!;
+  const rule = isConsolidationParentProduct(ctx.rule) ? { ...ctx.rule!, incremental: true, multiDraw: false, drawInitial: null, drawSubsequent: null } : ctx.rule!;
 
   const factor = rule.factor ? draft.factor ?? null : null;
   const apr = rule.factor ? null : draft.apr ?? null;
@@ -119,8 +124,9 @@ export function priceDeal(draft: NewDealDraft, ctx: PricingContext): Deal {
     closerRate,
     overrideRate,
   });
-  // Increments are a consolidation thing: LOCs and single-payout products never get a schedule.
-  const schedule = !rule.incremental ? null : scheduleFor(ctx.lender, draft.fundedDate, { increments: draft.commIncrements, upfrontPct: draft.commUpfrontPct, remainder: draft.commRemainder, cadenceDays: draft.commCadenceDays, startDate: draft.commStartDate, amounts: draft.commAmounts ?? null });
+  // Only the consolidation parent owns the funding schedule. Backend child
+  // rows, LOC draws, and single-payout products never receive nested schedules.
+  const schedule = !isConsolidationParentProduct(rule) ? null : scheduleFor(ctx.lender, draft.fundedDate, { increments: draft.commIncrements, upfrontPct: draft.commUpfrontPct, remainder: draft.commRemainder, cadenceDays: draft.commCadenceDays, startDate: draft.commStartDate, amounts: draft.commAmounts ?? null });
 
   return {
     id: ctx.id,

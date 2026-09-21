@@ -136,13 +136,20 @@ describe('the increment grid: uneven disbursements', () => {
     expect(totalGross(d)).toBe(20_250);
     expect(scheduleEvents(segments(d)[0]!, '2026-09-01')).toHaveLength(16);
   });
-  it('withAmounts replaces the grid on a live deal and refuses one that does not total the plan or cuts received increments', () => {
+  it('withAmounts preserves received increments, allows future edits, and keeps the required grid', () => {
     const seg = segments(uneven(5))[0]!;
-    const patch = withAmounts(seg, parseIncrementGrid('10000 x25'))!;
-    expect(patch.schedule!.weeks).toBe(25);
+    const futureEdit = [...grid];
+    futureEdit[5] = 13_000;
+    futureEdit[6] = 12_000;
+    const patch = withAmounts(seg, futureEdit)!;
+    expect(patch.schedule!.weeks).toBe(20);
+    expect(patch.schedule!.amounts!.slice(0, 5)).toEqual(grid.slice(0, 5));
+    expect(patch.schedule!.amounts!.slice(5, 7)).toEqual([13_000, 12_000]);
+    expect(() => withAmounts(seg, parseIncrementGrid('10000 x25'))).toThrow(/Received increment 1 is immutable/);
     expect(() => withAmounts(seg, [100_000, 100_000])).toThrow(/totals/);
     expect(() => withAmounts(seg, parseIncrementGrid('125000 x2'))).toThrow(/already received/);
-    expect(withAmounts(seg, null)!.schedule!.amounts).toBeNull();
+    expect(() => withAmounts(seg, null)).toThrow(/required and cannot be cleared/);
+    expect(() => withAmounts(seg, [])).toThrow(/required and cannot be cleared/);
   });
 });
 

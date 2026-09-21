@@ -71,6 +71,22 @@ export function parseIncrementGrid(text: string): number[] {
   return out;
 }
 
+/** Strict validator shared by portal and domain callers. Returns a reason rather than silently dropping tokens. */
+export function validateIncrementGrid(textOrAmounts: string | number[], planned: number): string | null {
+  if (!Number.isFinite(planned) || planned <= 0) return 'The planned funding amount must be finite and positive';
+  if (typeof textOrAmounts === 'string' && textOrAmounts.trim() === '') return 'An increment grid is required';
+  const amounts = typeof textOrAmounts === 'string' ? parseIncrementGrid(textOrAmounts) : textOrAmounts;
+  if (!amounts.length) return 'Enter at least one increment amount';
+  if (amounts.some((a) => !Number.isFinite(a) || a <= 0 || Math.abs(a * 100 - Math.round(a * 100)) > 1e-7)) return 'Every increment must be a positive exact-cent amount';
+  const total = amounts.reduce((s, a) => s + Math.round(a * 100), 0);
+  if (total !== Math.round(planned * 100)) return `The increment grid must total ${planned.toFixed(2)}`;
+  if (typeof textOrAmounts === 'string') {
+    const meaningful = textOrAmounts.replace(/,(?=\d{3}(?!\d))/g, '').split(/[\n,;]+/).filter((x) => x.trim());
+    if (meaningful.length !== amounts.length && !meaningful.every((x) => /[\d.,$]+\s*[x×*]\s*\d+/i.test(x.trim()))) return 'The increment grid contains malformed amounts';
+  }
+  return null;
+}
+
 export interface IncrementParts {
   upfront: number;
   /** Commission per increment, on the PLANNED gross (spread structure); 0 when the rest is paid at the end. */
@@ -108,7 +124,16 @@ export function incrementCommission(plannedGross: number, s: WeeklySchedule, i: 
   const p = incrementParts(plannedGross, s);
   if ((s.remainder ?? 'spread') !== 'spread') return 0;
   const w = incrementWeights(s)[i - 1] ?? 0;
-  return cents(p.rest * w);
+  const effective = effectiveIncrements(s);
+  // Allocate the residual cent to the final effective unit. This makes the
+  // event ledger conserve the exact post-upfront gross, including awkward
+  // uneven grids and stopped plans.
+  if (i === effective) {
+    let prior = 0;
+    for (let n = 1; n < i; n++) prior += cents(Math.max(0, p.effectiveGross - p.upfront) * (incrementWeights(s)[n - 1] ?? 0));
+    return cents(Math.max(0, p.effectiveGross - p.upfront) - prior);
+  }
+  return cents(Math.max(0, p.effectiveGross - p.upfront) * w);
 }
 
 /** What the merchant is disbursed at increment `i` (1-based). */

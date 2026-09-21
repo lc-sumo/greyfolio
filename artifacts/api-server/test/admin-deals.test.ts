@@ -88,7 +88,7 @@ describe('POST /api/admin/deals', () => {
     expect(sch.disbursement).toMatchObject({ planned: 250_000, uneven: true, count: 0 });
     const after = (await admin.post(`/api/admin/deals/${res.body.id}/collection`).send({ segmentKey: 'base', recordWeeks: 16 })).body;
     expect(after.segments[0].schedule.disbursement).toMatchObject({ disbursed: 202_500, count: 16 });
-    const regrid = await admin.post(`/api/admin/deals/${res.body.id}/collection`).send({ segmentKey: 'base', amounts: [...Array(16).fill(12_500), 25_000, 25_000] });
+    const regrid = await admin.post(`/api/admin/deals/${res.body.id}/collection`).send({ segmentKey: 'base', amounts: [...grid.slice(0, 16), 20_000, 27_500] });
     expect(regrid.status).toBe(200);
     expect(regrid.body.segments[0].schedule.weeks).toBe(18);
     expect((await admin.post(`/api/admin/deals/${res.body.id}/collection`).send({ segmentKey: 'base', amounts: [1, 2] })).status).toBe(400);
@@ -125,6 +125,36 @@ describe('POST /api/admin/deals', () => {
     expect(edited.status).toBe(200);
     expect(edited.body.segments[0].schedule).toMatchObject({ weeks: 3, amounts: [10_000, 20_000, 70_000] });
   });
+  it('terms edits cannot rewrite received increments but may change the future suffix', async () => {
+    const { admin } = await harness();
+    const created = await admin.post('/api/admin/deals').send({ ...draft, lender: 'GFE', product: CONSOL, amount: 100_000, commAmounts: [25_000, 25_000, 25_000, 25_000], referralPartner: null });
+    await admin.post(`/api/admin/deals/${created.body.id}/collection`).send({ segmentKey: 'base', recordWeeks: 2 });
+    const rejected = await admin.patch(`/api/admin/deals/${created.body.id}/terms`).send({ commAmounts: [20_000, 30_000, 25_000, 25_000] });
+    expect(rejected.status).toBe(400);
+    expect(rejected.body.error).toMatch(/Received increment 1 is immutable/);
+    const edited = await admin.patch(`/api/admin/deals/${created.body.id}/terms`).send({ commAmounts: [25_000, 25_000, 20_000, 30_000] });
+    expect(edited.status).toBe(200);
+    expect(edited.body.segments[0].schedule).toMatchObject({ received: 2, amounts: [25_000, 25_000, 20_000, 30_000] });
+  });
+  it('terms edits cannot overwrite collection progress recorded after the edit began', async () => {
+    const { admin, repo } = await harness();
+    const created = await admin.post('/api/admin/deals').send({ ...draft, lender: 'GFE', product: CONSOL, amount: 100_000, commAmounts: [25_000, 25_000, 25_000, 25_000], referralPartner: null });
+    const original = repo.updateDealLocked.bind(repo);
+    let injected = false;
+    repo.updateDealLocked = async (id, patch, validate) => {
+      if (!injected && id === created.body.id) {
+        injected = true;
+        const index = repo.data.deals.findIndex((deal) => deal.id === id);
+        const current = repo.data.deals[index]!;
+        repo.data.deals[index] = { ...current, commSchedule: { ...current.commSchedule!, received: 1 } };
+      }
+      return original(id, patch, validate);
+    };
+    const res = await admin.patch(`/api/admin/deals/${created.body.id}/terms`).send({ commAmounts: [25_000, 25_000, 20_000, 30_000] });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/collection changed.*reload/i);
+    expect(repo.data.deals.find((deal) => deal.id === created.body.id)!.commSchedule?.received).toBe(1);
+  });
   it('treats Reverse total funding as a grid-backed parent even when settings says non-incremental', async () => {
     const { admin, repo } = await harness();
     const settings = await repo.getSettings();
@@ -143,12 +173,18 @@ describe('POST /api/admin/deals', () => {
     expect(res.status).toBe(201);
     expect(res.body.segments[0].schedule).toBeNull();
   });
+  it('does not create a nested grid for Consolidation disbursement child products', async () => {
+    const { admin } = await harness();
+    const res = await admin.post('/api/admin/deals').send({ ...draft, product: 'CONSOLIDATION DISBURSEMENT', parentId: 'F1', lender: 'GFE', amount: 1_000, factor: undefined, termDays: undefined, referralPartner: null });
+    expect(res.status).toBe(201);
+    expect(res.body.segments[0].schedule).toBeNull();
+  });
   it('increments are a consolidation thing: MCAs, LOCs and LOC draws are paid upfront even on a weekly lender', async () => {
     const { admin } = await harness();
     const mca = await admin.post('/api/admin/deals').send({ ...draft, lender: 'GFE' });
     expect(mca.body.segments[0].schedule).toBeNull();
     expect(mca.body.lenderPaidLabel).toBe('Not collected');
-    const loc = await admin.post('/api/admin/deals').send({ ...draft, lender: 'GFE', product: 'LOC - INITIAL', factor: undefined, commRate: undefined, creditLine: 250_000, referralPartner: null, commIncrements: 10, commUpfrontPct: 50 });
+    const loc = await admin.post('/api/admin/deals').send({ ...draft, lender: 'Revenued', product: 'LOC - INITIAL', factor: undefined, commRate: undefined, creditLine: 250_000, referralPartner: null, commIncrements: 10, commUpfrontPct: 50 });
     expect(loc.body.segments[0].schedule).toBeNull();
     const draw = await admin.post(`/api/admin/deals/${loc.body.id}/draws`).send({ amount: 25_000 });
     expect(draw.body.segments.map((x: { schedule: unknown }) => x.schedule)).toEqual([null, null]);
@@ -234,7 +270,7 @@ describe('deal edits', () => {
     expect(allowed.repo.data.deals.find((deal) => deal.id === 'F1')!.commSchedule?.stoppedAfter).toBe(2);
     assert1200Tie(allowed.repo);
 
-    const amounts = [2_000, 2_000, ...Array(8).fill(750)];
+    const amounts = [1_000, 1_000, 1_500, 500, ...Array(6).fill(1_000)];
     expect((await allowed.admin.post('/api/admin/deals/F1/collection').send({ segmentKey: 'base', amounts })).status).toBe(200);
     assert1200Tie(allowed.repo);
   });
@@ -324,7 +360,7 @@ describe('deal edits', () => {
     const fresh = await admin.post('/api/admin/deals').send({ ...draft, lender: 'Forward', referralPartner: null });
     expect(fresh.body.clawbackWindow).toMatchObject({ basis: 'days', count: 30, source: 'lender', cleared: false, daysLeft: 30 });
     // TERM LOAN carries no clawback in the product rules → exempt whatever the lender says
-    const exempt = await admin.post('/api/admin/deals').send({ ...draft, business: 'Exempt Co', lender: 'Revenued', product: 'TERM LOAN', factor: undefined, apr: 12, referralPartner: null });
+    const exempt = await admin.post('/api/admin/deals').send({ ...draft, business: 'Exempt Co', lender: 'Wall', product: 'TERM LOAN', factor: undefined, apr: 12, referralPartner: null });
     expect(exempt.body.clawbackWindow).toMatchObject({ basis: 'none', source: 'product', cleared: true });
     expect(fresh.body.atRisk).toBe(true);
   });
@@ -417,7 +453,7 @@ describe('deal edits', () => {
 describe('consolidation payout structures', () => {
   it('a deal can ask for 50 upfront and the rest when increments are done; upfront and final have recorders', async () => {
     const { admin } = await harness();
-    const res = await admin.post('/api/admin/deals').send({ ...draft, product: CONSOL, referralPartner: null, commAmounts: Array(10).fill(10_000), commUpfrontPct: 50, commRemainder: 'at-end' });
+    const res = await admin.post('/api/admin/deals').send({ ...draft, lender: 'GFE', product: CONSOL, referralPartner: null, commAmounts: Array(10).fill(10_000), commUpfrontPct: 50, commRemainder: 'at-end' });
     expect(res.status).toBe(201);
     const sch = res.body.segments[0].schedule;
     expect(sch).toMatchObject({ weeks: 10, upfrontPct: 0.5, upfrontAmount: 7_250, upfrontReceived: false, remainder: 'at-end', remainderAmount: 7_250, remainderReceived: false, perWeek: 0 });
@@ -498,7 +534,7 @@ describe('merchants and overview', () => {
     const { admin, rep } = await harness();
     expect((await rep.get('/api/admin/overview')).status).toBe(403);
     const res = await admin.get('/api/admin/overview?from=2026-06-01&to=2026-08-31');
-    expect(res.body.cards).toMatchObject({ funded: 35_000, commissions: 3_500, opportunities: 3, drawLines: 0, avgFactor: 1.3, paid: 350, renewalReady: 1 });
+    expect(res.body.cards).toMatchObject({ funded: 35_000, commissions: 3_500, opportunities: 3, drawLines: 0, avgFactor: 1.3, paid: 350, renewalReady: 2 });
     const ctx = { deals, lines, clawbacks };
     expect(res.body.cards.owed).toBe(reps.reduce((sum, r) => sum + repLedger(ctx, r.id).owed, 0)); // one definition of owed
     expect(res.body.cards.clawbackExposure).toBe(700); // cb-1: 800 rep total − 100 recovered

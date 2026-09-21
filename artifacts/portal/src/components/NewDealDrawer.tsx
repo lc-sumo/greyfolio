@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api, post, type AdminDealDetail, type MasterBoard, type RepOption, type Settings } from '../lib/api';
 import { compact, day, fullDay, money, pct, todayIso } from '../lib/format';
 import { addBusinessDays, liveMath, num, rate } from '../lib/math';
-import { isConsolidationParentProduct, parseIncrementGrid } from '@greystone/commission';
+import { isConsolidationParentProduct, parseIncrementGrid, productKind, lenderSupportsProduct, validateIncrementGrid } from '@greystone/commission';
 import { useSession } from '../lib/session';
 import { Drawer, Pill, toneFor } from './ui';
 
@@ -21,12 +21,16 @@ const DEAL_PRODUCTS = [
 ] as const;
 
 function dealProductOptions(products: Settings['products']) {
-  return DEAL_PRODUCTS.flatMap(({ label, names }) => {
+  const known = DEAL_PRODUCTS.flatMap(({ label, names }) => {
     const product = names.map((name) => products.find((p) => p.name.toUpperCase() === name)).find(Boolean);
-    return product && product.active !== false ? [{ label, product }] : [];
+    return product && product.active !== false && productKind(product) !== 'consolidation-backend' ? [{ label, product }] : [];
   });
+  const selected = new Set(known.map(({ product }) => product.name));
+  const renamedParents = products
+    .filter((product) => product.active !== false && productKind(product) === 'consolidation-upfront' && !selected.has(product.name))
+    .map((product) => ({ label: product.name, product }));
+  return [...known, ...renamedParents];
 }
-
 function Field({ label, hint, children, span }: { label: React.ReactNode; hint?: string; children: React.ReactNode; span?: boolean }) {
   return (
     <label className="field" style={span ? { gridColumn: '1 / -1' } : undefined}>
@@ -72,7 +76,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF((s) => ({ ...s, [k]: e.target.value }));
 
   const configuredRule = settings.products.find((p) => p.name === f.product);
-  const isConsolidation = isConsolidationParentProduct(f.product);
+  const isConsolidation = isConsolidationParentProduct(configuredRule ?? f.product);
   // Consolidation is entered as one funded deal with a commission-disbursement
   // schedule. It is incremental, but it is not a line of credit/multi-draw product.
   const rule = configuredRule && isConsolidation
@@ -93,7 +97,10 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
   useEffect(() => {
     if (!rule) return;
     if (skipDefaults.current) return;
-    setF((s) => ({ ...s, commRate: String((rule.multiDraw ? rule.drawInitial ?? rule.comm : rule.comm) * 100), drawInitialPct: rule.drawInitial ? String(rule.drawInitial * 100) : '', drawSubsequentPct: rule.drawSubsequent ? String(rule.drawSubsequent * 100) : '' }));
+    setF((s) => {
+      const nextLender = settings.lenders.find((l) => l.name === s.lender);
+      return { ...s, lender: nextLender ? (lenderSupportsProduct(nextLender, rule) ? String(s.lender ?? '') : '') : '', commRate: String((rule.multiDraw ? rule.drawInitial ?? rule.comm : rule.comm) * 100), drawInitialPct: rule.drawInitial ? String(rule.drawInitial * 100) : '', drawSubsequentPct: rule.drawSubsequent ? String(rule.drawSubsequent * 100) : '' };
+    });
   }, [rule?.name]); // eslint-disable-line react-hooks/exhaustive-deps
   // Lender change → seed the payout structure from the lender's defaults.
   useEffect(() => {
@@ -133,7 +140,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
   const grid = useMemo(() => (incremental && gridRaw.trim() ? parseIncrementGrid(gridRaw) : []), [incremental, gridRaw]);
   const legacyGridMissing = editing && incremental && !existing?.segments[0]?.schedule?.amounts?.length;
   const gridTotal = grid.reduce((a, b) => a + b, 0);
-  const gridInvalid = incremental && (!validIncrementGrid(gridRaw) || grid.length === 0);
+  const gridInvalid = incremental && !!validateIncrementGrid(gridRaw, num(f.amount));
   const gridMismatch = incremental && (gridInvalid || Math.abs(gridTotal - num(f.amount)) > 0.005);
   useEffect(() => { if (grid.length) setF((s) => ({ ...s, commIncrements: String(grid.length) })); }, [grid.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const m = useMemo(() => liveMath(f, rule, partner, referralPaidThisMonth), [f, rule, partner, referralPaidThisMonth]);
@@ -256,7 +263,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
         <Field label="Lender">
           <select value={f.lender} onChange={set('lender')}>
             <option value="">— select —</option>
-             {settings.lenders.filter((l) => (l.active !== false || l.name === f.lender) && (!l.products?.length || l.products.includes(f.product ?? ''))).map((l) => <option key={l.name} value={l.name}>{l.name}</option>)}
+             {settings.lenders.filter((l) => (l.active !== false || l.name === f.lender) && lenderSupportsProduct(l, rule)).map((l) => <option key={l.name} value={l.name}>{l.name}</option>)}
           </select>
           <span className="subtle" style={{ fontSize: 13 }}>Only lenders set up for {f.product} (Settings › Lenders).</span>
         </Field>
@@ -284,6 +291,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
         </Field>
         <div className="label" style={{ gridColumn: '1 / -1', marginTop: 6 }}>Commission payout from the lender</div>
         {!canIncrement && rule && <div className="note" style={{ gridColumn: '1 / -1' }}>{rule.name} commission is paid upfront by the lender. Increment structures (upfront share, number of increments, cadence) apply to consolidations only — not LOCs or LOC draws.</div>}
+        {f.product && !f.lender && <div className="note" style={{ gridColumn: '1 / -1', background: 'var(--amber-light)', color: 'var(--amber)' }}>Select a lender configured for this product. The previous lender was cleared because it does not support {rule?.name ?? 'this product'}.</div>}
         {incremental && (
           <>
              {legacyGridMissing && !(f.commGrid ?? '').trim() && <div className="note" style={{ gridColumn: '1 / -1', background: 'var(--amber-light)', color: 'var(--amber)' }}>This legacy consolidation has no stored increment breakdown. Enter the real funding breakdown below before saving; equal amounts will not be manufactured.</div>}
@@ -385,24 +393,4 @@ function structureNote(gross: number, f: Record<string, string>): string {
   const start = f.commStartDate || `one ${cadence} after funding`;
   if (up > 0 || f.commRemainder === 'at-end') return `Expect ${money(upfront)} at funding${up ? '' : ' (nothing upfront)'}, then ${n} merchant increments every ${cadence} starting ${start}, and the remaining ${money(rest)} once they are done.`;
   return `Expect ${up ? `${money(upfront)} at funding, then ` : ''}${n} receipts of ${money(rest / n)} every ${cadence} starting ${start} (${money(rest)} in total).`;
-}
-
-/** Validate the raw grid as well as its parsed values; the parser intentionally
- * skips malformed tokens for import convenience, but a save must not. */
-function validIncrementGrid(raw: string): boolean {
-  if (!raw.trim()) return false;
-  const flat = raw.replace(/,(?=\d{3}(?!\d))/g, '');
-  const tokens = flat.split(/[\n,;]+/).map((x) => x.trim().replace(/\$/g, ''));
-  if (!tokens.length || tokens.some((token) => !token)) return false;
-  return tokens.every((token) => {
-    const repeated = /^([\d.,]+)\s*[x×*]\s*(\d+)$/i.exec(token.replace(/,/g, ''));
-    if (repeated) {
-      const amount = Number(repeated[1]);
-      const count = Number(repeated[2]);
-      return Number.isFinite(amount) && amount > 0 && Number.isInteger(count) && count > 0 && count <= 520 && Math.abs(amount * 100 - Math.round(amount * 100)) <= 1e-7;
-    }
-    if (!/^[\d.,]+$/.test(token)) return false;
-    const amount = Number(token.replace(/,/g, ''));
-    return Number.isFinite(amount) && amount > 0 && Math.abs(amount * 100 - Math.round(amount * 100)) <= 1e-7;
-  });
 }

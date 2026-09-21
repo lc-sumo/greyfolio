@@ -7,7 +7,7 @@ Consolidation (also called Reverse) is one funded parent deal with a commission-
 
 Every newly entered or edited Consolidation/Reverse parent must carry its own explicit positive increment amounts totaling planned funding. A lender name never determines the deal’s increment count or amounts. Legacy disbursement child rows remain individual increments and do not receive nested schedules.
 
-For a split structure, the configured upfront share is paid at funding and acts as a credit against total commission earned on funding actually received. The remainder is payable only after every effective funding increment clears. For example, a 23-increment consolidation with 50% upfront pays half initially and the balance when the funding schedule completes.
+For a split structure, the configured upfront share is paid at funding and acts as a credit against total commission earned on funding actually received. The second half may release either after every effective funding increment clears or once the first half of planned funding is complete; that trigger must be explicit and is not yet implemented. For example, a 23-increment consolidation with 50% upfront may pay half initially and the balance when the configured release condition is met.
 
 If funding stops early, commission earned is the actual funding received multiplied by the contractual commission rate. The original planned funding remains visible separately. Any upfront payment above earned commission is recoverable; otherwise only the difference is due once the shortened schedule is finalized.
 

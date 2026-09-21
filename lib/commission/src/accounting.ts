@@ -3,7 +3,7 @@ import { clawbackSlices } from './clawback.js';
 import { cents, sum } from './money.js';
 import { segments } from './segments.js';
 import { dealLines } from './splits.js';
-import type { Clawback, Deal, PayoutLine, Segment } from './types.js';
+import type { Clawback, Deal, PayoutLine, Segment, WalletAdjustment } from './types.js';
 
 /**
  * The small, dependency-free accounting kernel. Database adapters persist these
@@ -21,6 +21,7 @@ export const SYSTEM_CHART = [
   { code: '4090', name: 'Clawback contra-revenue/loss', type: 'revenue', purpose: 'clawback_loss' },
   { code: '5000', name: 'Rep commission expense', type: 'expense', purpose: 'rep_expense' },
   { code: '5010', name: 'Referral expense', type: 'expense', purpose: 'referral_expense' },
+  { code: '5020', name: 'Wallet adjustment expense/clearing', type: 'expense', purpose: 'wallet_adjustment' },
 ] as const;
 
 export type SystemAccountCode = (typeof SYSTEM_CHART)[number]['code'];
@@ -53,6 +54,7 @@ export interface AccountingProjectionInput {
   deals: Deal[];
   payoutLines: PayoutLine[];
   clawbacks: Clawback[];
+  adjustments?: WalletAdjustment[];
 }
 
 export interface AccountingProjection {
@@ -101,13 +103,15 @@ function collectionJournals(deal: Deal, seg: Segment): AccountingJournal[] {
   const prefix = `collection:${deal.id}:${seg.sk}`;
   const dimensions = { dealId: deal.id };
   if (seg.schedule) {
-    // Schedules hold expected dates, not received timestamps. They are used
-    // deterministically and explicitly flagged until a source adds paid dates.
+    // A confirmed receipt date is authoritative.  Expected dates are only a
+    // deterministic fallback for legacy/imported history.
     return scheduleEvents(seg, '9999-12-31').filter((e) => e.received && e.amount > 0).map((e) => journal({
-      sourceKey: `${prefix}:${e.kind}:${e.n}`, sourceType: 'lender_collection', date: e.expected ?? seg.date,
+      sourceKey: `${prefix}:${e.kind}:${e.n}`, sourceType: 'lender_collection', date: e.confirmed ?? e.expected ?? seg.date,
       memo: `Lender commission collection — ${deal.id} ${seg.label}`,
       lines: [asLine('1000', e.amount, 0, undefined, dimensions), asLine('1100', 0, e.amount, undefined, dimensions)],
-      metadata: { collectionDateAssumed: true, deterministicDateRule: 'schedule expected date; segment funded date when absent' },
+      metadata: e.confirmed
+        ? { authoritativeReceiptDate: true, confirmedSource: e.confirmedSource ?? null }
+        : { collectionDateAssumed: true, deterministicDateRule: 'schedule expected date; segment funded date when absent' },
     }));
   }
   const amount = Math.max(0, cents(seg.collected ?? 0));
@@ -154,7 +158,8 @@ export function projectAccounting(input: AccountingProjectionInput): AccountingP
     // Accrue the rep obligation only for collection units marked received.
     for (const line of dealLines(deal)) if (line.collected && line.amount > 0) {
       const authoritativeBaseDate = line.segment.sk === 'base' && !line.segment.schedule ? deal.lenderPaid : null;
-      const date = authoritativeBaseDate ?? line.unit?.expected ?? line.segment.date;
+      const confirmedUnitDate = line.unit && line.segment.schedule?.confirmedDates?.[String(line.unit.n)];
+      const date = authoritativeBaseDate ?? confirmedUnitDate ?? line.unit?.expected ?? line.segment.date;
       const partialAggregate = !line.segment.schedule && cents(line.segment.collected ?? 0) < cents(line.segment.gross);
       out.push(journal({
         sourceKey: `rep-accrual:${line.key}`, sourceType: 'rep_accrual', date,
@@ -162,7 +167,9 @@ export function projectAccounting(input: AccountingProjectionInput): AccountingP
         lines: [asLine('5000', line.amount, 0, undefined, { dealId: deal.id, repId: line.repId }), asLine('2000', 0, line.amount, undefined, { dealId: deal.id, repId: line.repId })],
         metadata: { dealId: deal.id, repId: line.repId, ...(authoritativeBaseDate
           ? (partialAggregate ? { collectionDateAssumed: true, collectionDateUnresolved: true, deterministicDateRule: 'aggregate partial collection has no dated event history; using authoritative base receipt date' } : { authoritativeReceiptDate: true })
-          : { collectionDateAssumed: true, deterministicDateRule: line.unit?.expected ? 'schedule expected date' : 'segment funded date (collection date unavailable)' }) },
+          : confirmedUnitDate
+            ? { authoritativeReceiptDate: true }
+            : { collectionDateAssumed: true, deterministicDateRule: line.unit?.expected ? 'schedule expected date' : 'segment funded date (collection date unavailable)' }) },
       }));
     }
   }
@@ -185,6 +192,30 @@ export function projectAccounting(input: AccountingProjectionInput): AccountingP
     }
   }
   const payoutByKey = new Map(input.payoutLines.map((line) => [line.key, line]));
+  const adjustmentById = new Map((input.adjustments ?? []).map((a) => [a.id, a]));
+  const adjustmentEconomics = (a: WalletAdjustment, resolving = new Set<string>()): AccountingLine[] => {
+    if (a.reversalOf) {
+      if (resolving.has(a.id)) throw new Error(`Wallet adjustment reversal cycle at ${a.id}`);
+      const original = adjustmentById.get(a.reversalOf);
+      if (!original) throw new Error(`Wallet adjustment ${a.id} references missing adjustment ${a.reversalOf}`);
+      resolving.add(a.id);
+      const lines = adjustmentEconomics(original, resolving).map((l) => ({ ...l, debit: l.credit, credit: l.debit }));
+      resolving.delete(a.id);
+      return lines;
+    }
+    const amount = Math.abs(cents(a.amount));
+    return a.amount >= 0
+      ? [asLine('5020', amount, 0, undefined, { dealId: a.dealId, repId: a.repId }), asLine('2000', 0, amount, undefined, { dealId: a.dealId, repId: a.repId })]
+      : [asLine('2000', amount, 0, undefined, { dealId: a.dealId, repId: a.repId }), asLine('5020', 0, amount, undefined, { dealId: a.dealId, repId: a.repId })];
+  };
+  for (const a of [...(input.adjustments ?? [])].sort((x, y) => x.id.localeCompare(y.id))) {
+    if (!a.amount) continue;
+    out.push(journal({
+      sourceKey: `wallet-adjustment:${a.id}`, sourceType: a.reversalOf ? 'wallet_adjustment_reversal' : 'wallet_adjustment',
+      date: a.effectiveDate, memo: `${a.reversalOf ? 'Reversal of wallet adjustment' : 'Wallet adjustment'} — ${a.dealId}`,
+      lines: adjustmentEconomics(a), metadata: { dealId: a.dealId, repId: a.repId, adjustmentId: a.id, reversalOf: a.reversalOf },
+    }));
+  }
   const payoutEconomics = (line: PayoutLine, resolving = new Set<string>()): AccountingLine[] => {
     const dimensions = { dealId: line.dealId, repId: line.repId };
     if (line.role !== 'Void') {

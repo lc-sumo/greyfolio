@@ -155,6 +155,13 @@
       "when": 1788720000000,
       "tag": "0021_sheets_sync_operations_repair",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1788721000000,
+      "tag": "0022_wallet_adjustments",
+      "breakpoints": true
     }
   ]
 }

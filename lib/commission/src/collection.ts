@@ -44,6 +44,36 @@ export function outstandingOf(seg: Pick<Segment, 'gross' | 'collected' | 'schedu
   return cents(Math.max(0, seg.gross - collectedOf(seg)));
 }
 
+/** Contractual settlement for an incremental segment. Finalization happens only
+ * after all effective disbursements complete, or after an opt-out. */
+export interface SettlementSummary {
+  finalized: boolean;
+  reason: 'completed' | 'merchant_opted_out' | null;
+  actualFunded: number;
+  earnedGross: number;
+  upfrontCredit: number;
+  backendDue: number;
+  recoverableOverpayment: number;
+}
+
+export function settlementOf(seg: Pick<Segment, 'gross' | 'amount' | 'collected' | 'schedule'> & { planned?: Segment['planned'] }): SettlementSummary | null {
+  const s = schedOf(seg);
+  if (!s) return null;
+  const plannedAmount = seg.planned?.amount ?? seg.amount;
+  const plannedGross = seg.planned?.gross ?? seg.gross;
+  const ratio = s.stoppedAfter === null || s.stoppedAfter === undefined ? 1 : (s.stoppedFundingRatio ?? shareThrough(s, effectiveIncrements(s)));
+  const finalized = s.stoppedAfter !== null && s.stoppedAfter !== undefined || s.received >= effectiveIncrements(s);
+  // Until the plan is complete (or the merchant opts out), there is no
+  // settled actual amount.  In particular, do not present the planned total
+  // as earned while an in-progress plan can still change.
+  const actualFunded = finalized ? cents(plannedAmount * ratio) : 0;
+  const earnedGross = finalized ? cents(plannedGross * ratio) : 0;
+  const upfrontCredit = incrementParts(plannedGross, s).upfront;
+  const reason = finalized ? (s.stoppedAfter !== null && s.stoppedAfter !== undefined ? 'merchant_opted_out' : 'completed') : null;
+  const backendDue = finalized ? cents(Math.max(0, earnedGross - collectedOf(seg))) : 0;
+  return { finalized, reason, actualFunded, earnedGross, upfrontCredit, backendDue, recoverableOverpayment: cents(Math.max(0, collectedOf(seg) - earnedGross)) };
+}
+
 /** Commission status is a FUNCTION of collection, never a peer field. */
 export function statusFor(collected: number, gross: number): CommissionStatus {
   if (gross > 0 && collected >= gross) return 'YES - Paid In Full';
@@ -113,19 +143,38 @@ export function withCollection(seg: Pick<Segment, 'gross' | 'collected' | 'sched
         // Uneven grid: the most increments whose cumulative share fits the dollars — the inverse of `shareThrough`.
         while (received < s.weeks && shareThrough(s, received + 1) * parts.rest <= afterUpfront + 0.005) received++;
       } else received = parts.rest > 0 ? Math.round((afterUpfront / parts.rest) * s.weeks) : 0;
-      return { collected: null, schedule: { ...s, upfrontReceived, received: clamp(received, 0, s.weeks) } };
+      const next = clamp(received, 0, s.weeks);
+      return { collected: null, schedule: { ...s, upfrontReceived, received: next, confirmedDates: trimConfirmed(s, upfrontReceived, next), confirmedSources: trimSources(s, upfrontReceived, next) } };
     }
     const remainderReceived = afterUpfront >= parts.rest - 0.005 && parts.rest > 0;
-    return { collected: null, schedule: { ...s, upfrontReceived, remainderReceived, received: remainderReceived ? s.weeks : s.received } };
+    const next = remainderReceived ? s.weeks : s.received;
+    return { collected: null, schedule: { ...s, upfrontReceived, remainderReceived, received: next, confirmedDates: trimConfirmed(s, upfrontReceived, next, remainderReceived), confirmedSources: trimSources(s, upfrontReceived, next, remainderReceived) } };
   }
   return { collected: amt, schedule: null };
+}
+
+function trimConfirmed(s: WeeklySchedule, upfront: boolean, received: number, remainder = false): Record<string, string> | undefined {
+  const out = { ...(s.confirmedDates ?? {}) };
+  for (const key of Object.keys(out)) {
+    const n = Number(key);
+    if ((n === 0 && !upfront) || (n > 0 && n <= s.weeks && n > received) || (n === s.weeks + 1 && !remainder)) delete out[key];
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+function trimSources(s: WeeklySchedule, upfront: boolean, received: number, remainder = false): Record<string, string> | undefined {
+  const out = { ...(s.confirmedSources ?? {}) };
+  for (const key of Object.keys(out)) {
+    const n = Number(key);
+    if ((n === 0 && !upfront) || (n > 0 && n <= s.weeks && n > received) || (n === s.weeks + 1 && !remainder)) delete out[key];
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 /** Record the upfront share as received (or not). */
 export function withUpfront(seg: Pick<Segment, 'gross' | 'collected' | 'schedule'>, received: boolean): CollectionPatch | null {
   const s = schedOf(seg);
   if (!s || !(s.upfrontPct ?? 0)) return null;
-  return { collected: null, schedule: { ...s, upfrontReceived: received } };
+  return { collected: null, schedule: { ...s, upfrontReceived: received, confirmedDates: trimConfirmed(s, received, s.received, s.remainderReceived), confirmedSources: trimSources(s, received, s.received, s.remainderReceived) } };
 }
 
 /** Record the at-end remainder as received (or not). */
@@ -133,7 +182,7 @@ export function withRemainder(seg: Pick<Segment, 'gross' | 'collected' | 'schedu
   const s = schedOf(seg);
   if (!s || (s.remainder ?? 'spread') !== 'at-end') return null;
   if (received && s.received < effectiveIncrements(s)) throw new Error('The final commission is not payable until every funding increment clears');
-  return { collected: null, schedule: { ...s, remainderReceived: received } };
+  return { collected: null, schedule: { ...s, remainderReceived: received, confirmedDates: trimConfirmed(s, !!s.upfrontReceived, s.received, received), confirmedSources: trimSources(s, !!s.upfrontReceived, s.received, received) } };
 }
 
 export type ScheduleEventKind = 'upfront' | 'increment' | 'remainder';
@@ -143,6 +192,9 @@ export interface ScheduleEvent {
   n: number;
   label: string;
   expected: string | null;
+  /** Actual lender receipt date, when this event has been confirmed. */
+  confirmed: string | null;
+  confirmedSource: string | null;
   amount: number;
   received: boolean;
   /** Expected before `today` and not yet received. */
@@ -166,17 +218,17 @@ export function scheduleEvents(seg: Pick<Segment, 'gross' | 'collected' | 'sched
   const start = s.startDate ?? seg.date;
   const at = (i: number) => (start ? new Date(new Date(`${start}T00:00:00Z`).getTime() + i * cadence * 86_400_000).toISOString().slice(0, 10) : null);
   const out: ScheduleEvent[] = [];
-  if (parts.upfront > 0) out.push({ kind: 'upfront', n: 0, label: 'Upfront', expected: seg.date, amount: parts.upfront, received: !!s.upfrontReceived, overdue: !s.upfrontReceived && seg.date < today });
+  if (parts.upfront > 0) out.push({ kind: 'upfront', n: 0, label: 'Upfront', expected: seg.date, confirmed: s.confirmedDates?.['0'] ?? null, confirmedSource: s.confirmedSources?.['0'] ?? null, amount: parts.upfront, received: !!s.upfrontReceived, overdue: !s.upfrontReceived && seg.date < today });
   const plannedAmount = (seg as { planned?: Segment['planned']; amount?: number }).planned?.amount ?? (seg as { amount?: number }).amount;
   for (let i = 1; i <= eff; i++) {
     const expected = at(i - 1);
     const received = i <= s.received;
     const amount = gridOf(s) ? incrementCommission(plannedGrossOf(seg), s, i) : parts.perIncrement;
-    out.push({ kind: 'increment', n: i, label: `Increment ${i}`, expected, amount, received, overdue: !received && expected !== null && expected < today, funding: plannedAmount !== undefined && (s.stoppedFundingRatio === null || s.stoppedFundingRatio === undefined) ? incrementFunding(plannedAmount, s, i) : undefined });
+    out.push({ kind: 'increment', n: i, label: `Increment ${i}`, expected, confirmed: s.confirmedDates?.[String(i)] ?? null, confirmedSource: s.confirmedSources?.[String(i)] ?? null, amount, received, overdue: !received && expected !== null && expected < today, funding: plannedAmount !== undefined && (s.stoppedFundingRatio === null || s.stoppedFundingRatio === undefined) ? incrementFunding(plannedAmount, s, i) : undefined });
   }
   if (parts.remainder > 0) {
     const expected = at(eff);
-    out.push({ kind: 'remainder', n: s.weeks + 1, label: 'Final (when increments done)', expected, amount: parts.remainder, received: !!s.remainderReceived, overdue: !s.remainderReceived && expected !== null && expected < today });
+    out.push({ kind: 'remainder', n: s.weeks + 1, label: 'Final (when increments done)', expected, confirmed: s.confirmedDates?.[String(s.weeks + 1)] ?? null, confirmedSource: s.confirmedSources?.[String(s.weeks + 1)] ?? null, amount: parts.remainder, received: !!s.remainderReceived, overdue: !s.remainderReceived && expected !== null && expected < today });
   }
   return out;
 }
@@ -220,10 +272,32 @@ export function withStatus(
 }
 
 /** Record (or reverse, with a negative delta) weekly increments on a scheduled segment. */
-export function recordWeek(seg: Pick<Segment, 'gross' | 'collected' | 'schedule'>, delta = 1): CollectionPatch | null {
+export function recordWeek(seg: Pick<Segment, 'gross' | 'collected' | 'schedule'>, delta = 1, confirmedDate?: string, confirmedSource?: string): CollectionPatch | null {
   const s = schedOf(seg);
   if (!s) return null;
-  return { collected: null, schedule: { ...s, received: clamp((s.received || 0) + delta, 0, effectiveIncrements(s)) } };
+  const prior = clamp(s.received || 0, 0, effectiveIncrements(s));
+  const next = clamp(prior + delta, 0, effectiveIncrements(s));
+  const dates = { ...(s.confirmedDates ?? {}) };
+  const sources = { ...(s.confirmedSources ?? {}) };
+  if (delta > 0 && confirmedDate) for (let i = prior + 1; i <= next; i++) { dates[String(i)] ??= confirmedDate; if (confirmedSource) sources[String(i)] ??= confirmedSource; }
+  if (delta < 0) for (let i = next + 1; i <= prior; i++) { delete dates[String(i)]; delete sources[String(i)]; }
+  // A terminal remainder is only a valid receipt while every effective
+  // increment is complete. Reversing any receipt from a completed schedule
+  // must clear it atomically, including its confirmed audit date.
+  if (next < effectiveIncrements(s)) {
+    delete dates[String(s.weeks + 1)];
+    delete sources[String(s.weeks + 1)];
+  }
+  return {
+    collected: null,
+    schedule: {
+      ...s,
+      received: next,
+      remainderReceived: next < effectiveIncrements(s) && s.remainder === 'at-end' ? false : s.remainderReceived,
+      confirmedDates: Object.keys(dates).length ? dates : undefined,
+      confirmedSources: Object.keys(sources).length ? sources : undefined,
+    },
+  };
 }
 
 /** Replace the increment grid. Exact cents and the received prefix are immutable. */
@@ -253,7 +327,17 @@ export function withAmounts(seg: Pick<Segment, 'gross' | 'collected' | 'schedule
 export function withStopped(seg: Pick<Segment, 'gross' | 'collected' | 'schedule'> & { amount?: number; planned?: Segment['planned'] }, stopped: boolean, fundingReceived?: number | null): CollectionPatch | null {
   const s = schedOf(seg);
   if (!s) return null;
-  if (!stopped) return { collected: null, schedule: { ...s, stoppedAfter: null, stoppedFundingRatio: null } };
+  if (!stopped) return {
+    collected: null,
+    schedule: {
+      ...s,
+      stoppedAfter: null,
+      stoppedFundingRatio: null,
+      remainderReceived: s.remainder === 'at-end' ? false : s.remainderReceived,
+      confirmedDates: s.remainder === 'at-end' ? trimConfirmed(s, !!s.upfrontReceived, s.received, false) : s.confirmedDates,
+      confirmedSources: s.remainder === 'at-end' ? trimSources(s, !!s.upfrontReceived, s.received, false) : s.confirmedSources,
+    },
+  };
   const plannedAmount = seg.planned?.amount ?? seg.amount;
   let stoppedFundingRatio: number | null = null;
   if (fundingReceived !== null && fundingReceived !== undefined) {

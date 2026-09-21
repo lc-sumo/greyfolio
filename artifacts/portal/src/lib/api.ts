@@ -9,12 +9,15 @@ export interface Branding { company: string; portal: string; supportEmail: strin
 export interface AuthMe { user: SessionUser; canViewAs: boolean; oidc: boolean; devAuth: boolean; branding?: Branding; mustEnrollTotp?: boolean; idleMinutes?: number; superAdmin?: boolean; canEmailMerchants?: boolean; canEditContacts?: boolean }
 export interface TrustedDeviceView { id: string; label: string; ip: string | null; location: string | null; createdAt: string; lastUsedAt: string; expiresAt: string; current: boolean }
 export interface RepRoleLine { role: Role; rate: number; amount: number; segment: string; segmentKey: string; paid: boolean; paidAmount: number; units: { paid: number; total: number; collected: number } | null }
+export interface SettlementSummary { finalized: boolean; reason: 'completed' | 'merchant_opted_out' | null; actualFunded: number; earnedGross: number; upfrontCredit: number; backendDue: number; recoverableOverpayment: number }
+export interface RepScheduleEvent { kind: 'upfront' | 'increment' | 'remainder'; n: number; label: string; expected: string | null; confirmed: string | null; confirmedSource: string | null; amount: number; received: boolean; overdue: boolean; funding?: number }
 export interface RepDealView {
   id: string; crmId: string | null; date: string; business: string; merchantContact: string; merchantEmail: string; merchantPhone: string; missingContact: Array<'contact' | 'email' | 'phone'>; lender: string; product: string; funded: number; drawCount: number;
   disbursement: Disbursement | null;
   roles: Role[]; lines: RepRoleLine[]; share: number; accrued: number; paid: number; balance: number; payable: number; owed: number; payoutStatus: PayoutStatus;
   commissionStatus: CommissionStatus; lenderPaidLabel: string; dealStatus: string; repPaid: string | null; clawbackWindow: ClawbackWindow;
   clawback: { amount: number; recovered: number; remaining: number; status: 'open' | 'recovered' } | null;
+  schedule: { events: RepScheduleEvent[]; settlement: SettlementSummary | null } | null;
 }
 export interface RepDealDetail extends RepDealView { payments: Array<{ role: string; segmentKey: string | null; unit: string | null; amount: number; paidAt: string; runId: string | null }> }
 export interface RepWallet { earned: number; paid: number; cash: number; held: number; recovered: number; balance: number; payable: number; owed: number; dealCount: number; awaitingLender: number }
@@ -87,18 +90,18 @@ export interface Settings {
 }
 export interface MerchantTemplate { id: string; name: string; subject: string; body: string }
 export interface RoleView { role: Role; repId: string | null; name: string | null; rate: number; amount: number; paid: number }
-export interface AdminDealRow {
+ export interface AdminDealRow {
   id: string; renewedFromId: string | null; renewedById: string | null; opportunityId: string; parentId: string | null; date: string; business: string; drawCount: number;
   merchantContact: string; merchantEmail: string; merchantPhone: string; lender: string; product: string;
   funded: number; factor: number | null; apr: number | null; termDays: number | null; frequency: string; payback: number | null;
   commRate: number; psfPct: number; originationFee: number; lineRate: number | null; lineFee: number; gross: number; lenderClawbackBase: number; referralPartner: string | null; referralRate: number; referralFee: number; net: number;
   roles: RoleView[]; totalRepPayout: number; repBalance: number; repPayable: number; houseNet: number; collected: number; outstanding: number; lenderPaidLabel: string;
   commissionStatus: string; dealStatus: string; storedDealStatus: string; atRisk: boolean; repPaid: string | null; lenderPaid: string | null; crmId: string | null; crmUrl: string;
-  creditLine: number | null; creditLineUsed: number | null; creditLineAvailable: number | null; leadSource: string | null; notes: string | null; drawSubsequentPct: number | null; hasClawback: boolean; clawbackWindow: ClawbackWindow; overdueReceipts: number; overdueAmount: number; increments: { total: number; lenderPaid: number; repPaid: number; disbursed: number; planned: number; perIncrement: number; stopped: boolean } | null;
+  creditLine: number | null; creditLineUsed: number | null; creditLineAvailable: number | null; leadSource: string | null; notes: string | null; drawSubsequentPct: number | null; hasClawback: boolean; clawbackWindow: ClawbackWindow; overdueReceipts: number; overdueAmount: number; increments: { total: number; lenderPaid: number; repPaid: number; disbursed: number; planned: number; perIncrement: number; stopped: boolean } | null; settlement: SettlementSummary | null;
 }
-export interface ScheduleEvent { kind: 'upfront' | 'increment' | 'remainder'; n: number; label: string; expected: string | null; amount: number; received: boolean; overdue: boolean; funding?: number }
+export interface ScheduleEvent { kind: 'upfront' | 'increment' | 'remainder'; n: number; label: string; expected: string | null; confirmed: string | null; confirmedSource: string | null; amount: number; received: boolean; overdue: boolean; funding?: number }
 export interface Disbursement { planned: number; perIncrement: number; disbursed: number; final: number; count: number; total: number; stopped: boolean; uneven: boolean; manual?: true }
-export interface ScheduleView { disbursement: Disbursement; amounts: number[] | null; planned: { amount: number; gross: number; referralFee: number; net: number; increments: number } | null; weeks: number; received: number; startDate: string | null; perWeek: number; cadenceDays: number; upfrontPct: number; upfrontAmount: number; overpayment: number; upfrontReceived: boolean; remainder: 'spread' | 'at-end'; remainderAmount: number; remainderReceived: boolean; events: ScheduleEvent[]; nextExpected: ScheduleEvent | null; overdue: number; overdueAmount: number; paidToReps: Array<{ role: Role; repId: string; name: string | null; paid: number; total: number }> }
+export interface ScheduleView { disbursement: Disbursement; amounts: number[] | null; planned: { amount: number; gross: number; referralFee: number; net: number; increments: number } | null; weeks: number; received: number; startDate: string | null; perWeek: number; cadenceDays: number; upfrontPct: number; upfrontAmount: number; overpayment: number; upfrontReceived: boolean; remainder: 'spread' | 'at-end'; remainderAmount: number; remainderReceived: boolean; events: ScheduleEvent[]; confirmedDates: Record<string,string>; nextExpected: ScheduleEvent | null; overdue: number; overdueAmount: number; paidToReps: Array<{ role: Role; repId: string; name: string | null; paid: number; total: number }>; settlement: SettlementSummary | null }
 export interface SegmentView { sk: string; label: string; n: number; date: string; amount: number; commRate: number; gross: number; referralFee: number; net: number; collected: number; outstanding: number; status: string; lenderPaidLabel: string; schedule: ScheduleView | null; termDays: number | null; factor: number | null; payback: number | null; payment: number | null }
 export interface AdminDealDetail extends AdminDealRow {
   segments: SegmentView[];
@@ -114,6 +117,10 @@ export interface NewDealDraft {
   referralPartner?: string | null; referralRate?: number | null; creditLine?: number | null; drawInitialPct?: number | null; drawSubsequentPct?: number | null; lineRate?: number | null;
   openerId?: string | null; openerRate?: number | null; closerId?: string | null; closerRate?: number | null; overrideId?: string | null; overrideRate?: number | null; leadSource?: string | null; notes?: string | null;
   commIncrements?: number | null; commUpfrontPct?: number | null; commRemainder?: 'spread' | 'at-end' | null; commCadenceDays?: number | null; commStartDate?: string | null; commAmounts?: number[] | null;
+}
+export interface IncrementGridPreview {
+  source: string; amounts: number[]; expected: Array<string | null>; total: number; count: number; planned: number | null;
+  warnings: string[]; errors: string[]; rows: Array<{ row: number; amount: number | null; expected: string | null; error: string | null }>;
 }
 export const post = <T,>(path: string, body: unknown, method = 'POST') => api<T>(path, { method, body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
 
@@ -143,7 +150,7 @@ export interface RenewalBase { id: string; crmId: string | null; business: strin
 export interface RepRenewalView extends RenewalBase { roles: Role[]; whoCalls: 'You' | 'Closer' | 'Opener'; estRenewalShare: number }
 export interface AdminRenewalRow extends RenewalBase { whoCalls: string; estRenewalGross: number; crmUrl: string }
 export interface PayHistoryRow { key: string; paidAt: string; dealId: string; business: string; role: string; segmentKey: string | null; segmentLabel: string; voided: boolean; amount: number; runId: string | null; runLabel: string | null }
-export interface PayHistory { rows: PayHistoryRow[]; days: Array<{ date: string; runLabel: string | null; grossPaid: number; recovered: number; cash: number; rows: PayHistoryRow[] }>; summary: { grossPaid: number; recovered: number; cash: number; payouts: number } }
+export interface PayHistory { rows: PayHistoryRow[]; days: Array<{ date: string; runLabel: string | null; grossPaid: number; recovered: number; cash: number; rows: PayHistoryRow[] }>; summary: { grossPaid: number; recovered: number; cash: number; payouts: number }; adjustments: Array<{ id: string; dealId: string; business: string; repId: string; reason: string; amount: number; effectiveDate: string; reversalOf: string | null }> }
 
 /** Statuses ops set by hand; Performing / Prospecting / Refi Ready follow the dates automatically. */
 export const MANUAL_DEAL_STATUSES = ['Refinanced', 'Default', 'Slow Pay', 'Paid In Full'] as const;

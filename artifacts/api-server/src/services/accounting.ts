@@ -32,8 +32,8 @@ export function profitAndLoss(journals: PostedJournal[], from?: string, to?: str
   const contra = tb.rows.find((x) => x.accountCode === '4090');
   // 4090 is deliberately debit-normal even though it is in the 4xxx revenue
   // family: debit clawbacks reduce revenue rather than increasing it.
-  const revenue = row('4000'); const clawbacks = contra ? cents(contra.debit - contra.credit) : 0; const expenses = cents(row('5000') + row('5010'));
-  return { from: from ?? null, to: to ?? null, revenue, clawbacks, netRevenue: cents(revenue - clawbacks), expenses, netIncome: cents(revenue - clawbacks - expenses), drilldown: tb.rows.filter((r) => ['4000', '4090', '5000', '5010'].includes(r.accountCode)) };
+  const revenue = row('4000'); const clawbacks = contra ? cents(contra.debit - contra.credit) : 0; const expenses = cents(row('5000') + row('5010') + row('5020'));
+  return { from: from ?? null, to: to ?? null, revenue, clawbacks, netRevenue: cents(revenue - clawbacks), expenses, netIncome: cents(revenue - clawbacks - expenses), drilldown: tb.rows.filter((r) => ['4000', '4090', '5000', '5010', '5020'].includes(r.accountCode)) };
 }
 export function balanceSheet(journals: PostedJournal[], asOf?: string) {
   const tb = trialBalance(journals, undefined, asOf);

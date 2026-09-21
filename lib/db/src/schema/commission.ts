@@ -283,6 +283,29 @@ export const commissionPayoutLines = pgTable(
   ],
 );
 
+/** Append-only deal-linked wallet corrections; never a payout or cash event. */
+export const commissionWalletAdjustments = pgTable(
+  'commission_wallet_adjustments',
+  {
+    id: text('id').primaryKey(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    dealId: text('deal_id').notNull().references(() => commissionDeals.id),
+    repId: text('rep_id').notNull().references(() => commissionReps.id),
+    amount: money('amount').notNull(),
+    reason: text('reason').notNull(),
+    effectiveDate: isoDate('effective_date').notNull(),
+    actorRepId: text('actor_rep_id').notNull().references(() => commissionReps.id),
+    reversalOf: text('reversal_of').references((): AnyPgColumn => commissionWalletAdjustments.id, { onDelete: 'restrict' }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex('commission_wallet_adjustments_idempotency_idx').on(t.idempotencyKey),
+    uniqueIndex('commission_wallet_adjustments_reversal_idx').on(t.reversalOf).where(sql`${t.reversalOf} is not null`),
+    index('commission_wallet_adjustments_deal_idx').on(t.dealId),
+    index('commission_wallet_adjustments_rep_idx').on(t.repId),
+  ],
+);
+
 /* ------------------------------------------------------------------ */
 /* Settings and integrations                                           */
 /* ------------------------------------------------------------------ */
@@ -638,6 +661,11 @@ export const commissionPayoutLinesRelations = relations(commissionPayoutLines, (
   run: one(commissionPayrollRuns, { fields: [commissionPayoutLines.runId], references: [commissionPayrollRuns.id] }),
   clawback: one(commissionClawbacks, { fields: [commissionPayoutLines.clawbackId], references: [commissionClawbacks.id] }),
 }));
+export const commissionWalletAdjustmentsRelations = relations(commissionWalletAdjustments, ({ one }) => ({
+  deal: one(commissionDeals, { fields: [commissionWalletAdjustments.dealId], references: [commissionDeals.id] }),
+  rep: one(commissionReps, { fields: [commissionWalletAdjustments.repId], references: [commissionReps.id] }),
+  actor: one(commissionReps, { fields: [commissionWalletAdjustments.actorRepId], references: [commissionReps.id], relationName: 'adjustmentActor' }),
+}));
 
 export const commissionPayrollRunsRelations = relations(commissionPayrollRuns, ({ many }) => ({
   payoutLines: many(commissionPayoutLines),
@@ -649,6 +677,7 @@ export type TeamRow = typeof commissionTeams.$inferSelect;
 export type DealRow = typeof commissionDeals.$inferSelect;
 export type DealDrawRow = typeof commissionDealDraws.$inferSelect;
 export type PayoutLineRow = typeof commissionPayoutLines.$inferSelect;
+export type WalletAdjustmentRow = typeof commissionWalletAdjustments.$inferSelect;
 export type ClawbackRow = typeof commissionClawbacks.$inferSelect;
 export type PayrollRunRow = typeof commissionPayrollRuns.$inferSelect;
 export type SettingRow = typeof commissionSettings.$inferSelect;

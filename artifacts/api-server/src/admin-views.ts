@@ -1,5 +1,5 @@
 /** Admin projections: everything, including house net, referral and every rep's name. Never served to reps. */
-import { RENEWAL_BUCKET_LABEL, cents, clawbackSlices, clawbackWindow, collectedGross, collectedOf, collectionLabel, crmUrl, dealCommissionStatus, dealLines, dealPayback, disbursementOf, effectiveDealStatus, effectiveIncrements, houseNet, isLinePaid, lenderClawbackBase, outstandingGross, outstandingOf, paidKeys, paymentFor, renewalOf, roleAssignments, scheduleEvents, scheduleParts, segmentStatus, segments, standingLines, sum, totalFunded, totalGross, totalNet, totalRepPayout, type Clawback, type ClawbackWindow, type Deal, type LedgerContext, type RenewalBucket, type Rep, type Role, type ScheduleEvent, type Segment, unitsPaid } from '@greystone/commission';
+import { RENEWAL_BUCKET_LABEL, cents, clawbackSlices, clawbackWindow, collectedGross, collectedOf, collectionLabel, crmUrl, dealCommissionStatus, dealLines, dealPayback, disbursementOf, effectiveDealStatus, effectiveIncrements, houseNet, isLinePaid, lenderClawbackBase, outstandingGross, outstandingOf, paidKeys, paymentFor, renewalOf, roleAssignments, scheduleEvents, scheduleParts, segmentStatus, segments, settlementOf, standingLines, sum, totalFunded, totalGross, totalNet, totalRepPayout, type Clawback, type ClawbackWindow, type Deal, type LedgerContext, type RenewalBucket, type Rep, type Role, type ScheduleEvent, type Segment, unitsPaid } from '@greystone/commission';
 import type { Settings } from './repo.js';
 
 export interface RoleView {
@@ -80,6 +80,7 @@ export interface AdminDealRow {
   /** Incremental initial segment: lender increments received and the fewest increments paid to any assigned rep. */
   /** Incremental funding progress: increments disbursed to the merchant (= lender receipts) vs the plan, and dollars out the door. */
   increments: { total: number; lenderPaid: number; repPaid: number; disbursed: number; planned: number; perIncrement: number; stopped: boolean } | null;
+  settlement: ReturnType<typeof settlementOf>;
 }
 
 export function adminDealRow(deal: Deal, ctx: LedgerContext, reps: Rep[], settings: Settings, today: string): AdminDealRow {
@@ -160,6 +161,7 @@ export function adminDealRow(deal: Deal, ctx: LedgerContext, reps: Rep[], settin
       const disb = disbursementOf(base.planned?.amount ?? base.amount, base.schedule)!;
       return { total: disb.total, lenderPaid: disb.count, repPaid: paid.length ? Math.min(...paid) : 0, disbursed: disb.disbursed, planned: disb.planned, perIncrement: disb.perIncrement, stopped: disb.stopped };
     })(),
+    settlement: settlementOf(segs[0]!) ,
     overdueReceipts: segs.reduce((n, s) => n + scheduleEvents(s, today).filter((e) => e.overdue).length, 0),
     overdueAmount: sum(segs.flatMap((s) => scheduleEvents(s, today).filter((e) => e.overdue).map((e) => e.amount))),
   };
@@ -194,6 +196,7 @@ export interface SegmentView {
     remainderAmount: number;
     remainderReceived: boolean;
     events: ScheduleEvent[];
+    confirmedDates: Record<string, string>;
     nextExpected: ScheduleEvent | null;
     overdue: number;
     overdueAmount: number;
@@ -205,6 +208,7 @@ export interface SegmentView {
     amounts: number[] | null;
     /** The plan as entered, when the merchant has opted out part-way. */
     planned: Segment['planned'] | null;
+    settlement: ReturnType<typeof settlementOf>;
   } | null;
   /** Funding terms: the deal's for the initial segment, the draw's own for draws. */
   termDays: number | null;
@@ -281,12 +285,14 @@ function scheduleView(s: Segment, today: string, deal: Deal, ctx: LedgerContext,
     remainderAmount: parts.remainder,
     remainderReceived: !!sch.remainderReceived,
     events,
+    confirmedDates: sch.confirmedDates ?? {},
     nextExpected: pending.sort((a, b) => (a.expected! < b.expected! ? -1 : 1))[0] ?? null,
     overdue: events.filter((e) => e.overdue).length,
     overdueAmount: sum(events.filter((e) => e.overdue).map((e) => e.amount)),
     disbursement: disbursementOf(s.planned?.amount ?? s.amount, s.schedule)!,
     planned: s.planned ?? null,
     amounts: s.schedule?.amounts ?? null,
+    settlement: settlementOf(s),
     paidToReps: roleAssignments(deal)
       .filter((r): r is { role: Role; repId: string; rate: number } => !!r.repId && r.rate > 0)
       .map((r) => {

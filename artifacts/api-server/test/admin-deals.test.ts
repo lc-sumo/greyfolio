@@ -22,6 +22,36 @@ async function harness() {
 const CONSOL = 'CONSOLIDATION - UPFRONT COMM';
 const draft = { business: 'Northstar Dental', merchantContact: 'Maria Duran', merchantEmail: 'MDuran@northstar.test', merchantPhone: '(201) 555-0199', fundedDate: today, lender: 'MBC', product: 'MCA', amount: 100_000, termDays: 120, factor: 1.3, commRate: 12, psfPct: 2, originationFee: 500, referralPartner: 'MBC', openerId: 'rep-julian-ribak', openerRate: 35, closerId: 'rep-zach-sanders', closerRate: 40, overrideId: 'rep-raymond-amato', overrideRate: 5 };
 
+describe('wallet adjustments API', () => {
+  it('creates and enriches deal-scoped adjustments, and exposes them only to the assigned rep', async () => {
+    const { admin, rep, mgr } = await harness();
+    const body = { idempotencyKey: 'test-wallet-1', repId: 'rep-julian-ribak', amount: 12.34, reason: 'Manual correction', effectiveDate: today };
+    const created = await admin.post('/api/admin/deals/F1/wallet-adjustments').send(body);
+    expect(created.status).toBe(201);
+    const list = await admin.get('/api/admin/deals/F1/wallet-adjustments');
+    expect(list.body[0]).toMatchObject({ dealId: 'F1', business: expect.any(String), repId: 'rep-julian-ribak', repName: expect.any(String), reason: body.reason, amount: body.amount });
+    const history = await rep.get('/api/me/payments');
+    expect(history.body.adjustments).toEqual(expect.arrayContaining([expect.objectContaining({ dealId: 'F1', business: expect.any(String), repId: 'rep-julian-ribak', amount: body.amount, reason: body.reason })]));
+    expect((await mgr.post('/api/admin/deals/F1/wallet-adjustments').send(body)).status).toBe(403);
+  });
+  it('rejects invalid values and handles idempotency and exact one-time reversal', async () => {
+    const { admin } = await harness();
+    const body = { idempotencyKey: 'test-wallet-2', repId: 'rep-julian-ribak', amount: 1.25, reason: 'Correction', effectiveDate: today };
+    for (const invalid of [{ ...body, dealId: 'NOPE' }, { ...body, repId: 'NOPE', idempotencyKey: 'bad-rep' }, { ...body, amount: 0, idempotencyKey: 'bad-amount' }, { ...body, reason: '', idempotencyKey: 'bad-reason' }, { ...body, effectiveDate: '2035-01-01', idempotencyKey: 'bad-date' }]) {
+      expect((await admin.post('/api/admin/wallet-adjustments').send({ dealId: 'F1', ...invalid })).status).toBe(400);
+    }
+    const first = await admin.post('/api/admin/deals/F1/wallet-adjustments').send(body);
+    const replay = await admin.post('/api/admin/deals/F1/wallet-adjustments').send(body);
+    expect(replay.body.id).toBe(first.body.id);
+    expect((await admin.post('/api/admin/deals/F1/wallet-adjustments').send({ ...body, amount: 2.25 })).status).toBe(400);
+    const reversed = await admin.post(`/api/admin/deals/F1/wallet-adjustments/${first.body.id}/reverse`).send({ idempotencyKey: 'test-wallet-2-reverse' });
+    expect(reversed.status).toBe(201);
+    expect(reversed.body).toMatchObject({ reversalOf: first.body.id, amount: -body.amount, dealId: 'F1' });
+    expect((await admin.post(`/api/admin/deals/F1/wallet-adjustments/${first.body.id}/reverse`).send({ idempotencyKey: 'other-reverse' })).status).toBe(400);
+    expect((await admin.post(`/api/admin/deals/F1/wallet-adjustments/${reversed.body.id}/reverse`).send({ idempotencyKey: 'reverse-reversal' })).status).toBe(400);
+  });
+});
+
 describe('only admins add deals', () => {
   it('reps and team leads get 403 on every deal write and on the master board', async () => {
     const { rep, mgr } = await harness();
@@ -154,6 +184,23 @@ describe('POST /api/admin/deals', () => {
     expect(res.status).toBe(409);
     expect(res.body.error).toMatch(/collection changed.*reload/i);
     expect(repo.data.deals.find((deal) => deal.id === created.body.id)!.commSchedule?.received).toBe(1);
+  });
+  it('reversing a completed at-end schedule removes the terminal confirmation', async () => {
+    const { admin } = await harness();
+    const created = await admin.post('/api/admin/deals').send({
+      ...draft, lender: 'GFE', product: CONSOL, amount: 100_000,
+      commAmounts: [50_000, 50_000], commUpfrontPct: 0.5, commRemainder: 'at-end', referralPartner: null,
+    });
+    expect(created.status).toBe(201);
+    const id = created.body.id;
+    await admin.post(`/api/admin/deals/${id}/collection`).send({ segmentKey: 'base', markUpfront: true, confirmedDate: '2026-01-02' });
+    await admin.post(`/api/admin/deals/${id}/collection`).send({ segmentKey: 'base', recordWeeks: 2, confirmedDate: '2026-01-03' });
+    const paid = await admin.post(`/api/admin/deals/${id}/collection`).send({ segmentKey: 'base', markRemainder: true, confirmedDate: '2026-01-04' });
+    expect(paid.body.segments[0].schedule.remainderReceived).toBe(true);
+    const reopened = await admin.post(`/api/admin/deals/${id}/collection`).send({ segmentKey: 'base', recordWeeks: -1 });
+    expect(reopened.body.segments[0].schedule).toMatchObject({ received: 1, remainderReceived: false });
+    expect(reopened.body.segments[0].schedule.confirmedDates?.['3']).toBeUndefined();
+    expect(reopened.body.segments[0].schedule.events.find((e: { kind: string }) => e.kind === 'remainder').received).toBe(false);
   });
   it('treats Reverse total funding as a grid-backed parent even when settings says non-incremental', async () => {
     const { admin, repo } = await harness();

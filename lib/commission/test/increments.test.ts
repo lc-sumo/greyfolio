@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collectedOf, collectionLabel, scheduleEvents, scheduleFor, segmentStatus, withAmounts, withRemainder, withStopped } from '../src/collection.js';
+import { collectedOf, collectionLabel, scheduleEvents, scheduleFor, segmentStatus, settlementOf, withAmounts, withRemainder, withStopped } from '../src/collection.js';
 import { disbursementOf, incrementParts, parseIncrementGrid } from '../src/increments.js';
 import { repLedger } from '../src/ledger.js';
 import { segments, totalFunded, totalGross, totalNet } from '../src/segments.js';
@@ -100,6 +100,11 @@ describe('partial upfront consolidation commission', () => {
     expect(totalGross(d)).toBe(3_600);
     expect(parts).toMatchObject({ upfront: 6_000, remainder: 0, effectiveGross: 3_600 });
     expect(parts.upfront - seg.gross).toBe(2_400);
+  });
+  it('settles a 75% opt-out at earned gross less the upfront credit', () => {
+    const d = makeDeal({ id: 'F11', funded: 100_000, commRate: 0.2, lender: 'ROWAN', commCollected: null, commSchedule: { ...scheduleFor(rowan, '2026-06-01', { upfrontPct: 50, remainder: 'at-end' })!, upfrontReceived: true, received: 15, stoppedAfter: 15 }, closerId: null, overrideId: null });
+    const settlement = settlementOf(segments(d)[0]!)!;
+    expect(settlement).toMatchObject({ finalized: true, reason: 'merchant_opted_out', actualFunded: 75_000, earnedGross: 15_000, upfrontCredit: 10_000, backendDue: 5_000, recoverableOverpayment: 0 });
   });
 });
 

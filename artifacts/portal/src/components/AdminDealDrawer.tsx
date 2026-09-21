@@ -14,6 +14,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
   const { notify } = useSession();
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['admin-deal', id], queryFn: () => api<AdminDealDetail>(`/api/admin/deals/${encodeURIComponent(id)}`) });
+  const adjustments = useQuery({ queryKey: ['admin-deal-adjustments', id], queryFn: () => api<Array<{ id: string; dealId: string; business: string; repId: string; repName: string; amount: number; reason: string; effectiveDate: string; reversalOf: string | null }>>(`/api/admin/deals/${encodeURIComponent(id)}/wallet-adjustments`) });
   const d = q.data;
   const clawbackRepTotal = d?.clawbacks.reduce((total, clawback) => total + clawback.slices.reduce((sum, slice) => sum + slice.share, 0), 0) ?? 0;
   const clawbackRepRemaining = d?.clawbacks.reduce((total, clawback) => total + clawback.slices.reduce((sum, slice) => sum + slice.remaining, 0), 0) ?? 0;
@@ -26,6 +27,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
   const [legacyNotes, setLegacyNotes] = useState<string | null>(null);
   const [splits, setSplits] = useState<Record<string, string>>({});
   const [err, setErr] = useState('');
+  const [adj, setAdj] = useState({ repId: '', amount: '', reason: '', effectiveDate: new Date().toISOString().slice(0, 10), key: '' });
   useEffect(() => {
     if (d) setSplits({ openerId: d.roles[0]?.repId ?? '', openerRate: String((d.roles[0]?.rate ?? 0) * 100), closerId: d.roles[1]?.repId ?? '', closerRate: String((d.roles[1]?.rate ?? 0) * 100), overrideId: d.roles[2]?.repId ?? '', overrideRate: String((d.roles[2]?.rate ?? 0) * 100) });
   }, [d?.id, d?.roles.map((r) => `${r.repId}:${r.rate}`).join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -156,6 +158,20 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
             </dl>
           </section>
 
+          <section className="card">
+            <h3>Wallet adjustments <small>separate from payouts and cash</small></h3>
+            {(adjustments.data ?? []).map((a) => <div className="row" key={a.id}><span><b>{a.dealId}</b> · {a.business} · {a.repName}<span className="subtle"> · {a.reason}{a.reversalOf ? ' · reversal' : ''}</span></span><span className={`num ${a.amount < 0 ? 'neg' : 'pos'}`}>{money(a.amount)}</span>{!a.reversalOf && <button className="btn" onClick={() => { if (window.confirm(`Reverse ${a.dealId} · ${a.business} adjustment ${money(a.amount)}?`)) void run('Adjustment reversed', async () => { await post(`/api/admin/deals/${id}/wallet-adjustments/${a.id}/reverse`, { idempotencyKey: `reverse-${a.id}`, reason: `Reversal: ${a.reason}` }); }); }}>Reverse</button>}</div>)}
+            {!adjustments.data?.length && <div className="muted">No adjustments on this deal.</div>}
+            <div className="form" style={{ marginTop: 12 }}>
+              <select value={adj.repId} onChange={(e) => setAdj({ ...adj, repId: e.target.value })}><option value="">Select rep</option>{opts.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}</select>
+              <input placeholder="Signed amount" inputMode="decimal" value={adj.amount} onChange={(e) => setAdj({ ...adj, amount: e.target.value })} />
+              <input placeholder="Reason" value={adj.reason} onChange={(e) => setAdj({ ...adj, reason: e.target.value })} />
+              <input type="date" value={adj.effectiveDate} onChange={(e) => setAdj({ ...adj, effectiveDate: e.target.value })} />
+              <button className="btn primary" disabled={!adj.repId || !adj.amount || !adj.reason || !adj.key} onClick={() => void run('Wallet adjustment recorded', async () => { await post(`/api/admin/deals/${id}/wallet-adjustments`, { repId: adj.repId, amount: Number(adj.amount), reason: adj.reason, effectiveDate: adj.effectiveDate, idempotencyKey: adj.key }); setAdj({ ...adj, amount: '', reason: '', key: '' }); await adjustments.refetch(); })}>Add adjustment</button>
+              <input placeholder="Idempotency key (required)" value={adj.key} onChange={(e) => setAdj({ ...adj, key: e.target.value })} />
+            </div>
+          </section>
+
           {d.segments.map((s) => s.schedule && (
             <section className="card" key={s.sk}>
               <h3>Commission payout schedule{s.sk !== 'base' && <small>{s.label}</small>}{s.schedule.overdue > 0 && <small className="neg">{s.schedule.overdue} overdue · {money(s.schedule.overdueAmount)}</small>}</h3>
@@ -174,6 +190,7 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
                 <dt>Lender paid</dt><dd>{s.schedule.received}/{s.schedule.weeks} increments{s.schedule.remainder === 'spread' ? ` · ${money(s.schedule.perWeek * s.schedule.received)}` : ''}</dd>
                 <dt>Collected so far</dt><dd>{money(s.collected)} <span className="subtle">of {money(s.gross)}</span></dd>
                 {s.schedule.overpayment > 0 && <><dt className="neg">Upfront recovery due</dt><dd className="neg"><b>{money(s.schedule.overpayment)}</b> <span className="subtle">received above commission earned on final funding</span></dd></>}
+                 {s.schedule.settlement && <><dt>Settlement</dt><dd style={{ fontFamily: 'var(--sans)' }}><b>{s.schedule.settlement.finalized ? (s.schedule.settlement.reason === 'merchant_opted_out' ? 'Merchant opted out' : 'Completed') : 'In progress'}</b><div className="subtle">Actual funded {money(s.schedule.settlement.actualFunded)} · earned gross {money(s.schedule.settlement.earnedGross)} · upfront credit {money(s.schedule.settlement.upfrontCredit)}{s.schedule.settlement.recoverableOverpayment > 0 ? ` · recoverable overpayment ${money(s.schedule.settlement.recoverableOverpayment)}` : ` · backend due ${money(s.schedule.settlement.backendDue)}`}</div></dd></>}
                 {s.schedule.paidToReps.length > 0 && <><dt>Rep paid</dt><dd style={{ fontFamily: 'var(--sans)' }}>{s.schedule.paidToReps.map((r) => <div key={r.role}><span className="num">{r.paid}/{r.total}</span> <span className="subtle">{r.name} · {r.role}</span></div>)}</dd></>}
                 <dt>Still to come</dt><dd>{money(s.outstanding)}</dd>
                 <dt>Next expected</dt><dd>{s.schedule.nextExpected ? <>{s.schedule.nextExpected.expected ? day(s.schedule.nextExpected.expected) : '—'} <span className="subtle" style={{ fontFamily: 'var(--sans)' }}>· {s.schedule.nextExpected.label}{s.schedule.nextExpected.amount ? ` · ${money(s.schedule.nextExpected.amount)}` : ''}{s.schedule.nextExpected.overdue ? <b className="neg"> · overdue</b> : ''}</span></> : <span className="pos">Complete</span>}</dd>
@@ -186,19 +203,21 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
               <details style={{ marginTop: 10 }}>
                 <summary className="muted" style={{ cursor: 'pointer', fontSize: 14 }}>Expected receipts ({s.schedule.events.length})</summary>
                 <div className="pl" style={{ marginTop: 6 }}>
-                  {s.schedule.events.map((e) => (
-                    <div className="row" key={`${e.kind}-${e.n}`} style={{ gridTemplateColumns: 'minmax(0,1fr) 90px 110px 100px 90px' }}>
+                  <div className="row subtle" style={{ gridTemplateColumns: 'minmax(0,1fr) 90px 90px 110px 125px 100px 90px', fontSize: 11, textTransform: 'uppercase' }}><span>Event</span><span>Expected</span><span>Confirmed</span><span>Funding</span><span>Commission</span><span>Source</span><span>Status</span></div>
+                   {s.schedule.events.map((e) => (
+                     <div className="row" key={`${e.kind}-${e.n}`} style={{ gridTemplateColumns: 'minmax(0,1fr) 90px 90px 110px 125px 100px 90px' }}>
                       <span className={e.overdue ? 'neg' : ''}>{e.label}</span>
                       <span className="num subtle">{e.expected ? day(e.expected) : '—'}</span>
+                       <span className="num subtle">{e.confirmed ? day(e.confirmed) : '—'}</span>
                       <span className="num subtle" title="Disbursed to the merchant at this increment">{e.funding !== undefined ? money(e.funding) : ''}</span>
                       <span className="num">{e.amount ? money(e.amount) : <span className="subtle">progress</span>}</span>
-                      <Pill tone={e.received ? 'teal' : e.overdue ? 'red' : 'grey'}>{e.received ? 'Received' : e.overdue ? 'Overdue' : 'Expected'}</Pill>
+                       <span className="subtle">{e.confirmedSource ?? ''}</span><Pill tone={e.received ? 'teal' : e.overdue ? 'red' : 'grey'}>{e.received ? 'Received' : e.overdue ? 'Overdue' : 'Expected'}</Pill>
                     </div>
                   ))}
                 </div>
               </details>
               <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                <button className="btn primary" disabled={s.schedule.received >= s.schedule.weeks} onClick={() => { const n = s.schedule!.received + 1; const event = s.schedule!.events.filter((e) => e.kind === 'increment')[n - 1]; if (window.confirm(`Add collected increment ${n} of ${s.schedule!.weeks}${event ? ` (${money(event.amount)} · expected ${event.expected ? fullDay(event.expected) : 'no date'})` : ''}?`)) void collect({ segmentKey: s.sk, recordWeeks: 1 }, `${d.id} — collected increment ${n} of ${s.schedule!.weeks} · ${money(event?.amount ?? 0)}`); }}>Add collected increment</button>
+                 <button className="btn primary" disabled={s.schedule.received >= s.schedule.weeks} onClick={() => { const n = s.schedule!.received + 1; const event = s.schedule!.events.filter((e) => e.kind === 'increment')[n - 1]; const confirmedDate = window.prompt('Confirmed lender receipt date (YYYY-MM-DD):', new Date().toISOString().slice(0, 10)); if (!confirmedDate) return; if (window.confirm(`Add collected increment ${n} of ${s.schedule!.weeks}${event ? ` (${money(event.amount)} · expected ${event.expected ? fullDay(event.expected) : 'no date'})` : ''}?`)) void collect({ segmentKey: s.sk, recordWeeks: 1, confirmedDate, confirmedSource: 'manual' }, `${d.id} — collected increment ${n} of ${s.schedule!.weeks} · ${money(event?.amount ?? 0)}`); }}>Add collected increment</button>
                 <button className="btn" disabled={s.schedule.received <= 0} onClick={() => { const n = s.schedule!.received; const event = s.schedule!.events.filter((e) => e.kind === 'increment')[n - 1]; if (window.confirm(`Remove collected increment ${n} of ${s.schedule!.weeks}${event ? ` (${money(event.amount)} · expected ${event.expected ? fullDay(event.expected) : 'no date'})` : ''}? This only reverses the most recently recorded lender collection.`)) void collect({ segmentKey: s.sk, recordWeeks: -1 }, `${d.id} — removed collected increment ${n} of ${s.schedule!.weeks}`); }}>Remove last increment</button>
                 {s.schedule.disbursement.stopped
                   ? <button className="btn" onClick={() => void collect({ segmentKey: s.sk, stopIncrements: false }, `${d.id} — plan reopened to ${s.schedule!.planned?.increments ?? s.schedule!.weeks} increments`)}>Reopen full plan</button>
@@ -210,7 +229,14 @@ export function AdminDealDrawer({ id, settings, editOptions, onClose }: { id: st
                       fundingReceived = Number(entered.replace(/[^0-9.]/g, ''));
                       if (!(fundingReceived >= 0) || fundingReceived > s.schedule!.disbursement.planned) { setErr(`Funding received must be between $0 and ${money(s.schedule!.disbursement.planned)}`); return; }
                     }
-                    void collect({ segmentKey: s.sk, stopIncrements: true, ...(fundingReceived === undefined ? {} : { fundingReceived }) }, `${d.id} — merchant opted out after ${s.schedule!.received} increments`);
+                     const planAmount = s.schedule!.planned?.amount ?? s.amount;
+                     const planGross = s.schedule!.planned?.gross ?? s.gross;
+                     const ratio = s.schedule!.amounts ? s.schedule!.amounts.slice(0, s.schedule!.received).reduce((a, b) => a + b, 0) / planAmount : s.schedule!.received / Math.max(1, s.schedule!.weeks);
+                     const earned = planGross * ratio;
+                     const upfront = s.schedule!.upfrontAmount;
+                     const already = s.collected;
+                     const preview = `\nActual funded ${money(planAmount * ratio)} · earned gross ${money(earned)} · upfront credit ${money(upfront)} · ${Math.max(0, already - earned) > 0 ? `recoverable overpayment ${money(already - earned)}` : `backend due ${money(Math.max(0, earned - already))}`}`;
+                     if (window.confirm(`Merchant opts out after ${s.schedule!.received} increments?${preview}`)) void collect({ segmentKey: s.sk, stopIncrements: true, ...(fundingReceived === undefined ? {} : { fundingReceived }) }, `${d.id} — merchant opted out after ${s.schedule!.received} increments`);
                   }}>Merchant opted out</button>}
               </div>
             </section>

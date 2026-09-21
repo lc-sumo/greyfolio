@@ -17,6 +17,8 @@ describe('immutable accounting correction chains', () => {
     expect(sync.indexOf('db.$client.reserve()')).toBeLessThan(sync.indexOf('pg_advisory_lock'));
     expect(sync.indexOf('pg_advisory_lock')).toBeLessThan(sync.indexOf('db.transaction'));
     expect(sync.indexOf('db.transaction')).toBeLessThan(sync.indexOf('tx.select().from(commissionDeals)'));
+    expect(sync).toContain('tx.select().from(commissionWalletAdjustments)');
+    expect(sync).not.toContain('db.select().from(commissionWalletAdjustments)');
     expect(sync).toContain('pg_advisory_unlock');
     expect(sync).toContain('connection.release()');
   });

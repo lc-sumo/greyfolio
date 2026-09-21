@@ -33,6 +33,15 @@ export function PayHistory() {
               {DEMO ? <span className="subtle" style={{ fontSize: 13 }}>Downloads are available on the live portal.</span> : <a className="btn" href="/api/me/payments.csv" download>Download pay history (CSV)</a>}
             </div>
           </Card>
+          <Card title="Wallet adjustments" extra="separate from payouts, cash and tax totals">
+            {h.adjustments.length === 0 ? <div className="muted">No wallet adjustments.</div> : <div className="pl">
+              {h.adjustments.map((a) => <div className="row" key={a.id}>
+                <span><b>{a.dealId}</b> · {a.business}<span className="subtle"> · {a.reason}{a.reversalOf ? ' · reversal' : ''}</span></span>
+                <span className={`num ${a.amount < 0 ? 'neg' : 'pos'}`}>{money(a.amount)}</span>
+                <span className="subtle">{fullDay(a.effectiveDate)}</span>
+              </div>)}
+            </div>}
+          </Card>
           <FilesPanel base="/api/me/files" title="My documents" hint="W-9 and agreements for the office · PDF or image · only an admin can remove one" canDelete={false} />
           {h.days.length > 1 && (() => {
             const years = new Map<string, { gross: number; recovered: number; cash: number; payouts: number }>();

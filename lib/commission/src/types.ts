@@ -130,6 +130,10 @@ export interface WeeklySchedule {
   stoppedAfter?: number | null;
   /** Exact final funded share for a manual opt-out when no increment grid exists. */
   stoppedFundingRatio?: number | null;
+  /** Actual lender receipt dates, keyed by increment number (1-based). */
+  confirmedDates?: Record<string, string>;
+  /** Optional provenance for an actual receipt (manual, remittance, etc.). */
+  confirmedSources?: Record<string, string>;
   /**
    * The increment grid: what the merchant is disbursed at each increment,
    * when the increments are not equal (e.g. 15 weeks at 12,500, then 8,000,
@@ -295,6 +299,20 @@ export interface PayoutLine {
   voids?: string | null;
 }
 
+/** Append-only, deal-linked correction to a rep's wallet. */
+export interface WalletAdjustment {
+  id: string;
+  idempotencyKey: string;
+  dealId: string;
+  repId: string;
+  amount: number;
+  reason: string;
+  effectiveDate: string;
+  actorRepId: string;
+  reversalOf: string | null;
+  createdAt: string;
+}
+
 export interface Clawback {
   id: string;
   dealId: string;
@@ -323,4 +341,5 @@ export interface LedgerContext {
   deals: Deal[];
   lines: PayoutLine[];
   clawbacks: Clawback[];
+  adjustments?: WalletAdjustment[];
 }

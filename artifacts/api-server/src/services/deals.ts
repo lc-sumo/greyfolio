@@ -2,6 +2,7 @@ import {
   ValidationError,
   asRate,
   collectedOf,
+  scheduleEvents,
   newDraw,
   nextDealId,
   priceDeal,
@@ -29,6 +30,12 @@ import { HttpError } from '../http-error.js';
 import type { Repo } from '../repo.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
+function validConfirmedDate(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00Z`) : new Date('invalid');
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value || value > today()) throw new HttpError(400, 'Confirmed date must be a real ISO date that is not in the future');
+  return value;
+}
 
 async function requireDeal(repo: Repo, id: string): Promise<Deal> {
   const ctx = await repo.loadContext();
@@ -234,6 +241,9 @@ export async function updateTerms(repo: Repo, id: string, input: Partial<NewDeal
     throw new HttpError(400, 'The incremental schedule has received commission history and cannot be removed');
   }
   if (commSchedule && s) {
+    if (receivedActivity && Math.round(priced.gross * 100) !== Math.round(deal.gross * 100)) {
+      throw new HttpError(400, 'Commission terms cannot change after lender receipts have been confirmed');
+    }
     if (commSchedule.weeks < s.received) throw new HttpError(400, `The grid has ${commSchedule.weeks} increments but ${s.received} were already received`);
     const oldAmounts = s.amounts ?? (s.weeks > 0 ? Array.from({ length: s.weeks }, () => Math.round((deal.funded / s.weeks) * 100) / 100) : []);
     const nextAmounts = commSchedule.amounts ?? [];
@@ -242,7 +252,28 @@ export async function updateTerms(repo: Repo, id: string, input: Partial<NewDeal
         throw new HttpError(400, `Received increment ${i + 1} is immutable`);
       }
     }
-    commSchedule = { ...commSchedule, received: Math.min(s.received, commSchedule.weeks), upfrontReceived: commSchedule.upfrontPct ? !!s.upfrontReceived : undefined, remainderReceived: commSchedule.remainder === 'at-end' ? !!s.remainderReceived : undefined, stoppedAfter: s.stoppedAfter === null || s.stoppedAfter === undefined ? s.stoppedAfter : Math.min(s.stoppedAfter, commSchedule.weeks) };
+    // A received event's commission economics are historical facts too. A
+    // terms edit may change future pricing, but never silently re-price a
+    // receipt that has already been confirmed.
+    if (receivedActivity) {
+      const oldSegment = segmentOf(deal, 'base');
+      const nextSegment = segmentOf(priced, 'base');
+      const oldEvents = oldSegment ? scheduleEvents({ ...oldSegment, schedule: s }, '9999-12-31').filter((e) => e.received) : [];
+      const historicalNextSchedule = commSchedule ? {
+        ...commSchedule,
+        received: Math.min(s.received, commSchedule.weeks),
+        upfrontReceived: commSchedule.upfrontPct ? !!s.upfrontReceived : undefined,
+        remainderReceived: commSchedule.remainder === 'at-end' ? !!s.remainderReceived : undefined,
+      } : null;
+      const nextEvents = nextSegment && historicalNextSchedule ? scheduleEvents({ ...nextSegment, schedule: historicalNextSchedule }, '9999-12-31').filter((e) => e.received) : [];
+      for (const oldEvent of oldEvents) {
+        const nextEvent = nextEvents.find((e) => e.n === oldEvent.n);
+        if (!nextEvent || Math.round(nextEvent.amount * 100) !== Math.round(oldEvent.amount * 100)) {
+          throw new HttpError(400, 'Commission terms cannot re-price confirmed lender receipts');
+        }
+      }
+    }
+    commSchedule = { ...commSchedule, received: Math.min(s.received, commSchedule.weeks), upfrontReceived: commSchedule.upfrontPct ? !!s.upfrontReceived : undefined, remainderReceived: commSchedule.remainder === 'at-end' ? !!s.remainderReceived : undefined, stoppedAfter: s.stoppedAfter === null || s.stoppedAfter === undefined ? s.stoppedAfter : Math.min(s.stoppedAfter, commSchedule.weeks), confirmedDates: s.confirmedDates, confirmedSources: s.confirmedSources };
   } else if (!commSchedule && typeof deal.commCollected === 'number') {
     commCollected = Math.min(deal.commCollected, priced.gross);
   }
@@ -355,12 +386,12 @@ export async function addDraw(repo: Repo, id: string, input: { amount: number; d
 }
 
 export type CollectionInput =
-  | { segmentKey: SegmentKey; dollars: number }
+  | { segmentKey: SegmentKey; dollars: number; confirmedDate?: string; confirmedSource?: string }
   | { segmentKey: SegmentKey; status: CommissionStatus; partialDollars?: number }
-  | { segmentKey: SegmentKey; recordWeeks: number }
+  | { segmentKey: SegmentKey; recordWeeks: number; confirmedDate?: string; confirmedSource?: string }
   | { segmentKey: SegmentKey; toggle: true }
-  | { segmentKey: SegmentKey; markUpfront: boolean }
-  | { segmentKey: SegmentKey; markRemainder: boolean }
+  | { segmentKey: SegmentKey; markUpfront: boolean; confirmedDate?: string; confirmedSource?: string }
+  | { segmentKey: SegmentKey; markRemainder: boolean; confirmedDate?: string; confirmedSource?: string }
   | { segmentKey: SegmentKey; stopIncrements: boolean; fundingReceived?: number | null }
   | { segmentKey: SegmentKey; amounts: number[] | null };
 
@@ -374,18 +405,34 @@ export async function setCollection(repo: Repo, id: string, input: CollectionInp
   const seg = segmentOf(deal, input.segmentKey);
   if (!seg) throw new HttpError(404, `Segment ${input.segmentKey} not found on ${id}`);
   const buildPatch = (currentSeg: NonNullable<ReturnType<typeof segmentOf>>) => {
+    if ('confirmedDate' in input) validConfirmedDate(input.confirmedDate);
     let patch;
-    if ('dollars' in input) patch = withCollection(currentSeg, Number(input.dollars));
+    if ('dollars' in input) {
+      patch = withCollection(currentSeg, Number(input.dollars));
+      if (patch.schedule) {
+        const prior = currentSeg.schedule;
+        const date = input.confirmedDate ?? today();
+        const source = input.confirmedSource ?? 'manual';
+        const dates = { ...(patch.schedule.confirmedDates ?? {}) };
+        const sources = { ...(patch.schedule.confirmedSources ?? {}) };
+        const from = prior?.received ?? 0;
+        for (let i = from + 1; i <= patch.schedule.received; i++) { dates[String(i)] ??= date; sources[String(i)] ??= source; }
+        if (!prior?.upfrontReceived && patch.schedule.upfrontReceived) { dates['0'] ??= date; sources['0'] ??= source; }
+        patch.schedule = { ...patch.schedule, confirmedDates: dates, confirmedSources: sources };
+      }
+    }
     else if ('status' in input) patch = withStatus(currentSeg, input.status, input.partialDollars);
     else if ('recordWeeks' in input) {
-      patch = recordWeek(currentSeg, Number(input.recordWeeks));
+      patch = recordWeek(currentSeg, Number(input.recordWeeks), input.confirmedDate ?? today(), input.confirmedSource ?? 'manual');
       if (!patch) throw new HttpError(400, `${id} ${currentSeg.sk} is not on an incremental schedule`);
     } else if ('markUpfront' in input) {
       patch = withUpfront(currentSeg, !!input.markUpfront);
       if (!patch) throw new HttpError(400, `${id} ${currentSeg.sk} has no upfront share`);
+      if (input.markUpfront && patch.schedule) patch.schedule = { ...patch.schedule, confirmedDates: { ...(patch.schedule.confirmedDates ?? {}), '0': input.confirmedDate ?? today() }, confirmedSources: { ...(patch.schedule.confirmedSources ?? {}), '0': input.confirmedSource ?? 'manual' } };
     } else if ('markRemainder' in input) {
       patch = withRemainder(currentSeg, !!input.markRemainder);
       if (!patch) throw new HttpError(400, `${id} ${currentSeg.sk} has no at-end remainder`);
+      if (input.markRemainder && patch.schedule) patch.schedule = { ...patch.schedule, confirmedDates: { ...(patch.schedule.confirmedDates ?? {}), [String(patch.schedule.weeks + 1)]: input.confirmedDate ?? today() }, confirmedSources: { ...(patch.schedule.confirmedSources ?? {}), [String(patch.schedule.weeks + 1)]: input.confirmedSource ?? 'manual' } };
     } else if ('amounts' in input) {
       try {
         patch = withAmounts(currentSeg, Array.isArray(input.amounts) ? input.amounts.map(Number) : null);

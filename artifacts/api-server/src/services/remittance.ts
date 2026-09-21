@@ -102,14 +102,14 @@ export function planReceipt(seg: Segment, amount: number, on: string): { steps: 
     for (const e of pending) {
       if (sum + e.amount > amount + tol) break;
       sum = cents(sum + e.amount);
-      if (e.kind === 'upfront') steps.push({ segmentKey: seg.sk, input: { markUpfront: true }, label: 'Upfront', amount: e.amount });
+      if (e.kind === 'upfront') steps.push({ segmentKey: seg.sk, input: { markUpfront: true, confirmedDate: on, confirmedSource: 'remittance' }, label: 'Upfront', amount: e.amount });
       else if (e.kind === 'increment') {
         weeks++;
         first ||= e.n;
         last = e.n;
-      } else steps.push({ segmentKey: seg.sk, input: { markRemainder: true }, label: 'Final', amount: e.amount });
+      } else steps.push({ segmentKey: seg.sk, input: { markRemainder: true, confirmedDate: on, confirmedSource: 'remittance' }, label: 'Final', amount: e.amount });
     }
-    if (weeks) steps.splice(steps.findIndex((s) => s.label === 'Final') >= 0 ? steps.findIndex((s) => s.label === 'Final') : steps.length, 0, { segmentKey: seg.sk, input: { recordWeeks: weeks }, label: weeks === 1 ? `Increment ${first}` : `Increments ${first}–${last}`, amount: cents(pending.filter((e) => e.kind === 'increment' && e.n >= first && e.n <= last).reduce((s, e) => s + e.amount, 0)) });
+     if (weeks) steps.splice(steps.findIndex((s) => s.label === 'Final') >= 0 ? steps.findIndex((s) => s.label === 'Final') : steps.length, 0, { segmentKey: seg.sk, input: { recordWeeks: weeks, confirmedDate: on, confirmedSource: 'remittance' }, label: weeks === 1 ? `Increment ${first}` : `Increments ${first}–${last}`, amount: cents(pending.filter((e) => e.kind === 'increment' && e.n >= first && e.n <= last).reduce((s, e) => s + e.amount, 0)) });
     const plan = steps.length ? steps.map((s) => s.label).join(' + ') : pending.length ? `Less than the next receipt (${pending[0]!.label} is ${pending[0]!.amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })})` : 'Schedule already complete';
     return { steps, plan, unapplied: cents(amount - sum) };
   }
@@ -187,7 +187,11 @@ function applyToCopy(deal: Deal, steps: RemittanceStep[]): void {
     } else if (sched) {
       const next = { ...sched };
       if ('markUpfront' in st.input) next.upfrontReceived = true;
-      if ('recordWeeks' in st.input) next.received = Math.min(next.weeks, next.received + Number(st.input.recordWeeks));
+     if ('recordWeeks' in st.input) {
+       const prior = next.received;
+       next.received = Math.min(next.weeks, next.received + Number(st.input.recordWeeks));
+       if (st.input.confirmedDate) next.confirmedDates = { ...(next.confirmedDates ?? {}), ...Object.fromEntries(Array.from({ length: next.received - prior }, (_, i) => [String(prior + i + 1), String(st.input.confirmedDate)]) ) };
+     }
       if ('markRemainder' in st.input) next.remainderReceived = true;
       if (isBase) deal.commSchedule = next;
       else deal.draws = deal.draws.map((d) => (d.ref === st.segmentKey ? { ...d, schedule: next } : d));

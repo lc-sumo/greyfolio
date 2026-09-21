@@ -1,9 +1,9 @@
-import type { AccountingJournal, Clawback, Deal, DealDraw, Lender, LedgerContext, PayoutLine, PayrollRun, ProductRule, ReferralPartner, Rep, SegmentKey, Team, WeeklySchedule } from '@greystone/commission';
+import type { AccountingJournal, Clawback, Deal, DealDraw, Lender, LedgerContext, PayoutLine, PayrollRun, ProductRule, ReferralPartner, Rep, SegmentKey, Team, WeeklySchedule, WalletAdjustment } from '@greystone/commission';
 import type { PlaybookRule } from './services/playbook-rules.js';
 
 export interface AuditEntry {
   actorRepId: string;
-  action: 'login' | 'logout' | 'view-as' | 'deal.create' | 'deal.update' | 'deal.draw' | 'deal.collection' | 'payroll.run' | 'payroll.pay' | 'settings.update' | 'team.update' | 'rep.update' | 'rep.password' | 'login.failed' | 'deal.delete' | 'payroll.void' | 'deal.import' | 'password.reset' | 'rep.totp' | 'deal.note' | 'deal.file' | 'deal.clawback' | 'deal.remittance' | 'mail.sent' | 'deal.draw.delete' | 'payroll.run.delete' | 'payroll.run.archive' | 'deal.contact' | 'deal.draw.update' | 'deal.clawback.update' | 'deal.clawback.delete' | 'payroll.run.reopen' | 'settings.rename' | 'rep.invite' | 'rep.device' | 'session.idle' | 'rep.file' | 'rep.calendar' | 'deal.referral.paid' | 'settings.playbook' | 'playbook.fired' | 'task' | 'mail.merchant' | 'backup' | 'books.sync' | 'books.period.close' | 'books.period.reopen' | 'books.period.create' | 'books.reconciliation';
+  action: string;
   targetRepId: string | null;
   path: string | null;
   detail?: Record<string, unknown>;
@@ -171,6 +171,9 @@ export interface Repo {
   listTeams(): Promise<Team[]>;
   listRuns(): Promise<PayrollRun[]>;
   loadContext(): Promise<LedgerContext>;
+  listWalletAdjustments(): Promise<WalletAdjustment[]>;
+  createWalletAdjustment(adjustment: WalletAdjustment): Promise<WalletAdjustment>;
+  reverseWalletAdjustment(id: string, reversal: WalletAdjustment): Promise<WalletAdjustment>;
   getSetting<T>(key: string): Promise<T | null>;
   /** Atomically create a setting only when its key does not already exist. */
   claimSettingOnce(key: string, value?: unknown): Promise<boolean>;

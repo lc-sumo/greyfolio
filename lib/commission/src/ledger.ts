@@ -47,6 +47,7 @@ export function repLedger(ctx: LedgerContext, repId: string): RepLedger {
   const accrued = sum(deals.flatMap((d) => dealLines(d).filter((l) => l.repId === repId && l.collected).map((l) => l.amount)));
   const paid = sum(standingLines(mine).filter((l) => l.amount > 0).map((l) => l.amount));
   const cash = sum(mine.map((l) => l.amount)); // voids cancel their originals here
+  const adjustments = sum((ctx.adjustments ?? []).filter((a) => a.repId === repId).map((a) => a.amount));
 
   let held = 0;
   let recovered = 0;
@@ -62,7 +63,7 @@ export function repLedger(ctx: LedgerContext, repId: string): RepLedger {
   held = cents(held);
   recovered = cents(recovered);
 
-  const balance = cents(accrued - paid - held);
+  const balance = cents(accrued - paid - held + adjustments);
   return {
     deals, earned, accrued, awaitingLender: Math.max(0, cents(earned - accrued)),
     paid, cash, held, recovered, balance, payable: Math.max(0, balance),

@@ -6,7 +6,9 @@ import { adminMerchants, adminOverview, merchantKey } from '../analytics-views.j
 import type { Repo } from '../repo.js';
 import { addDraw, createDeal, deleteClawback, deleteDeal, deleteDraw, linkRenewal, recordClawback, updateClawback, updateContact, updateDealMetadata, updateDrawTerms, setCollection, setCrmId, setDealStatus, updateSplits, updateTerms } from '../services/deals.js';
 import { addFile, addNote, fetchFile, removeFile, removeNote } from '../services/notes.js';
+import { previewIncrementGridUpload } from '../services/increment-grid-import.js';
 import { notifyClawback, type NotifyDeps } from '../services/notify.js';
+import { createAdjustment, reverseAdjustment } from '../services/wallet-adjustments.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -18,6 +20,53 @@ const today = () => new Date().toISOString().slice(0, 10);
 export function adminDealsRouter(repo: Repo, notify?: Omit<NotifyDeps, 'repo'>): Router {
   const r = Router();
   r.use(requireRole('admin'));
+
+  r.get('/wallet-adjustments', async (_req, res) => {
+    const [adjustments, deals, reps] = await Promise.all([repo.listWalletAdjustments(), repo.loadContext(), repo.listReps()]);
+    const names = new Map(reps.map((r) => [r.id, r.name]));
+    const businesses = new Map(deals.deals.map((d) => [d.id, d.business]));
+    res.json(adjustments.map((a) => ({ ...a, repName: names.get(a.repId) ?? a.repId, business: businesses.get(a.dealId) ?? a.dealId })));
+  });
+  r.get('/deals/:id/wallet-adjustments', async (req, res) => {
+    const [ctx, reps] = await Promise.all([repo.loadContext(), repo.listReps()]);
+    const deal = ctx.deals.find((d) => d.id === String(req.params.id));
+    if (!deal) throw new HttpError(404, 'Deal not found');
+    const names = new Map(reps.map((r) => [r.id, r.name]));
+    res.json((ctx.adjustments ?? []).filter((a) => a.dealId === deal.id).map((a) => ({ ...a, dealId: deal.id, business: deal.business, repId: a.repId, repName: names.get(a.repId) ?? a.repId })));
+  });
+  r.post('/wallet-adjustments', async (req, res) => {
+    const actor = currentUser(req)!.repId;
+    const body = req.body ?? {};
+    let created;
+    try { created = await createAdjustment(repo, { ...body, idempotencyKey: String(body.idempotencyKey ?? ''), dealId: String(body.dealId ?? ''), repId: String(body.repId ?? '') }, actor); } catch (e) { throw new HttpError(400, e instanceof Error ? e.message : 'Invalid wallet adjustment'); }
+    await repo.writeAudit({ actorRepId: actor, action: 'wallet.adjustment.create', targetRepId: created.repId, path: req.path, detail: { id: created.id, dealId: created.dealId, amount: created.amount } });
+    res.status(201).json(created);
+  });
+  r.post('/deals/:id/wallet-adjustments', async (req, res) => {
+    const actor = currentUser(req)!.repId;
+    let created;
+    try { created = await createAdjustment(repo, { ...req.body, dealId: String(req.params.id), idempotencyKey: String(req.body?.idempotencyKey ?? ''), repId: String(req.body?.repId ?? '') }, actor); } catch (e) { throw new HttpError(400, e instanceof Error ? e.message : 'Invalid wallet adjustment'); }
+    await repo.writeAudit({ actorRepId: actor, action: 'wallet.adjustment.create', targetRepId: created.repId, path: req.path, detail: { id: created.id, dealId: created.dealId, amount: created.amount, reason: created.reason } });
+    res.status(201).json(created);
+  });
+  r.post('/wallet-adjustments/:id/reverse', async (req, res) => {
+    const actor = currentUser(req)!.repId;
+    let created;
+    try { created = await reverseAdjustment(repo, String(req.params.id), String(req.body?.idempotencyKey ?? ''), req.body?.reason, actor); } catch (e) { throw new HttpError(400, e instanceof Error ? e.message : 'Invalid reversal'); }
+    await repo.writeAudit({ actorRepId: actor, action: 'wallet.adjustment.reverse', targetRepId: created.repId, path: req.path, detail: { id: created.id, reversalOf: created.reversalOf, dealId: created.dealId, reason: created.reason } });
+    res.status(201).json(created);
+  });
+  r.post('/deals/:dealId/wallet-adjustments/:id/reverse', async (req, res) => {
+    const actor = currentUser(req)!.repId;
+    const dealId = String(req.params.dealId);
+    const original = (await repo.listWalletAdjustments()).find((a) => a.id === String(req.params.id));
+    if (!original) throw new HttpError(404, 'Adjustment not found');
+    if (original.dealId !== dealId) throw new HttpError(400, 'Adjustment does not belong to this deal');
+    let created;
+    try { created = await reverseAdjustment(repo, String(req.params.id), String(req.body?.idempotencyKey ?? ''), req.body?.reason, actor); } catch (e) { throw new HttpError(400, e instanceof Error ? e.message : 'Invalid reversal'); }
+    await repo.writeAudit({ actorRepId: actor, action: 'wallet.adjustment.reverse', targetRepId: created.repId, path: req.path, detail: { id: created.id, reversalOf: created.reversalOf, dealId: created.dealId, reason: created.reason } });
+    res.status(201).json(created);
+  });
 
   r.get('/settings', async (_req, res) => {
     res.json(await repo.getSettings());
@@ -86,6 +135,10 @@ export function adminDealsRouter(repo: Repo, notify?: Omit<NotifyDeps, 'repo'>):
     const [ctx, reps, settings] = await Promise.all([repo.loadContext(), repo.listReps(), repo.getSettings()]);
     res.status(201).json(adminDealDetail(deal, ctx, reps, settings, today()));
   });
+  r.post('/deals/increment-grid/preview', async (req, res) => {
+    const planned = req.body?.planned === null || req.body?.planned === undefined ? null : Number(req.body.planned);
+    res.json(await previewIncrementGridUpload(req.body ?? {}, Number.isFinite(planned) ? planned : null));
+  });
 
   const detailOf = async (id: string) => {
     const [ctx, reps, settings] = await Promise.all([repo.loadContext(), repo.listReps(), repo.getSettings()]);
@@ -97,6 +150,12 @@ export function adminDealsRouter(repo: Repo, notify?: Omit<NotifyDeps, 'repo'>):
   r.patch('/deals/:id/terms', async (req, res) => {
     await updateTerms(repo, String(req.params.id), req.body ?? {}, currentUser(req)!.repId);
     res.json(await detailOf(String(req.params.id)));
+  });
+  r.post('/deals/:id/increment-grid/preview', async (req, res) => {
+    const ctx = await repo.loadContext();
+    const deal = ctx.deals.find((d) => d.id === String(req.params.id));
+    if (!deal) throw new HttpError(404, 'Deal not found');
+    res.json(await previewIncrementGridUpload(req.body ?? {}, deal.funded));
   });
   r.delete('/deals/:id', async (req, res) => {
     await deleteDeal(repo, String(req.params.id), currentUser(req)!.repId);

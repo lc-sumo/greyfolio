@@ -26,6 +26,7 @@ import {
   commissionSheetsSyncOperations,
   commissionTeams,
   commissionTrustedDevices,
+  commissionWalletAdjustments,
   toClawback,
   toDeal,
   toPayoutLine,
@@ -34,10 +35,12 @@ import {
   type Database,
 } from '@greystone/db';
 import { NOTIFICATION_DEFAULTS, PERMISSION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AccountingPeriod, type AuditEntry, type ClawbackMutationContext, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Reconciliation, type Repo, type RepFile, type RepTask, type Settings, type StoredJournal, type TotpState, type TrustedDevice } from './repo.js';
+import type { WalletAdjustment } from '@greystone/commission';
 import type { PlaybookRule } from './services/playbook-rules.js';
 import { requestMeta } from './auth/request-context.js';
 
 let accountingSyncTail = Promise.resolve();
+const toWalletAdjustment = (row: typeof commissionWalletAdjustments.$inferSelect): WalletAdjustment => ({ ...row, createdAt: row.createdAt.toISOString() });
 
 async function serializeAccountingSync<T>(work: () => Promise<T>): Promise<T> {
   const previous = accountingSyncTail;
@@ -113,7 +116,8 @@ export function dbRepo(db: Database): Repo {
             tx.select().from(commissionPayoutLines),
             tx.select().from(commissionClawbacks).where(sql`${commissionClawbacks.forgivenAt} is null`),
           ]);
-          projectionResult = projectAccounting({ deals: deals.map((d) => toDeal(d, draws)), payoutLines: lines.map(toPayoutLine), clawbacks: clawbacks.map(toClawback) });
+          const adjustments = await tx.select().from(commissionWalletAdjustments);
+          projectionResult = projectAccounting({ deals: deals.map((d) => toDeal(d, draws)), payoutLines: lines.map(toPayoutLine), clawbacks: clawbacks.map(toClawback), adjustments: adjustments.map(toWalletAdjustment) });
           syncEntries = projectionResult.journals;
           syncEntries.forEach(assertBalanced);
         }
@@ -438,13 +442,61 @@ export function dbRepo(db: Database): Repo {
       return rows.map((r) => ({ id: r.id, label: r.label, start: r.start, end: r.end, status: r.status as PayrollRun['status'] }));
     },
     async loadContext(): Promise<LedgerContext> {
-      const [deals, draws, lines, clawbacks] = await Promise.all([
+      const [deals, draws, lines, clawbacks, adjustments] = await Promise.all([
         db.select().from(commissionDeals).where(sql`${commissionDeals.deletedAt} is null`).orderBy(desc(commissionDeals.date), desc(commissionDeals.id)),
         db.select().from(commissionDealDraws),
         db.select().from(commissionPayoutLines),
         db.select().from(commissionClawbacks).where(sql`${commissionClawbacks.forgivenAt} is null`),
+        db.select().from(commissionWalletAdjustments),
       ]);
-      return { deals: deals.map((d) => toDeal(d, draws)), lines: lines.map(toPayoutLine), clawbacks: clawbacks.map(toClawback) };
+      return { deals: deals.map((d) => toDeal(d, draws)), lines: lines.map(toPayoutLine), clawbacks: clawbacks.map(toClawback), adjustments: adjustments.map(toWalletAdjustment) };
+    },
+    async listWalletAdjustments() { return (await db.select().from(commissionWalletAdjustments)).map(toWalletAdjustment); },
+    async createWalletAdjustment(a) {
+      try {
+        return await db.transaction(async (tx) => {
+        const prior = await tx.select().from(commissionWalletAdjustments).where(eq(commissionWalletAdjustments.idempotencyKey, a.idempotencyKey)).limit(1);
+        if (prior[0]) {
+          const existing = toWalletAdjustment(prior[0]);
+          if (existing.dealId !== a.dealId || existing.repId !== a.repId || existing.amount !== a.amount || existing.reason !== a.reason || existing.effectiveDate !== a.effectiveDate) throw new Error('idempotency key conflicts with an existing adjustment');
+          return existing;
+        }
+        const rows = await tx.insert(commissionWalletAdjustments).values({ ...a, createdAt: new Date(a.createdAt) }).returning();
+        return toWalletAdjustment(rows[0]!);
+        });
+      } catch (error) {
+        // A concurrent request may win the unique idempotency insert after
+        // both transactions read no prior row. Replay it if the payload agrees.
+        const prior = await db.select().from(commissionWalletAdjustments).where(eq(commissionWalletAdjustments.idempotencyKey, a.idempotencyKey)).limit(1);
+        if (prior[0]) {
+          const existing = toWalletAdjustment(prior[0]);
+          if (existing.dealId === a.dealId && existing.repId === a.repId && existing.amount === a.amount && existing.reason === a.reason && existing.effectiveDate === a.effectiveDate) return existing;
+          throw new Error('idempotency key conflicts with an existing adjustment');
+        }
+        throw error;
+      }
+    },
+    async reverseWalletAdjustment(id, reversal) {
+      return db.transaction(async (tx) => {
+        const original = await tx.select().from(commissionWalletAdjustments).where(eq(commissionWalletAdjustments.id, id)).for('update').limit(1);
+        if (!original[0]) throw new Error('Adjustment not found');
+        if (original[0].reversalOf) throw new Error('Cannot reverse a reversal');
+        const sameKey = await tx.select().from(commissionWalletAdjustments).where(eq(commissionWalletAdjustments.idempotencyKey, reversal.idempotencyKey)).limit(1);
+        if (sameKey[0]) {
+          if (sameKey[0].reversalOf !== id || sameKey[0].dealId !== reversal.dealId || sameKey[0].repId !== reversal.repId || Number(sameKey[0].amount) !== reversal.amount) {
+            throw new Error('idempotency key conflicts with an existing adjustment');
+          }
+          return toWalletAdjustment(sameKey[0]);
+        }
+        const prior = await tx.select().from(commissionWalletAdjustments).where(eq(commissionWalletAdjustments.reversalOf, id)).for('update').limit(1);
+        if (prior[0]) {
+          if (prior[0].idempotencyKey === reversal.idempotencyKey) return toWalletAdjustment(prior[0]);
+          throw new Error('Adjustment has already been reversed');
+        }
+        if (reversal.amount !== -Number(original[0].amount)) throw new Error('Reversal must be exact opposite');
+        const rows = await tx.insert(commissionWalletAdjustments).values({ ...reversal, createdAt: new Date(reversal.createdAt) }).returning();
+        return toWalletAdjustment(rows[0]!);
+      });
     },
     async getSetting<T>(key: string): Promise<T | null> {
       const rows = await db.select().from(commissionSettings).where(eq(commissionSettings.key, key)).limit(1);

@@ -48,6 +48,9 @@ export function DealDrawer({ id, onClose }: { id: string; onClose: () => void })
           )}
 
           <section className="card">
+            {d.schedule && <><h3>Expected vs confirmed lender receipts</h3><div className="pl">{d.schedule.events.map((e) => <div className="row" key={`${e.kind}-${e.n}`}><span>{e.label}<span className="subtle"> · {e.amount ? money(e.amount) : 'progress'}</span></span><span className="subtle">{e.expected ? `expected ${day(e.expected)}` : '—'} · {e.confirmed ? `confirmed ${day(e.confirmed)}${e.confirmedSource ? ` (${e.confirmedSource})` : ''}` : e.received ? 'confirmed date unavailable' : 'pending'}</span></div>)}</div><div className="note" style={{ marginTop: 10 }}>{d.schedule.settlement ? (d.schedule.settlement.finalized ? `${d.schedule.settlement.reason === 'merchant_opted_out' ? 'Merchant opted out' : 'Plan completed'} · actual funded ${money(d.schedule.settlement.actualFunded)} · earned gross ${money(d.schedule.settlement.earnedGross)} · ${d.schedule.settlement.recoverableOverpayment > 0 ? `recoverable overpayment ${money(d.schedule.settlement.recoverableOverpayment)}` : `backend due ${money(d.schedule.settlement.backendDue)}`}` : 'Settlement remains open until all effective disbursements complete or the merchant opts out.') : null}</div></>}
+          </section>
+          <section className="card">
             <h3>Deal terms</h3>
             <dl className="kv">
               <dt>Funded amount</dt><dd>{money(d.funded)}{d.drawCount ? ` (${d.drawCount} draw${d.drawCount > 1 ? 's' : ''})` : ''}{d.disbursement && <div className="subtle" style={{ fontSize: 12.5, fontFamily: 'var(--sans)' }}>{money(d.disbursement.disbursed)} disbursed · {d.disbursement.count}/{d.disbursement.total} increments{d.disbursement.stopped ? ' · merchant opted out' : ` of ${money(d.disbursement.planned)} planned`}</div>}</dd>

@@ -73,6 +73,17 @@ describe('the single collection writer with structures', () => {
     expect(withUpfront(seg(scheduleFor(rowan, '2026-06-01')!), true)).toBeNull();
     expect(withRemainder(seg(s), true)).toBeNull();
   });
+  it('reversing a completed schedule clears the terminal remainder receipt and audit date', () => {
+    const atEnd = scheduleFor(rowan, '2026-06-01', { increments: 2, remainder: 'at-end' })!;
+    let cur = { ...atEnd, ...recordWeek(seg(atEnd), 2, '2026-06-15', 'test')!.schedule! };
+    cur = { ...cur, ...withRemainder(seg(cur), true)!.schedule!, confirmedDates: { ...(cur.confirmedDates ?? {}), '3': '2026-06-16' }, confirmedSources: { ...(cur.confirmedSources ?? {}), '3': 'test' } };
+    expect(cur.confirmedDates?.['3']).toBeDefined();
+    cur = { ...cur, ...recordWeek(seg(cur), -1)!.schedule! };
+    expect(cur.received).toBe(1);
+    expect(cur.remainderReceived).toBe(false);
+    expect(cur.confirmedDates?.['3']).toBeUndefined();
+    expect(cur.confirmedSources?.['3']).toBeUndefined();
+  });
 });
 
 describe('expected receipts', () => {

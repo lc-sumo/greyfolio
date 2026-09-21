@@ -76,6 +76,10 @@ const FINGERPRINTS: Record<string, Fingerprint> = {
     { kind: 'column', table: 'commission_sheets_sync_operations', name: 'state' },
     { kind: 'index', table: 'commission_sheets_sync_operations', name: 'commission_sheets_sync_operations_key_idx', unique: true },
   ] },
+  '0022_wallet_adjustments': { checks: [
+    { kind: 'constraint', table: 'commission_wallet_adjustments', name: 'commission_wallet_adjustments_reversal_of_fkey', constraintType: 'f' },
+    { kind: 'account', name: '5020', value: 'wallet_adjustment' },
+  ] },
 };
 
 interface JournalEntry { idx: number; when: number; tag: string }

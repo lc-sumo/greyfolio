@@ -7,7 +7,7 @@
  * override amounts belonging to someone else, other reps' ids or names.
  * `assertRepSafe` is the guard tests run over every projection.
  */
-import { RENEWAL_BUCKET_LABEL, cents, clawbackWindow, collectionLabel, dealCommissionStatus, dealPayback, disbursementOf, isLinePaid, linesInPeriod, monthlySeries, paidFigures, paidKeys, renewalOf, repClawback, repDeals, repLedger, repLines, repShare, segments, standingLines, sum, totalFunded, type Clawback, type ClawbackWindow, type CommissionStatus, type Deal, type LedgerContext, type Lender, type PayoutLine, type PayrollRun, type ProductRule, type RenewalBucket, type RenewalSettings, type Rep, type Role, unitsPaid, voidedKeys } from '@greystone/commission';
+import { RENEWAL_BUCKET_LABEL, cents, clawbackWindow, collectionLabel, dealCommissionStatus, dealPayback, disbursementOf, isLinePaid, linesInPeriod, monthlySeries, paidFigures, paidKeys, renewalOf, repClawback, repDeals, repLedger, repLines, repShare, scheduleEvents, segments, standingLines, sum, totalFunded, type Clawback, type ClawbackWindow, type CommissionStatus, type Deal, type LedgerContext, type Lender, type PayoutLine, type PayrollRun, type ProductRule, type RenewalBucket, type RenewalSettings, type Rep, type Role, unitsPaid, voidedKeys } from '@greystone/commission';
 
 /** Keys that must never appear anywhere in a rep-scoped payload. */
 export const REP_FORBIDDEN_KEYS: readonly string[] = [
@@ -100,6 +100,9 @@ export interface RepDealView {
   /** When this deal clears the lender's clawback window — the rep's commission is safe after that. */
   clawbackWindow: ClawbackWindow;
   clawback: { amount: number; recovered: number; remaining: number; status: Clawback['status'] } | null;
+  /** Receipt timing only; lender commission dollars and settlement economics
+   * are deliberately absent from rep-scoped payloads. */
+  schedule: { events: ReturnType<typeof scheduleEvents>; settlement: null } | null;
 }
 
 function payoutStatus(share: number, paid: number, accrued: number): PayoutStatus {
@@ -175,6 +178,16 @@ export function repDealView(deal: Deal, repId: string, lines: PayoutLine[], claw
     repPaid: deal.repPaid,
     clawback: cb,
     clawbackWindow: clawbackWindow(deal, { lender: settings.lenders.find((l) => l.name === deal.lender), rule: settings.products.find((p) => p.name === deal.product), defaultDays: settings.thresholds.clawbackWindowDays }, settings.today ?? new Date().toISOString().slice(0, 10)),
+     schedule: (() => {
+       const b = segs[0]!;
+       if (!b.schedule) return null;
+       // scheduleEvents.amount is lender commission economics. Reps already
+       // receive their own share through lines/share; exposing this amount
+       // would disclose house gross/net economics.
+       const events = scheduleEvents(b, settings.today ?? new Date().toISOString().slice(0, 10))
+         .map((e) => ({ ...e, amount: 0 }));
+       return { events, settlement: null };
+     })(),
   };
 }
 
@@ -459,6 +472,7 @@ export interface PayHistory {
   /** Grouped by payout date, newest first, each with gross / recovered / cash. */
   days: Array<{ date: string; runLabel: string | null; grossPaid: number; recovered: number; cash: number; rows: PayHistoryRow[] }>;
   summary: { grossPaid: number; recovered: number; cash: number; payouts: number };
+  adjustments: Array<{ id: string; dealId: string; business: string; repId: string; reason: string; amount: number; effectiveDate: string; reversalOf: string | null }>;
 }
 
 /** Every ledger row for the rep: when they were paid, how much, and for which deal. */
@@ -495,7 +509,8 @@ export function repPayHistory(ctx: LedgerContext, runs: PayrollRun[], repId: str
     d.cash = f.cash;
   }
   const f = paidFigures(ctx.lines.filter((l) => l.repId === repId));
-  return { rows, days, summary: { grossPaid: f.gross, recovered: f.recovered, cash: f.cash, payouts: days.length } };
+  const adjustments = (ctx.adjustments ?? []).filter((a) => a.repId === repId).map((a) => ({ id: a.id, dealId: a.dealId, business: byDeal.get(a.dealId)?.business ?? a.dealId, repId: a.repId, reason: a.reason, amount: a.amount, effectiveDate: a.effectiveDate, reversalOf: a.reversalOf }));
+  return { rows, days, summary: { grossPaid: f.gross, recovered: f.recovered, cash: f.cash, payouts: days.length }, adjustments };
 }
 
 /** The rep's own pay history as a CSV (what they see on Pay history). */

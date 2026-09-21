@@ -1,4 +1,4 @@
-import { assertBalanced, cents, journalFingerprint, projectAccounting, type AccountingJournal, type Clawback, type Deal, type DealDraw, type LedgerContext, type PayoutLine, type PayrollRun, type Rep, type Team, type WeeklySchedule } from '@greystone/commission';
+import { assertBalanced, cents, journalFingerprint, projectAccounting, type AccountingJournal, type Clawback, type Deal, type DealDraw, type LedgerContext, type PayoutLine, type PayrollRun, type Rep, type Team, type WeeklySchedule, type WalletAdjustment } from '@greystone/commission';
 import { NOTIFICATION_DEFAULTS, PERMISSION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AccountingPeriod, type AuditEntry, type ClawbackMutationContext, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Reconciliation, type Repo, type RepFile, type RepTask, type Settings, type StoredJournal, type SyncIdempotencyRecord, type TotpState, type TrustedDevice } from './repo.js';
 import { requestMeta } from './auth/request-context.js';
 
@@ -9,6 +9,7 @@ export interface MemoryData {
   deals: Deal[];
   lines: PayoutLine[];
   clawbacks: Clawback[];
+  adjustments?: WalletAdjustment[];
   settings: Omit<Settings, 'portal' | 'notifications' | 'security' | 'templates' | 'permissions'> & Partial<Pick<Settings, 'portal' | 'notifications' | 'security' | 'templates' | 'permissions'>>;
 }
 
@@ -118,7 +119,7 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
       try {
         let projectionResult: ReturnType<typeof projectAccounting> | null = null;
         if (entries === null) {
-          projectionResult = projectAccounting({ deals: data.deals, payoutLines: data.lines, clawbacks: data.clawbacks.filter((clawback) => !clawback.forgivenAt) });
+          projectionResult = projectAccounting({ deals: data.deals, payoutLines: data.lines, clawbacks: data.clawbacks.filter((clawback) => !clawback.forgivenAt), adjustments: data.adjustments ?? [] });
           entries = projectionResult.journals;
         }
         entries.forEach(assertBalanced);
@@ -425,7 +426,30 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
       return data.runs;
     },
     async loadContext() {
-      return { ...ctx, clawbacks: data.clawbacks.filter((clawback) => !clawback.forgivenAt) };
+      return { ...ctx, clawbacks: data.clawbacks.filter((clawback) => !clawback.forgivenAt), adjustments: (data.adjustments ?? []).map((a) => ({ ...a })) };
+    },
+    async listWalletAdjustments() { return (data.adjustments ?? []).map((a) => ({ ...a })); },
+    async createWalletAdjustment(a) {
+      if (!a.amount || !Number.isFinite(a.amount) || Math.round(a.amount * 100) !== a.amount * 100) throw new Error('Adjustment amount must be nonzero exact cents');
+      if (!a.reason.trim()) throw new Error('Adjustment reason is required');
+      if (!data.deals.some((d) => d.id === a.dealId) || !data.reps.some((r) => r.id === a.repId)) throw new Error('Adjustment deal or rep not found');
+      if ((data.adjustments ?? []).some((x) => x.idempotencyKey === a.idempotencyKey)) throw new Error('Adjustment idempotency key already exists');
+      (data.adjustments ??= []).push({ ...a, reversalOf: null });
+      return { ...a, reversalOf: null };
+    },
+    async reverseWalletAdjustment(id, reversal) {
+      const original = (data.adjustments ?? []).find((a) => a.id === id);
+      if (!original) throw new Error('Adjustment not found');
+      if (original.reversalOf) throw new Error('Cannot reverse a reversal');
+      const sameKey = (data.adjustments ?? []).find((a) => a.idempotencyKey === reversal.idempotencyKey);
+      if (sameKey) {
+        if (sameKey.reversalOf !== id || sameKey.dealId !== reversal.dealId || sameKey.repId !== reversal.repId || sameKey.amount !== reversal.amount) throw new Error('idempotency key conflicts with an existing adjustment');
+        return { ...sameKey };
+      }
+      if ((data.adjustments ?? []).some((a) => a.reversalOf === id)) throw new Error('Adjustment has already been reversed');
+      if (reversal.amount !== -original.amount) throw new Error('Reversal must be exact opposite');
+      (data.adjustments ?? []).push({ ...reversal, dealId: original.dealId, repId: original.repId, reversalOf: id });
+      return { ...reversal, dealId: original.dealId, repId: original.repId, reversalOf: id };
     },
     async getSetting<T>(key: string): Promise<T | null> {
       return ((data.settings as unknown as Record<string, unknown>)[key] as T) ?? null;

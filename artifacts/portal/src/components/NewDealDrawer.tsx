@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { api, post, type AdminDealDetail, type MasterBoard, type RepOption, type Settings } from '../lib/api';
+import { api, post, type AdminDealDetail, type IncrementGridPreview, type MasterBoard, type RepOption, type Settings } from '../lib/api';
 import { compact, day, fullDay, money, pct, todayIso } from '../lib/format';
 import { addBusinessDays, liveMath, num, rate } from '../lib/math';
 import { isConsolidationParentProduct, parseIncrementGrid, productKind, lenderSupportsProduct, validateIncrementGrid } from '@greystone/commission';
@@ -73,6 +73,8 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
   });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [gridPreview, setGridPreview] = useState<IncrementGridPreview | null>(null);
+  const [optOutCount, setOptOutCount] = useState('');
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF((s) => ({ ...s, [k]: e.target.value }));
 
   const configuredRule = settings.products.find((p) => p.name === f.product);
@@ -146,6 +148,12 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
   const m = useMemo(() => liveMath(f, rule, partner, referralPaidThisMonth), [f, rule, partner, referralPaidThisMonth]);
   const upfrontShare = incremental ? Math.min(1, Math.max(0, num(f.commUpfrontPct) / 100)) : 1;
   const dueAtFunding = incremental ? upfrontShare : 1;
+  const optCount = Math.min(grid.length, Math.max(0, Math.floor(num(optOutCount))));
+  const optRatio = incremental && grid.length && gridTotal > 0 ? grid.slice(0, optCount).reduce((a, b) => a + b, 0) / gridTotal : 0;
+  const optEarned = m.gross * optRatio;
+  const optUpfront = incremental ? m.gross * upfrontShare : 0;
+  const optBackend = Math.max(0, optEarned - optUpfront);
+  const optOver = Math.max(0, optUpfront - optEarned);
   const email = (f.merchantEmail ?? '').trim().toLowerCase();
   const priorDeals = useMemo(() => (email ? board.deals.filter((d) => d.merchantEmail && d.merchantEmail.toLowerCase() === email).sort((a, b) => b.date.localeCompare(a.date)) : []), [board.deals, email]);
   const client = priorDeals[0];
@@ -196,6 +204,34 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
       onSaved(saved);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not save');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function previewGridFile(file: File | undefined) {
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { setErr(`${file.name} is over 5 MB`); return; }
+    setErr('');
+    setBusy(true);
+    try {
+      const data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
+        reader.readAsDataURL(file);
+      });
+      const path = editing ? `/api/admin/deals/${existing!.id}/increment-grid/preview` : '/api/admin/deals/increment-grid/preview';
+      const preview = await post<IncrementGridPreview>(path, { name: file.name, mime: file.type || 'text/plain', data, planned: editing ? undefined : num(f.amount) });
+      setGridPreview(preview);
+       if (preview.errors.length) {
+         setErr(`Fix the ${preview.errors.length} grid error${preview.errors.length === 1 ? '' : 's'} before importing`);
+       } else if (preview.amounts.length) {
+         setF((s) => ({ ...s, commGrid: preview.amounts.join('\n'), ...(preview.expected[0] ? { commStartDate: preview.expected[0] } : {}) }));
+       }
+    } catch (e) {
+      setGridPreview(null);
+      setErr(e instanceof Error ? e.message : 'Could not preview the grid file');
     } finally {
       setBusy(false);
     }
@@ -307,8 +343,25 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
               <select value={f.commCadenceDays} onChange={set('commCadenceDays')}><option value="7">Weekly</option><option value="14">Bi-weekly</option><option value="30">Monthly</option></select>
             </Field>
             <Field label="First increment expected" hint="defaults to one cadence after funding"><input type="date" value={f.commStartDate} onChange={set('commStartDate')} /></Field>
-             <Field label="Increment breakdown (required)" span hint={gridInvalid ? 'Enter positive, finite dollar amounts in exact cents. Use one per line/comma/semicolon or amount x count (for example, 12500 x15).' : grid.length ? `${grid.length} increments totalling ${money(gridTotal)}${gridMismatch ? ` — remaining/over amount ${money(num(f.amount) - gridTotal)}` : ' — matches the funded amount'}` : 'Enter one amount per line or comma-separated; "12500 x15" repeats an amount. This deal-specific breakdown is required.'}>
-              <textarea rows={3} value={f.commGrid} onChange={(e) => setF((s) => ({ ...s, commGrid: e.target.value }))} placeholder={'12500 x15\n8000 x3\n5000 x2'} style={{ border: '1px solid var(--border-strong)', borderRadius: 8, padding: '8px 10px', background: 'var(--input-bg)', color: 'inherit', font: 'inherit', fontFamily: 'var(--mono)', fontSize: 13.5, resize: 'vertical', outline: 'none', borderColor: gridMismatch ? 'var(--red)' : undefined }} />
+             <Field label={<span style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>Increment breakdown (required) <label className="btn" style={{ cursor: busy ? 'wait' : 'pointer' }} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void previewGridFile(e.dataTransfer.files[0]); }}><input type="file" accept=".csv,.txt,.xlsx,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style={{ display: 'none' }} disabled={busy} onChange={(e) => { void previewGridFile(e.target.files?.[0]); e.target.value = ''; }} />{busy ? 'Reading…' : 'Import file'}</label></span>} span hint={gridInvalid ? 'Enter positive, finite dollar amounts in exact cents. Use one per line/comma/semicolon or amount x count (for example, 12500 x15).' : grid.length ? `${grid.length} increments totalling ${money(gridTotal)}${gridMismatch ? ` — remaining/over amount ${money(num(f.amount) - gridTotal)}` : ' — matches the funded amount'}` : 'Enter one amount per line or comma-separated; "12500 x15" repeats an amount. This deal-specific breakdown is required.'}>
+              <div className="subtle" style={{ marginBottom: 6 }}>Drop a CSV, TXT, or XLSX here to review and load its amounts. PDF and image confirmations must be attached separately.</div>
+              <textarea rows={3} value={f.commGrid} onChange={(e) => { setF((s) => ({ ...s, commGrid: e.target.value })); setGridPreview(null); }} placeholder={'12500 x15\n8000 x3\n5000 x2'} style={{ border: '1px solid var(--border-strong)', borderRadius: 8, padding: '8px 10px', background: 'var(--input-bg)', color: 'inherit', font: 'inherit', fontFamily: 'var(--mono)', fontSize: 13.5, resize: 'vertical', outline: 'none', borderColor: gridMismatch ? 'var(--red)' : undefined }} />
+              {gridPreview && <div className="note" style={{ marginTop: 6 }}>
+                Imported {gridPreview.count} increments · {money(gridPreview.total)} from <b>{gridPreview.source}</b>
+                {gridPreview.expected.some(Boolean) && <span> · first expected {gridPreview.expected.find(Boolean)}</span>}
+                {gridPreview.warnings.map((warning, i) => <div key={`w-${i}`}>{warning}</div>)}
+                {gridPreview.errors.map((error, i) => <div key={`e-${i}`} style={{ color: 'var(--red)' }}>{error}</div>)}
+                <div style={{ marginTop: 8, maxHeight: 180, overflowY: 'auto' }}>
+                  {gridPreview.rows.map((row) => (
+                    <div key={row.row} style={{ display: 'grid', gridTemplateColumns: '42px 1fr 1fr 2fr', gap: 8, fontFamily: 'var(--mono)', fontSize: 12, padding: '2px 0' }}>
+                      <span>#{row.row}</span>
+                      <span>{row.amount === null ? '—' : money(row.amount)}</span>
+                      <span>{row.expected ?? '—'}</span>
+                      <span style={row.error ? { color: 'var(--red)' } : undefined}>{row.error ?? 'OK'}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>}
             </Field>
             {grid.length > 0 && (
               <div className="gridpreview" style={{ gridColumn: '1 / -1' }}>
@@ -351,6 +404,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
           <dt>Origination fee</dt><dd>{money(m.originationFee)}</dd>
           <dt className="sum">{incremental ? 'Gross due at funding' : 'Gross (comm + PSF + orig)'}</dt><dd className="sum">{money(m.gross * dueAtFunding)}</dd>
           {incremental && <><dt>Planned gross after all increments</dt><dd>{money(m.gross)}</dd></>}
+          {incremental && <><dt>Opt-out scenario</dt><dd><input className="mini-input" inputMode="numeric" placeholder="increments taken" value={optOutCount} onChange={(e) => setOptOutCount(e.target.value)} /> {optCount > 0 && <>→ actual funded {money(num(f.amount) * optRatio)} · earned gross {money(optEarned)} · upfront credit {money(optUpfront)} · {optOver ? `recoverable overpayment ${money(optOver)}` : `backend due ${money(optBackend)}`}</>}</dd></>}
           <dt className="grp">Referral{partner && partner.name !== 'None' ? ` · ${partner.name} ${Math.round(partner.pct * 100)}%` : ''}</dt><dd />
           {partner && partner.name !== 'None' && partner.monthlyCap ? (
             <>
@@ -375,7 +429,7 @@ export function NewDealDrawer({ settings, board, existing, onClose, onSaved }: {
       </div>
       {err && <div className="note" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}>{err}</div>}
       <div style={{ display: 'flex', gap: 9 }}>
-         <button className="btn primary big" disabled={busy || gridMismatch} title={gridMismatch ? 'A valid increment breakdown totaling the funded amount is required' : undefined} onClick={() => void save()}>{busy ? 'Saving…' : editing ? 'Save terms' : 'Save deal'}</button>
+         <button className="btn primary big" disabled={busy || gridMismatch || !!gridPreview?.errors.length} title={gridPreview?.errors.length ? 'Fix the imported grid errors or edit the grid manually before saving' : gridMismatch ? 'A valid increment breakdown totaling the funded amount is required' : undefined} onClick={() => void save()}>{busy ? 'Saving…' : editing ? 'Save terms' : 'Save deal'}</button>
         <button className="btn big" onClick={onClose}>Cancel</button>
       </div>
       <div className="subtle" style={{ fontSize: 13 }}>Rates: {pct(0.2)} means 20 — type either.</div>

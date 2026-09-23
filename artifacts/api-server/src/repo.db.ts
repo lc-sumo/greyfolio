@@ -83,7 +83,10 @@ export function dbRepo(db: Database): Repo {
           if (inserted.length) { result.created++; continue; }
           const imported = await tx.select({ status: commissionImportReviews.status }).from(commissionImportReviews)
             .where(and(eq(commissionImportReviews.sourceId, row.sourceId), eq(commissionImportReviews.status, 'imported'))).limit(1);
-          if (imported.length) { result.unchanged++; continue; }
+          if (imported.length) {
+            await tx.update(commissionImportReviews).set({ active: true }).where(eq(commissionImportReviews.sourceId, row.sourceId));
+            result.unchanged++; continue;
+          }
           const changed = await tx.update(commissionImportReviews).set({
             sourceHash: row.sourceHash, source: row.source, review: emptyImportReview(),
             active: true, status: 'needs_attention', updatedAt: sql`now()`, revision: sql`${commissionImportReviews.revision} + 1`,
@@ -114,6 +117,10 @@ export function dbRepo(db: Database): Repo {
         if (!row) throw new Error('Staged review is missing, no longer active, or is not reviewed');
         const source = row.source as ImportReview['source'];
         const repIds = ((row.review as ImportReviewDecision).repPayments ?? []).map((p) => p.repId);
+        // A payroll run may be holding this lock when the staged row is read.
+        // READ COMMITTED below gives the authoritative preview a fresh snapshot
+        // after these locks are acquired. Under SERIALIZABLE it could retain a
+        // pre-payroll snapshot and miss a just-committed payout.
         for (const repId of [...new Set(repIds)].sort()) await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'payroll-rep:' + repId}))`);
         const parentId = ((row.review as ImportReviewDecision).terms?.parent ?? source.parent) || source.id;
         const dealIds = [...new Set([parentId, source.id])].sort();
@@ -149,11 +156,11 @@ export function dbRepo(db: Database): Repo {
             await txRepo.updateDeal(current.id, { repPaid: lines.map((l) => l.paidAt).sort().at(-1)! });
         }
         await txRepo.writeAudit({ actorRepId, action: 'import-review.commit', targetRepId: null, path: `/api/admin/import-review/${id}/commit`, detail: { sourceId: id, revision, action: result.action, lines: lines.length } });
-        const marked = await tx.update(commissionImportReviews).set({ status: 'imported', active: false, revision: sql`${commissionImportReviews.revision} + 1`, updatedBy: actorRepId, updatedAt: sql`now()` })
+        const marked = await tx.update(commissionImportReviews).set({ status: 'imported', active: true, revision: sql`${commissionImportReviews.revision} + 1`, updatedBy: actorRepId, updatedAt: sql`now()` })
           .where(and(eq(commissionImportReviews.sourceId, id), eq(commissionImportReviews.revision, revision), eq(commissionImportReviews.status, 'reviewed'))).returning({ sourceId: commissionImportReviews.sourceId });
         if (!marked.length) throw new Error('Staged review changed while committing');
         return { sourceId: id, action: result.action };
-      }, { isolationLevel: 'serializable' });
+      }, { isolationLevel: 'read committed' });
     },
     async listJournals(filter = {}) {
       const where = [filter.from ? sql`${commissionJournals.date} >= ${filter.from}` : undefined, filter.to ? sql`${commissionJournals.date} <= ${filter.to}` : undefined, filter.sourceKey ? eq(commissionJournals.sourceKey, filter.sourceKey) : undefined].filter(Boolean);

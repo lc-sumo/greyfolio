@@ -9,17 +9,28 @@ import './import-review.css';
 
 interface ImportPreview {
   sourceId: string; revision: number; action: string;
-  deal: unknown; draw: unknown; receipt: unknown;
+  deal: { id: string; business: string; lender: string; product: string; date: string; funded: number; gross: number; net: number } | null;
+  draw: { ref: string; amount: number; gross: number } | null;
+  receipt: { amount: number; paidAt: string } | null;
   payouts: Array<{ repId: string; role: string; amount: number; paidAt: string; alreadyPosted: boolean }>;
-  clawback: unknown; problems: string[]; previewToken: string;
+  clawback: { amount: number; date: string } | null; problems: string[]; previewToken: string;
 }
 const statusLabel: Record<Status, string> = {
-  not_reviewed: 'Not reviewed', in_progress: 'In progress', needs_attention: 'Needs attention', reviewed: 'Reviewed',
+  not_reviewed: 'Not reviewed', in_progress: 'In progress', needs_attention: 'Needs attention', reviewed: 'Reviewed', imported: 'In Master Deals',
 };
 const amountInput = (value: number | null) => value === null ? '' : String(value);
 const safeDate = (v: string) => v || null;
 const defaultPayments = (review: Decision) => review.repPayments ?? [];
 const asDecision = (review: Decision): Decision => ({ ...review, repPayments: defaultPayments(review), lenderWeeks: review.lenderWeeks ?? null });
+const sheetPayments = (terms: Source, roster: Array<{ id: string; name: string }>, date: string): Decision['repPayments'] =>
+  ([
+    [terms.opener, 'Opener', terms.openerDollars],
+    [terms.closer, 'Closer', terms.closerDollars],
+    [terms.override, 'Override', terms.overrideDollars],
+  ] as const).flatMap(([name, role, amount]) => {
+    const rep = roster.find((r) => r.name.toLowerCase() === name.toLowerCase());
+    return rep && amount !== null && amount > 0 && date ? [{ repId: rep.id, role, amount, paidAt: date }] : [];
+  });
 
 export function ImportReviewTab() {
   const { notify } = useSession();
@@ -40,9 +51,14 @@ export function ImportReviewTab() {
   const current = rows.find((r) => r.sourceId === selected) ?? null;
   const terms = current && draft ? { ...current.source, ...draft.terms } : null;
   useEffect(() => {
-    if (rows.length && !selected) setSelected(rows.find((x) => x.status !== 'reviewed')?.sourceId ?? rows[0]!.sourceId);
+    if (rows.length && !selected) setSelected(rows.find((x) => x.status !== 'reviewed' && x.status !== 'imported')?.sourceId ?? rows[0]!.sourceId);
   }, [rows, selected]);
-  useEffect(() => { if (current && !dirty) { setDraft(asDecision(current.review)); setPreview(null); } }, [current?.revision, selected, dirty]);
+  useEffect(() => {
+    if (current && !dirty) {
+      setDraft(asDecision(current.review));
+      setPreview((p) => p?.sourceId === current.sourceId && p.revision === current.revision ? p : null);
+    }
+  }, [current?.revision, selected, dirty]);
   useEffect(() => {
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
@@ -89,7 +105,11 @@ export function ImportReviewTab() {
       const result = await post<{ sourceId: string; action: string }>(`/api/admin/import-review/${encodeURIComponent(current.sourceId)}/commit`, { revision: current.revision, previewToken: preview.previewToken });
       setPreview(null);
       await qc.invalidateQueries({ queryKey: ['import-reviews'] });
-      notify(`${result.sourceId}: ${result.action}`);
+      await qc.invalidateQueries();
+      notify(`${result.sourceId} added to Master Deals; historical payments reconciled`);
+      const index = rows.findIndex((x) => x.sourceId === current.sourceId);
+      const next = [...rows.slice(index + 1), ...rows.slice(0, index)].find((x) => x.status !== 'imported' && x.sourceId !== current.sourceId);
+      if (next) { setSelected(next.sourceId); setDraft(asDecision(next.review)); }
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not commit this import'); }
     finally { setBusy(false); }
   };
@@ -97,10 +117,14 @@ export function ImportReviewTab() {
     if (!current || !draft || busy) return;
     setBusy(true); setError('');
     try {
-      await post(`/api/admin/import-review/${encodeURIComponent(current.sourceId)}`, { revision: current.revision, review: draft, status }, 'PATCH');
+      const saved = await post<{ revision: number }>(`/api/admin/import-review/${encodeURIComponent(current.sourceId)}`, { revision: current.revision, review: draft, status }, 'PATCH');
       setDirty(false);
       await qc.invalidateQueries({ queryKey: ['import-reviews'] });
       notify(status === 'reviewed' ? `${current.sourceId} reviewed and saved (not posted to ledger)` : 'Review progress saved');
+      if (status === 'reviewed') {
+        const result = await post<ImportPreview>(`/api/admin/import-review/${encodeURIComponent(current.sourceId)}/preview`, { revision: saved.revision });
+        setPreview(result);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save review');
       if ((e as { status?: number }).status === 409) await qc.invalidateQueries({ queryKey: ['import-reviews'] });
@@ -108,12 +132,12 @@ export function ImportReviewTab() {
   };
   const visible = rows.filter((r) => (filter === 'all' || r.status === filter)
     && `${r.sourceId} ${r.source.business} ${r.source.lender}`.toLowerCase().includes(search.toLowerCase()));
-  const reviewed = rows.filter((r) => r.status === 'reviewed').length;
+  const reviewed = rows.filter((r) => r.status === 'reviewed' || r.status === 'imported').length;
   return (
     <div className="import-review">
       <section className="review-intro">
-        <div><div className="review-kicker">SAFE IMPORT · STEP 1</div><h3>Review the old tracker, one deal at a time</h3>
-          <p>Upload a CSV export of FUNDED DEALS. Reviews save in the database and remain here when you leave or sign in again. Re-uploading unchanged rows keeps their progress; changed rows require a fresh review.</p></div>
+        <div><div className="review-kicker">SAFE IMPORT · STEP 1</div><h3>Check, preview, add to Master Deals.</h3>
+          <p>Sheet values start the review. Correct them, confirm the payment history, then preview exactly what will be added. Your progress is saved between sittings.</p></div>
         <div className="review-progress"><strong>{reviewed} / {rows.length}</strong><span>reviewed</span><div className="review-progress-track"><div style={{ width: `${rows.length ? reviewed / rows.length * 100 : 0}%` }} /></div></div>
       </section>
       <div className="review-upload">
@@ -142,8 +166,9 @@ export function ImportReviewTab() {
         </aside>
         {current && draft && terms && <section className="review-detail">
           <div className="review-detail-head"><div><div className="review-kicker">SOURCE ROW {current.source.line} · {current.sourceId}</div><h3>{terms.business}</h3><span className="review-muted">{terms.date} · {terms.lender} · {terms.product}</span></div><span className={`review-state ${current.status}`}>{statusLabel[current.status]}</span></div>
-          {current.alreadyInPortal && <div className="review-caution"><b>Already in portal.</b> This review will not overwrite the existing deal or its ledger. Reconcile it against live data before importing anything.</div>}
-          {current.issues.length > 0 && <div className="review-caution"><b>Resolve before marking reviewed</b><ul>{current.issues.map((x) => <li key={x}>{x}</li>)}</ul></div>}
+          {current.status === 'imported' ? <div className="review-imported"><b>Added to Master Deals.</b> This row is locked against importing again. Open Master Deals to view the deal.</div> : <>
+          {current.alreadyInPortal && <div className="review-caution"><b>Already in portal.</b> The preview checks the live deal and its ledger; it will not overwrite its terms.</div>}
+          {current.issues.length > 0 && <div className="review-caution"><b>{dirty ? 'Saved-row issues — save or confirm to check your corrections' : 'Resolve before marking reviewed'}</b><ul>{current.issues.map((x) => <li key={x}>{x}</li>)}</ul></div>}
           <div className="review-source">
             <div><span>Funded</span><b>{money(current.source.amount)}</b></div>
             <div><span>Commission rate</span><b>{current.source.commRate ?? '—'}{current.source.commRate && current.source.commRate <= 1 ? ' (fraction)' : '%'}</b></div>
@@ -152,19 +177,19 @@ export function ImportReviewTab() {
             <div><span>Sheet rep payout</span><b>{current.source.totalRepPayout === null ? '—' : money(current.source.totalRepPayout)}</b></div>
           </div>
           <ImportReviewTerms terms={terms} settings={settings.data} roster={(roster.data?.reps ?? []).map((r) => r.name)} onChange={changeTerm} />
-           <div className="review-roles"><b>Rep split on sheet</b><span>{current.source.opener || 'No opener'}: {money(current.source.openerDollars ?? 0)}</span><span>{current.source.closer || 'No closer'}: {money(current.source.closerDollars ?? 0)}</span>{current.source.override && <span>{current.source.override}: {money(current.source.overrideDollars ?? 0)}</span>}</div>
-          <label className="review-confirm"><input type="checkbox" checked={draft.termsConfirmed} onChange={(e) => change({ termsConfirmed: e.target.checked })} /> I checked the lender, product, funding and commission terms against the source.</label>
+          <div className="review-section-title"><b>Payment history</b><span>Sheet values are suggestions, not live payments. Confirm them against actual records.</span></div>
           <div className="review-answers">
             <fieldset><legend>Did we receive commission from the lender?</legend><small>Sheet says: {current.source.commissionStatus || 'unknown'} · paid date {current.source.lenderPaid || 'not recorded'}</small>
-              <select aria-label="Lender payment answer" value={draft.lender} onChange={(e) => change({ lender: e.target.value as Answer, lenderAmount: null, lenderDate: null })}><option value="unknown">Not sure yet</option><option value="unpaid">No, not received</option><option value="paid">Yes, received</option></select>
+              <select aria-label="Lender payment answer" value={draft.lender} onChange={(e) => change({ lender: e.target.value as Answer, lenderAmount: e.target.value === 'paid' ? terms.gross : null, lenderDate: e.target.value === 'paid' ? current.source.lenderPaid || null : null })}><option value="unknown">Not sure yet</option><option value="unpaid">No, not received</option><option value="paid">Yes, received</option></select>
               {draft.lender === 'paid' && <div className="review-fields"><label>Amount received <input type="number" min="0.01" step="0.01" value={amountInput(draft.lenderAmount)} onChange={(e) => change({ lenderAmount: e.target.value ? Number(e.target.value) : null })} /></label><label>Actual date <input type="date" value={draft.lenderDate ?? ''} onChange={(e) => change({ lenderDate: safeDate(e.target.value) })} /></label></div>}
             </fieldset>
             <fieldset><legend>Were reps already paid?</legend><small>Sheet rep-paid date: {current.source.repPaid || 'not recorded'}</small>
-              <select aria-label="Rep payout answer" value={draft.reps} onChange={(e) => change({ reps: e.target.value as Answer, repAmount: null, repDate: null })}><option value="unknown">Not sure yet</option><option value="unpaid">No, not paid</option><option value="paid">Yes, paid</option></select>
+              <label className="review-paid-check"><input type="checkbox" checked={draft.reps === 'paid'} onChange={(e) => change({ reps: e.target.checked ? 'paid' : 'unpaid', repAmount: e.target.checked ? terms.totalRepPayout : null, repDate: e.target.checked ? current.source.repPaid || null : null, repPayments: e.target.checked ? sheetPayments(terms, roster.data?.reps ?? [], current.source.repPaid) : [] })} /> Reps were paid {current.source.repPaid ? '· prechecked from the tracker' : ''}</label>
               {draft.reps === 'paid' && <div className="review-fields"><label>Total paid to reps <input type="number" min="0.01" step="0.01" value={amountInput(draft.repAmount)} onChange={(e) => change({ repAmount: e.target.value ? Number(e.target.value) : null })} /></label><label>Actual date <input type="date" value={draft.repDate ?? ''} onChange={(e) => change({ repDate: safeDate(e.target.value) })} /></label></div>}
             </fieldset>
           </div>
-           <fieldset className="review-payouts"><legend>Verified historical rep payouts</legend><small>Enter each payout separately. These entries are used for the import and will not be inferred from the sheet total.</small>
+           {draft.reps === 'paid' && <fieldset className="review-payouts"><legend>Who was paid?</legend><small>Each amount and date starts from the tracker when available. Confirm each against your payroll records; these are the payments the import will record.</small>
+              {!draft.repPayments.length && <button className="btn" type="button" onClick={() => change({ repPayments: sheetPayments(terms, roster.data?.reps ?? [], draft.repDate ?? current.source.repPaid) })}>Use sheet rep splits as a starting point</button>}
              {draft.repPayments.map((payment, index) => <div className="review-payout-row" key={`${index}-${payment.repId}`}>
                <label>Rep <select value={payment.repId} onChange={(e) => { const repPayments = [...draft.repPayments]; repPayments[index] = { ...payment, repId: e.target.value }; change({ repPayments }); }}><option value="">Choose rep</option>{(roster.data?.reps ?? []).map((rep) => <option key={rep.id} value={rep.id}>{rep.name}</option>)}</select></label>
                <label>Role <select value={payment.role} onChange={(e) => { const repPayments = [...draft.repPayments]; repPayments[index] = { ...payment, role: e.target.value }; change({ repPayments }); }}><option value="">Choose role</option><option>Opener</option><option>Closer</option><option>Override</option></select></label>
@@ -173,14 +198,16 @@ export function ImportReviewTab() {
                <button className="btn subtle" type="button" onClick={() => change({ repPayments: draft.repPayments.filter((_, i) => i !== index) })}>Remove</button>
              </div>)}
              <button className="btn" type="button" onClick={() => change({ repPayments: [...draft.repPayments, { repId: '', role: '', amount: 0, paidAt: '' }] })}>Add rep payout</button>
-           </fieldset>
-           <label className="review-weeks">Scheduled lender receipt weeks (optional)<input type="number" min="0" step="1" value={draft.lenderWeeks ?? ''} onChange={(e) => change({ lenderWeeks: e.target.value === '' ? null : Math.max(0, Number(e.target.value)) })} placeholder="Leave blank if unknown" /><small>Use only for a weekly receipt schedule; leave blank when the historical source does not establish one.</small></label>
-          <label className="review-notes">Notes / what still needs checking<textarea value={draft.notes} maxLength={2000} rows={3} onChange={(e) => change({ notes: e.target.value })} placeholder="Record any differences or where to verify payment." /></label>
-           <div className="review-actions"><button className="btn" disabled={busy} onClick={() => void save(current.issues.length ? 'needs_attention' : 'in_progress')}>Save progress</button><button className="btn primary" disabled={busy || !draft.termsConfirmed || draft.lender === 'unknown' || draft.reps === 'unknown' || current.issues.length > 0} onClick={() => void save('reviewed')}>Mark reviewed</button>{dirty && <span>Unsaved changes — save before preview or commit</span>}</div>
+            </fieldset>}
+           {draft.lender === 'paid' && <details className="review-more"><summary>Scheduled lender receipt weeks (if applicable)</summary><label className="review-weeks">Weeks actually received<input type="number" min="0" step="1" value={draft.lenderWeeks ?? ''} onChange={(e) => change({ lenderWeeks: e.target.value === '' ? null : Math.max(0, Number(e.target.value)) })} placeholder="Leave blank if not scheduled" /><small>Only for weekly schedules; confirm the week count from actual remittances.</small></label></details>}
+          <label className="review-confirm"><input type="checkbox" checked={draft.termsConfirmed} onChange={(e) => change({ termsConfirmed: e.target.checked })} /> I confirmed the corrected deal fields and each payment amount, payee, and date above.</label>
+          <details className="review-more"><summary>Optional internal note</summary><label className="review-notes">Only if you want to record something for later<textarea value={draft.notes} maxLength={2000} rows={2} onChange={(e) => change({ notes: e.target.value })} placeholder="Optional — no explanation is required to correct the sheet." /></label></details>
+           <div className="review-actions"><button className="btn" disabled={busy} onClick={() => void save(current.issues.length ? 'needs_attention' : 'in_progress')}>Save for later</button><button className="btn primary" disabled={busy || !draft.termsConfirmed || draft.lender === 'unknown' || draft.reps === 'unknown'} onClick={() => void save('reviewed')}>Confirm &amp; preview import</button>{dirty && <span>Unsaved changes — save before import</span>}</div>
            <section className="review-import-actions"><div><b>Historical import</b><p>Preview is a dry run. Nothing is posted until you explicitly commit the reviewed revision.</p></div><div className="review-actions"><button className="btn" disabled={busy || dirty || current.status !== 'reviewed'} onClick={() => void runPreview()}>Preview import</button><button className="btn primary" disabled={busy || dirty || !preview || preview.sourceId !== current.sourceId || preview.revision !== current.revision || preview.problems.length > 0} onClick={() => void commit()}>Commit preview</button></div>
-             {preview && <div className="review-preview"><div className="review-preview-title"><b>Dry-run: {preview.action}</b><span>Revision {preview.revision}</span></div>{preview.problems.length > 0 && <div className="review-caution"><b>Blocked:</b><ul>{preview.problems.map((problem) => <li key={problem}>{problem}</li>)}</ul></div>}<div className="review-preview-grid"><span>Deal <b>{JSON.stringify(preview.deal)}</b></span><span>Draw <b>{JSON.stringify(preview.draw)}</b></span><span>Receipt <b>{JSON.stringify(preview.receipt)}</b></span><span>Clawback <b>{JSON.stringify(preview.clawback)}</b></span></div><h4>Payouts ({preview.payouts.length})</h4><ul className="review-payout-list">{preview.payouts.map((p) => <li key={`${p.repId}-${p.role}-${p.paidAt}`}>{p.repId} · {p.role} · {money(p.amount)} · {p.paidAt} {p.alreadyPosted ? <b className="review-already">Already posted</b> : <b>Will post</b>}</li>)}</ul></div>}
+              {preview && <div className="review-preview"><div className="review-preview-title"><b>Dry run: {preview.action === 'new' ? 'Add new deal' : preview.action === 'existing' ? 'Reconcile existing deal' : preview.action === 'draw' ? 'Add draw' : 'Blocked'}</b><span>Review revision {preview.revision}</span></div>{preview.problems.length > 0 && <div className="review-caution"><b>Fix before importing:</b><ul>{preview.problems.map((problem) => <li key={problem}>{problem}</li>)}</ul></div>}<div className="review-preview-grid"><span>Deal <b>{preview.deal ? `${preview.deal.id} · ${preview.deal.business} · ${preview.deal.lender} · ${preview.deal.product}` : 'Not ready'}</b></span><span>Funded <b>{preview.deal ? `${money(preview.deal.funded)} · ${preview.deal.date}` : '—'}</b></span><span>Gross / net commission <b>{preview.deal ? `${money(preview.deal.gross)} / ${money(preview.deal.net)}` : '—'}</b></span><span>Draw <b>{preview.draw ? `${preview.draw.ref} · ${money(preview.draw.amount)} · gross ${money(preview.draw.gross)}` : 'None'}</b></span><span>Lender receipt <b>{preview.receipt ? `${money(preview.receipt.amount)} · ${preview.receipt.paidAt}` : 'None will be posted'}</b></span><span>Clawback <b>{preview.clawback ? `${money(preview.clawback.amount)} · ${preview.clawback.date}` : 'None'}</b></span></div><h4>Historical rep payments ({preview.payouts.length})</h4>{!preview.payouts.length && <p className="review-muted">None will be posted.</p>}<ul className="review-payout-list">{preview.payouts.map((p) => <li key={`${p.repId}-${p.role}-${p.paidAt}`}>{roster.data?.reps.find((r) => r.id === p.repId)?.name ?? p.repId} · {p.role} · {money(p.amount)} · {p.paidAt} {p.alreadyPosted ? <b className="review-already">Already posted</b> : <b>Will post</b>}</li>)}</ul></div>}
            </section>
            <p className="review-safety">Reviewed means your answers are saved, not that money was posted. Preview is read-only. Commit is explicit and blocked while changes are unsaved or preview problems remain.</p>
+          </>}
         </section>}
       </div>}
     </div>

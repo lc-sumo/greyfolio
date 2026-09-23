@@ -84,6 +84,7 @@ describe('resumable tracker reviews', () => {
     expect((await admin.post('/api/admin/import-review/stage').send({ csv: paidCsv })).status).toBe(200);
     const initial = (await admin.get('/api/admin/import-review')).body.rows[0];
     expect(initial.review).toMatchObject({ reps: 'paid', repAmount: 200, repDate: '2025-01-11', lender: 'unknown', termsConfirmed: false });
+    expect(initial.review.repPayments).toEqual([{ repId: 'rep-leor', role: 'Opener', amount: 200, paidAt: '2025-01-11' }]);
     expect(initial.issues.some((x: string) => x.includes('Missing Lender'))).toBe(true);
     const saved = await admin.patch('/api/admin/import-review/F990').send({
       revision: initial.revision,

@@ -106,7 +106,7 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
       for (const row of rows) {
         activeImportReviews.add(row.sourceId);
         const old = importReviews.get(row.sourceId);
-        if (old?.status === 'imported') { activeImportReviews.delete(row.sourceId); result.unchanged++; continue; }
+        if (old?.status === 'imported') { result.unchanged++; continue; }
         if (old?.sourceHash === row.sourceHash) { importReviews.set(row.sourceId, { ...old, source: row.source }); result.unchanged++; continue; }
         const next: ImportReview = {
           ...row, review: emptyImportReview(), status: old ? 'needs_attention' : 'not_reviewed',
@@ -167,7 +167,6 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
         const current = importReviews.get(id);
         if (!current || current.revision !== revision || current.status !== 'reviewed') throw new Error('Staged review changed while committing');
         importReviews.set(id, { ...current, status: 'imported', revision: revision + 1, updatedAt: new Date().toISOString() });
-        activeImportReviews.delete(id);
         return { sourceId: id, action: result.action };
         } catch (error) {
           data.deals.splice(0, data.deals.length, ...rollback.deals);

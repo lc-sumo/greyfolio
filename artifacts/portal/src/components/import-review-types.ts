@@ -1,5 +1,5 @@
 export type Answer = 'unknown' | 'unpaid' | 'paid';
-export type Status = 'not_reviewed' | 'in_progress' | 'needs_attention' | 'reviewed';
+export type Status = 'not_reviewed' | 'in_progress' | 'needs_attention' | 'reviewed' | 'imported';
 
 export interface Source {
   line: number; id: string; parent: string; date: string; business: string; lender: string; product: string;

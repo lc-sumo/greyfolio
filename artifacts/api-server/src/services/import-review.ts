@@ -27,15 +27,29 @@ function validateTerms(input: unknown): asserts input is Terms {
   }
 }
 
-export function suggestedReview(source: SheetRow, saved: ImportReviewDecision, status: ImportReview['status']): ImportReviewDecision {
+export function suggestedReview(source: SheetRow, saved: ImportReviewDecision, status: ImportReview['status'],
+  reps: Awaited<ReturnType<Repo['listReps']>> = []): ImportReviewDecision {
   if (status !== 'not_reviewed' && !(status === 'needs_attention'
     && !saved.termsConfirmed && saved.lender === 'unknown' && saved.reps === 'unknown' && !saved.notes && !saved.terms)) return saved;
   const repAmount = source.totalRepPayout && source.totalRepPayout > 0
     ? source.totalRepPayout : money((source.openerDollars ?? 0) + (source.closerDollars ?? 0) + (source.overrideDollars ?? 0)) || null;
+  const repPayments: ImportReviewDecision['repPayments'] = [];
+  if (source.repPaid) {
+    for (const [name, role, amount] of [
+      [source.opener, 'Opener', source.openerDollars],
+      [source.closer, 'Closer', source.closerDollars],
+      [source.override, 'Override', source.overrideDollars],
+    ] as const) {
+      const rep = reps.find((r) => r.name.toLowerCase() === name.toLowerCase());
+      if (rep && amount !== null && amount > 0)
+        repPayments.push({ repId: rep.id, role, amount, paidAt: source.repPaid });
+    }
+  }
   return { ...saved,
     lender: source.lenderPaid ? 'paid' : source.commissionStatus.toLowerCase().includes('waiting') ? 'unpaid' : 'unknown',
     lenderAmount: source.lenderPaid ? source.gross : null, lenderDate: source.lenderPaid || null,
-    reps: source.repPaid ? 'paid' : 'unpaid', repAmount: source.repPaid ? repAmount : null, repDate: source.repPaid || null };
+    reps: source.repPaid ? 'paid' : 'unpaid', repAmount: source.repPaid ? repAmount : null, repDate: source.repPaid || null,
+    repPayments };
 }
 
 export async function stageTracker(repo: Repo, csv: string, actorRepId: string) {
@@ -93,7 +107,7 @@ export async function listTrackerReviews(repo: Repo) {
   const existing = new Set(context.deals.map((x) => x.id));
   return rows.map((row) => ({
     ...row,
-    review: suggestedReview(row.source, row.review, row.status),
+    review: suggestedReview(row.source, row.review, row.status, reps),
     issues: [...(row.sourceId.includes(':duplicate:') ? [`Deal ID ${row.source.id} is duplicated in this sheet. Correct the IDs before using either row for a live import.`] : []), ...trackerIssues(verifiedTerms(row.source, row.review.terms), settings, reps)],
     alreadyInPortal: existing.has(row.source.id),
   }));
@@ -102,6 +116,7 @@ export async function listTrackerReviews(repo: Repo) {
 export async function saveTrackerReview(repo: Repo, id: string, revision: number, input: ImportReviewDecision, status: ImportReview['status'], actorRepId: string) {
   const current = (await repo.listImportReviews()).find((x) => x.sourceId === id);
   if (!current) throw new HttpError(404, 'Tracker row not found');
+  if (current.status === 'imported') throw new HttpError(409, 'This row was already imported and cannot be reviewed again.');
   if (current.revision !== revision) throw new HttpError(409, 'This row changed in another session. Refresh to see the latest review before saving.');
   if (!['not_reviewed', 'in_progress', 'needs_attention', 'reviewed'].includes(status)) throw new HttpError(400, 'Invalid review status');
   input = { ...input, repPayments: input?.repPayments ?? [], lenderWeeks: input?.lenderWeeks ?? null };

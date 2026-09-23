@@ -55,4 +55,7 @@
 .review-preview-grid b { color:var(--text); overflow-wrap:anywhere; font-size:12px; font-weight:500; }
 .review-preview h4 { margin:3px 0 0; }.review-payout-list { margin:0; padding-left:20px; font-size:13px; line-height:1.8; }
 .review-already { color:var(--amber-deep); margin-left:5px; }
+.review-state.imported,.review-imported { background:var(--teal-light); color:var(--teal); }
+.review-imported { padding:15px; border-radius:8px; font-size:14px; }
+.review-more .review-weeks { margin-top:12px; }
 @media(max-width:700px) { .review-payout-row,.review-preview-grid { grid-template-columns:1fr; } }

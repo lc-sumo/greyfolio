@@ -37,6 +37,32 @@ async function setup(source = row) {
 }
 
 describe('reviewed historical import', () => {
+  it('previews and commits an unpaid deal without posting cash, then locks its imported review', async () => {
+    const source = row.replace('Partially Paid,01/20/2025', 'Waiting for payment,');
+    const h = await setup(source);
+    const unpaid: ImportReviewDecision = {
+      ...decision, lender: 'unpaid', lenderAmount: null, lenderDate: null,
+      reps: 'unpaid', repAmount: null, repDate: null, repPayments: [],
+    };
+    const saved = await h.reviewed(unpaid);
+    const before = await h.repo.loadContext();
+    const preview = await h.preview();
+    expect(preview.body.problems).toEqual([]);
+    expect(preview.body.receipt).toBeNull();
+    expect(preview.body.payouts).toEqual([]);
+    expect((await h.repo.loadContext()).deals).toEqual(before.deals);
+    expect((await h.commit(saved.revision, preview.body.previewToken)).status).toBe(201);
+    const after = await h.repo.loadContext();
+    expect(after.deals.find((d) => d.id === h.id)?.commCollected).toBe(0);
+    expect(after.lines.filter((l) => l.dealId === h.id)).toEqual([]);
+    expect((await h.get()).status).toBe('imported');
+    expect((await h.admin.patch(`/api/admin/import-review/${h.id}`).send({
+      revision: saved.revision + 1, review: unpaid, status: 'reviewed',
+    })).status).toBe(409);
+    expect((await h.admin.post('/api/admin/import-review/stage').send({ csv: `${header}\n${source}` })).body.unchanged).toBe(1);
+    expect((await h.get()).status).toBe('imported');
+  });
+
   it('keeps review and preview read-only, commits exact collection and per-rep ledger once', async () => {
     const h = await setup();
     expect((await h.preview()).body.problems.length).toBeGreaterThan(0);
@@ -150,7 +176,7 @@ describe('reviewed historical import', () => {
     expect(results.map((x) => x.status).sort()).toEqual([201, 409]);
     expect((await h.repo.loadContext()).lines.filter((x) => x.dealId === h.id)).toHaveLength(1);
     expect((await h.admin.post('/api/admin/import-review/stage').send({ csv: `${header}\n${row}` })).status).toBe(200);
-    expect((await h.admin.get('/api/admin/import-review')).body.rows).toEqual([]);
+    expect((await h.admin.get('/api/admin/import-review')).body.rows).toMatchObject([{ status: 'imported', sourceId: h.id }]);
     expect((await h.admin.post('/api/admin/import').send({ csv: `${header}\n${row}`, skipExisting: true })).status).toBe(409);
   });
 

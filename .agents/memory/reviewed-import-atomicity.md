@@ -15,6 +15,12 @@ Historical partial role payments must remain visible as paid cash while the unsp
 
 **How to apply:** When changing payroll key handling, voids, or earned-line calculations, check all three cases together: historical partial payment, payment of its remainder, and voiding either portion.
 
+The authoritative import preview must see payroll committed while it waited for shared rep locks. Use statement-refreshing isolation when acquiring those locks after reading the staged review, or acquire locks before opening a transaction-wide snapshot. Do not assume serializable isolation itself makes a stale preview safe.
+
+**Why:** A transaction-wide snapshot taken before waiting for payroll can miss a canonical payment that finishes during the wait. Historical partial-payment keys are distinct from full payroll keys, so key uniqueness alone cannot prevent an overpayment.
+
+**How to apply:** Any change to import lock order or isolation must be checked against a concurrent payroll payment on the same rep; re-read live ledger facts after acquiring the shared lock, before planning or posting.
+
 Reviewed historical economics are an as-of-funding record; current referral settings are not evidence of the rate or cap used when the deal funded.
 
 **Why:** Repricing an old referral using today's partner configuration can silently change the historical house net even when the reviewed gross and rep split match.

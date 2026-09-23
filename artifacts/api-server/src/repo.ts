@@ -4,6 +4,13 @@ import type { PlaybookRule } from './services/playbook-rules.js';
 
 export interface ImportReviewDecision {
   termsConfirmed: boolean;
+  /** Corrected fields for the eventual import. Original CSV values remain in source. */
+  terms?: Partial<Pick<SheetRow,
+    'parent' | 'date' | 'business' | 'lender' | 'product' | 'amount' | 'factor' | 'termDays' |
+    'frequency' | 'commRate' | 'psf' | 'psfDollars' | 'gross' | 'referralFee' | 'totalRepPayout' |
+    'referralPartner' | 'opener' | 'openerRate' | 'openerDollars' | 'closer' | 'closerRate' |
+    'closerDollars' | 'override' | 'overrideRate' | 'overrideDollars' | 'clawbackAmount' |
+    'clawbackDate' | 'dealStatus' | 'notes' | 'leadSource'>>;
   lender: 'unknown' | 'unpaid' | 'paid';
   lenderAmount: number | null;
   lenderDate: string | null;

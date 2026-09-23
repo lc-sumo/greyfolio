@@ -1,27 +1,12 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { api, post } from '../lib/api';
+import { api, post, type Settings } from '../lib/api';
 import { money } from '../lib/format';
 import { useSession } from '../lib/session';
+import { ImportReviewTerms } from './ImportReviewTerms';
+import type { Answer, Decision, ReviewRow, Source, Status } from './import-review-types';
 import './import-review.css';
 
-type Answer = 'unknown' | 'unpaid' | 'paid';
-type Status = 'not_reviewed' | 'in_progress' | 'needs_attention' | 'reviewed';
-interface Decision {
-  termsConfirmed: boolean;
-  lender: Answer; lenderAmount: number | null; lenderDate: string | null;
-  reps: Answer; repAmount: number | null; repDate: string | null; notes: string;
-}
-interface Source {
-  line: number; id: string; parent: string; date: string; business: string; lender: string; product: string;
-  amount: number; gross: number | null; referralFee: number | null; totalRepPayout: number | null; commRate: number | null;
-  opener: string; closer: string; override: string; openerDollars: number | null; closerDollars: number | null; overrideDollars: number | null;
-  lenderPaid: string; repPaid: string; commissionStatus: string; notes: string;
-}
-interface ReviewRow {
-  sourceId: string; sourceHash: string; source: Source; review: Decision; status: Status; revision: number;
-  issues: string[]; alreadyInPortal: boolean; updatedAt: string;
-}
 const statusLabel: Record<Status, string> = {
   not_reviewed: 'Not reviewed', in_progress: 'In progress', needs_attention: 'Needs attention', reviewed: 'Reviewed',
 };
@@ -32,6 +17,8 @@ export function ImportReviewTab() {
   const { notify } = useSession();
   const qc = useQueryClient();
   const query = useQuery({ queryKey: ['import-reviews'], queryFn: () => api<{ rows: ReviewRow[] }>('/api/admin/import-review') });
+  const settings = useQuery({ queryKey: ['settings'], queryFn: () => api<Settings>('/api/admin/settings') });
+  const roster = useQuery({ queryKey: ['roster-reps'], queryFn: () => api<{ reps: Array<{ name: string }> }>('/api/admin/reps') });
   const rows = query.data?.rows ?? [];
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState<Decision | null>(null);
@@ -42,6 +29,7 @@ export function ImportReviewTab() {
   const [filter, setFilter] = useState<'all' | Status>('all');
   const [search, setSearch] = useState('');
   const current = rows.find((r) => r.sourceId === selected) ?? null;
+  const terms = current && draft ? { ...current.source, ...draft.terms } : null;
   useEffect(() => {
     if (rows.length && !selected) setSelected(rows.find((x) => x.status !== 'reviewed')?.sourceId ?? rows[0]!.sourceId);
   }, [rows, selected]);
@@ -52,7 +40,12 @@ export function ImportReviewTab() {
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty]);
-  const change = (patch: Partial<Decision>) => { setDraft((d) => d ? { ...d, ...patch } : d); setDirty(true); setError(''); };
+  const change = (patch: Partial<Decision>) => {
+    setDraft((d) => d ? { ...d, ...patch, ...('termsConfirmed' in patch || 'notes' in patch ? {} : { termsConfirmed: false }) } : d);
+    setDirty(true); setError('');
+  };
+  const changeTerm = <K extends keyof Source>(key: K, value: Source[K]) =>
+    change({ terms: { ...draft?.terms, [key]: value } });
   const select = (id: string) => {
     if (dirty && !window.confirm('This deal has unsaved changes. Leave without saving?')) return;
     setDirty(false); setSelected(id); setDraft(rows.find((r) => r.sourceId === id)?.review ?? null); setError('');
@@ -78,6 +71,11 @@ export function ImportReviewTab() {
       setDirty(false);
       await qc.invalidateQueries({ queryKey: ['import-reviews'] });
       notify(status === 'reviewed' ? `${current.sourceId} reviewed and saved (not posted to ledger)` : 'Review progress saved');
+      if (status === 'reviewed') {
+        const index = rows.findIndex((x) => x.sourceId === current.sourceId);
+        const next = [...rows.slice(index + 1), ...rows.slice(0, index)].find((x) => x.status !== 'reviewed');
+        if (next) { setSelected(next.sourceId); setDraft(next.review); }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save review');
       if ((e as { status?: number }).status === 409) await qc.invalidateQueries({ queryKey: ['import-reviews'] });
@@ -89,8 +87,8 @@ export function ImportReviewTab() {
   return (
     <div className="import-review">
       <section className="review-intro">
-        <div><div className="review-kicker">SAFE IMPORT · STEP 1</div><h3>Review the old tracker, one deal at a time</h3>
-          <p>Upload a CSV export of FUNDED DEALS. Reviews save in the database and remain here when you leave or sign in again. Re-uploading unchanged rows keeps their progress; changed rows require a fresh review.</p></div>
+        <div><div className="review-kicker">SAFE IMPORT · STEP 1</div><h3>Check, correct, confirm. Then move on.</h3>
+          <p>The tracker pre-fills the deal and payment answers. Correct anything that is wrong, confirm it, and the next deal opens. Your progress stays saved between sittings.</p></div>
         <div className="review-progress"><strong>{reviewed} / {rows.length}</strong><span>reviewed</span><div className="review-progress-track"><div style={{ width: `${rows.length ? reviewed / rows.length * 100 : 0}%` }} /></div></div>
       </section>
       <div className="review-upload">
@@ -117,31 +115,26 @@ export function ImportReviewTab() {
             {!visible.length && <p className="review-muted">No deals match this filter.</p>}
           </div>
         </aside>
-        {current && draft && <section className="review-detail">
-          <div className="review-detail-head"><div><div className="review-kicker">SOURCE ROW {current.source.line} · {current.sourceId}</div><h3>{current.source.business}</h3><span className="review-muted">{current.source.date} · {current.source.lender} · {current.source.product}</span></div><span className={`review-state ${current.status}`}>{statusLabel[current.status]}</span></div>
+        {current && draft && terms && <section className="review-detail">
+          <div className="review-detail-head"><div><div className="review-kicker">SOURCE ROW {current.source.line} · {current.sourceId}</div><h3>{terms.business}</h3><span className="review-muted">{terms.date} · {terms.lender} · {terms.product}</span></div><span className={`review-state ${current.status}`}>{statusLabel[current.status]}</span></div>
           {current.alreadyInPortal && <div className="review-caution"><b>Already in portal.</b> This review will not overwrite the existing deal or its ledger. Reconcile it against live data before importing anything.</div>}
-          {current.issues.length > 0 && <div className="review-caution"><b>Resolve before marking reviewed</b><ul>{current.issues.map((x) => <li key={x}>{x}</li>)}</ul></div>}
-          <div className="review-source">
-            <div><span>Funded</span><b>{money(current.source.amount)}</b></div>
-            <div><span>Commission rate</span><b>{current.source.commRate ?? '—'}{current.source.commRate && current.source.commRate <= 1 ? ' (fraction)' : '%'}</b></div>
-            <div><span>Sheet gross commission</span><b>{current.source.gross === null ? '—' : money(current.source.gross)}</b></div>
-            <div><span>Referral fee</span><b>{current.source.referralFee === null ? '—' : money(current.source.referralFee)}</b></div>
-            <div><span>Sheet rep payout</span><b>{current.source.totalRepPayout === null ? '—' : money(current.source.totalRepPayout)}</b></div>
-          </div>
-          <div className="review-roles"><b>Rep split on sheet</b><span>{current.source.opener || 'No opener'}: {money(current.source.openerDollars ?? 0)}</span><span>{current.source.closer || 'No closer'}: {money(current.source.closerDollars ?? 0)}</span>{current.source.override && <span>{current.source.override}: {money(current.source.overrideDollars ?? 0)}</span>}</div>
-          <label className="review-confirm"><input type="checkbox" checked={draft.termsConfirmed} onChange={(e) => change({ termsConfirmed: e.target.checked })} /> I checked the lender, product, funding and commission terms against the source.</label>
+          {current.issues.length > 0 && <div className="review-caution"><b>{dirty ? 'Saved-row issues — save or confirm to check corrections' : 'Resolve before marking reviewed'}</b><ul>{current.issues.map((x) => <li key={x}>{x}</li>)}</ul></div>}
+          <ImportReviewTerms terms={terms} settings={settings.data} roster={roster.data?.reps.map((r) => r.name) ?? []} onChange={changeTerm} />
+          <div className="review-section-title"><b>Payment history</b><span>Pre-filled from the sheet, not recorded as a live payment. Verify before confirming.</span></div>
           <div className="review-answers">
             <fieldset><legend>Did we receive commission from the lender?</legend><small>Sheet says: {current.source.commissionStatus || 'unknown'} · paid date {current.source.lenderPaid || 'not recorded'}</small>
-              <select aria-label="Lender payment answer" value={draft.lender} onChange={(e) => change({ lender: e.target.value as Answer, lenderAmount: null, lenderDate: null })}><option value="unknown">Not sure yet</option><option value="unpaid">No, not received</option><option value="paid">Yes, received</option></select>
+              <select aria-label="Lender payment answer" value={draft.lender} onChange={(e) => change({ lender: e.target.value as Answer, lenderAmount: e.target.value === 'paid' ? terms.gross : null, lenderDate: e.target.value === 'paid' ? current.source.lenderPaid || null : null })}><option value="unknown">Not sure yet</option><option value="unpaid">No, not received</option><option value="paid">Yes, received</option></select>
               {draft.lender === 'paid' && <div className="review-fields"><label>Amount received <input type="number" min="0.01" step="0.01" value={amountInput(draft.lenderAmount)} onChange={(e) => change({ lenderAmount: e.target.value ? Number(e.target.value) : null })} /></label><label>Actual date <input type="date" value={draft.lenderDate ?? ''} onChange={(e) => change({ lenderDate: safeDate(e.target.value) })} /></label></div>}
             </fieldset>
             <fieldset><legend>Were reps already paid?</legend><small>Sheet rep-paid date: {current.source.repPaid || 'not recorded'}</small>
-              <select aria-label="Rep payout answer" value={draft.reps} onChange={(e) => change({ reps: e.target.value as Answer, repAmount: null, repDate: null })}><option value="unknown">Not sure yet</option><option value="unpaid">No, not paid</option><option value="paid">Yes, paid</option></select>
+              <label className="review-paid-check"><input type="checkbox" checked={draft.reps === 'paid'} onChange={(e) => change({ reps: e.target.checked ? 'paid' : 'unpaid', repAmount: e.target.checked ? terms.totalRepPayout : null, repDate: e.target.checked ? current.source.repPaid || null : null })} /> Reps were paid {current.source.repPaid ? '· prechecked from the tracker' : ''}</label>
+              {draft.reps === 'unknown' && <small>Not sure yet — save progress and return when you know.</small>}
               {draft.reps === 'paid' && <div className="review-fields"><label>Total paid to reps <input type="number" min="0.01" step="0.01" value={amountInput(draft.repAmount)} onChange={(e) => change({ repAmount: e.target.value ? Number(e.target.value) : null })} /></label><label>Actual date <input type="date" value={draft.repDate ?? ''} onChange={(e) => change({ repDate: safeDate(e.target.value) })} /></label></div>}
             </fieldset>
           </div>
-          <label className="review-notes">Notes / what still needs checking<textarea value={draft.notes} maxLength={2000} rows={3} onChange={(e) => change({ notes: e.target.value })} placeholder="Record any differences or where to verify payment." /></label>
-          <div className="review-actions"><button className="btn" disabled={busy} onClick={() => void save(current.issues.length ? 'needs_attention' : 'in_progress')}>Save progress</button><button className="btn primary" disabled={busy || !draft.termsConfirmed || draft.lender === 'unknown' || draft.reps === 'unknown' || current.issues.length > 0} onClick={() => void save('reviewed')}>Mark reviewed</button>{dirty && <span>Unsaved changes</span>}</div>
+          <label className="review-confirm"><input type="checkbox" checked={draft.termsConfirmed} onChange={(e) => change({ termsConfirmed: e.target.checked })} /> I confirmed the corrected deal fields and the payment answers above.</label>
+          <details className="review-more"><summary>Optional internal note</summary><label className="review-notes">Only if you want to record something for later<textarea value={draft.notes} maxLength={2000} rows={2} onChange={(e) => change({ notes: e.target.value })} placeholder="Optional — no explanation is required to correct the sheet." /></label></details>
+          <div className="review-actions"><button className="btn" disabled={busy} onClick={() => void save(current.issues.length ? 'needs_attention' : 'in_progress')}>Save for later</button><button className="btn primary" disabled={busy || !draft.termsConfirmed || draft.lender === 'unknown' || draft.reps === 'unknown'} onClick={() => void save('reviewed')}>Confirm &amp; next deal</button>{dirty && <span>Unsaved changes</span>}</div>
           <p className="review-safety">Reviewed means your answers are saved, not that money was posted. No staged sheet value can create a lender receipt or payout automatically. Reconcile paid amounts per rep before any live import.</p>
         </section>}
       </div>}

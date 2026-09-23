@@ -25,4 +25,18 @@
 .review-answers { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }.review-answers fieldset { border:1px solid var(--border); border-radius:8px; margin:0; padding:14px; display:grid; align-content:start; gap:10px; min-width:0; }.review-answers legend { font-size:14px; font-weight:700; padding:0 4px; }.review-answers small { color:var(--muted); line-height:1.4; }
 .review-fields { display:grid; gap:10px; }.review-fields label,.review-notes { display:grid; gap:6px; font-size:13px; font-weight:600; }.review-notes textarea { resize:vertical; }
 .review-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }.review-actions span,.review-safety { color:var(--muted); font-size:12px; }.review-safety { border-top:1px solid var(--border); padding-top:14px; margin:0; line-height:1.5; }
+.review-section-title { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; border-bottom:1px solid var(--border); padding-bottom:7px; }
+.review-section-title b { font-size:15px; }.review-section-title span,.review-source-note { color:var(--ink-muted); font-size:12px; }
+.review-terms { display:grid; gap:14px; }
+.review-form-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.review-form-grid label { display:grid; align-content:start; gap:6px; min-width:0; font-size:12px; font-weight:600; }
+.review-form-grid small { color:var(--ink-muted); font-weight:400; }
+.review-more { border:1px solid var(--border); border-radius:8px; padding:11px 14px; }
+.review-more summary { font-weight:700; color:var(--teal); cursor:pointer; }
+.review-more .review-form-grid,.review-more .review-notes { margin-top:15px; }
+.review-paid-check { display:flex; align-items:center; gap:9px; padding:11px 12px; border:1px solid var(--border-strong); border-radius:8px; font-weight:600; cursor:pointer; }
+.review-paid-check input { width:18px; height:18px; flex:none; }
+.review-paid-check:has(input:checked) { background:var(--teal-light); border-color:var(--teal-light-2); color:var(--teal); }
 @media(max-width:850px) { .review-layout { grid-template-columns:1fr; }.review-list { position:static; }.review-scroll { max-height:230px; }.review-answers { grid-template-columns:1fr; }.review-intro { flex-wrap:wrap; } }
+@media(max-width:700px) { .review-form-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .review-detail { padding:15px; } }
+@media(max-width:480px) { .review-form-grid { grid-template-columns:1fr; } }

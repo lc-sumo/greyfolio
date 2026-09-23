@@ -42,7 +42,8 @@ describe('resumable tracker reviews', () => {
     expect((await admin.post('/api/admin/import-review/stage').send({ csv: csv.replace('Acme', 'Acme Inc') })).body.changed).toBe(1);
     item = (await admin.get('/api/admin/import-review')).body.rows[0];
     expect(item.status).toBe('needs_attention');
-    expect(item.review.lender).toBe('unknown');
+    expect(item.review.lender).toBe('unpaid'); // fresh suggestion, not a restored confirmation
+    expect(item.review.termsConfirmed).toBe(false);
     const after = await repo.loadContext();
     expect(after.deals).toEqual(before.deals);
     expect(after.lines).toEqual(before.lines);
@@ -75,5 +76,25 @@ describe('resumable tracker reviews', () => {
     expect((await admin.get('/api/admin/import-review')).body.rows.map((r: { sourceId: string }) => r.sourceId)).toEqual(['F990']);
     expect((await admin.post('/api/admin/import-review/stage').send({ csv: `${header}\n${row}\n${second}` })).body.unchanged).toBe(2);
     expect((await admin.get('/api/admin/import-review')).body.rows.find((r: { sourceId: string }) => r.sourceId === 'F991').review.termsConfirmed).toBe(true);
+  });
+
+  it('prechecks sheet-paid reps, lets an admin correct deal fields, and does not require notes', async () => {
+    const { admin, repo } = await harness();
+    const paidCsv = `${header}\n${row.replace('MBC', 'Missing Lender').replace('Waiting for payment,', 'YES - Paid In Full,01/11/2025')}`;
+    expect((await admin.post('/api/admin/import-review/stage').send({ csv: paidCsv })).status).toBe(200);
+    const initial = (await admin.get('/api/admin/import-review')).body.rows[0];
+    expect(initial.review).toMatchObject({ reps: 'paid', repAmount: 200, repDate: '2025-01-11', lender: 'unknown', termsConfirmed: false });
+    expect(initial.issues.some((x: string) => x.includes('Missing Lender'))).toBe(true);
+    const saved = await admin.patch('/api/admin/import-review/F990').send({
+      revision: initial.revision,
+      review: { ...initial.review, lender: 'unpaid', termsConfirmed: true, terms: { lender: 'MBC' }, notes: '' },
+      status: 'reviewed',
+    });
+    expect(saved.status).toBe(200);
+    expect(saved.body.review.terms.lender).toBe('MBC');
+    const result = (await admin.get('/api/admin/import-review')).body.rows[0];
+    expect(result.source.lender).toBe('Missing Lender');
+    expect(result.issues).toEqual([]);
+    expect((await repo.loadContext()).deals.some((d) => d.id === 'F990')).toBe(false);
   });
 });

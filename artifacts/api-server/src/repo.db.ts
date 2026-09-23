@@ -1,5 +1,5 @@
 import { and, desc, eq, ne, sql } from 'drizzle-orm';
-import { assertBalanced, cents, journalFingerprint, projectAccounting, SYSTEM_CHART, type AccountingJournal, type Clawback, type Deal, type DealDraw, type LedgerContext, type PayrollRun, type Rep, type Team, type WeeklySchedule } from '@greystone/commission';
+import { assertBalanced, cents, isDealFullyPaid, journalFingerprint, projectAccounting, SYSTEM_CHART, type AccountingJournal, type Clawback, type Deal, type DealDraw, type LedgerContext, type PayrollRun, type Rep, type Team, type WeeklySchedule } from '@greystone/commission';
 import {
   commissionAuditLog,
   commissionAccounts,
@@ -42,10 +42,10 @@ import type { PlaybookRule } from './services/playbook-rules.js';
 import { requestMeta } from './auth/request-context.js';
 
 let accountingSyncTail = Promise.resolve();
-const emptyImportReview = (): ImportReviewDecision => ({ termsConfirmed: false, lender: 'unknown', lenderAmount: null, lenderDate: null, reps: 'unknown', repAmount: null, repDate: null, notes: '' });
+const emptyImportReview = (): ImportReviewDecision => ({ termsConfirmed: false, lender: 'unknown', lenderAmount: null, lenderDate: null, reps: 'unknown', repAmount: null, repDate: null, notes: '', repPayments: [], lenderWeeks: null });
 const toImportReview = (row: typeof commissionImportReviews.$inferSelect): ImportReview => ({
   sourceId: row.sourceId, sourceHash: row.sourceHash, source: row.source as ImportReview['source'],
-  status: row.status as ImportReview['status'], review: row.review as ImportReviewDecision,
+  status: row.status as ImportReview['status'], review: { ...(row.review as ImportReviewDecision), repPayments: (row.review as ImportReviewDecision).repPayments ?? [], lenderWeeks: (row.review as ImportReviewDecision).lenderWeeks ?? null },
   revision: row.revision, updatedAt: row.updatedAt.toISOString(),
 });
 const toWalletAdjustment = (row: typeof commissionWalletAdjustments.$inferSelect): WalletAdjustment => ({ ...row, createdAt: row.createdAt.toISOString() });
@@ -67,8 +67,8 @@ export function dbRepo(db: Database): Repo {
   const toTask = (t: typeof commissionTasks.$inferSelect): RepTask => ({ id: t.id, dealId: t.dealId, repId: t.repId, playbookId: t.playbookId, title: t.title, dueDate: t.dueDate, status: t.status as RepTask['status'], outcome: t.outcome as RepTask['outcome'], note: t.note, createdBy: t.createdBy, createdAt: t.createdAt.toISOString(), doneAt: iso(t.doneAt) });
   const toDevice = (d: typeof commissionTrustedDevices.$inferSelect): TrustedDevice => ({ id: d.id, repId: d.repId, tokenHash: d.tokenHash, label: d.label, ip: d.ip, createdAt: d.createdAt.toISOString(), lastUsedAt: d.lastUsedAt.toISOString(), expiresAt: d.expiresAt.toISOString() });
   return {
-    async listImportReviews() {
-      return (await db.select().from(commissionImportReviews).where(eq(commissionImportReviews.active, true)).orderBy(commissionImportReviews.sourceId)).map(toImportReview);
+    async listImportReviews(includeInactive = false) {
+      return (await db.select().from(commissionImportReviews).where(includeInactive ? undefined : eq(commissionImportReviews.active, true)).orderBy(commissionImportReviews.sourceId)).map(toImportReview);
     },
     async stageImportReviews(rows) {
       return db.transaction(async (tx) => {
@@ -81,6 +81,9 @@ export function dbRepo(db: Database): Repo {
             ...row, source: row.source, review: emptyImportReview(), status: 'not_reviewed',
           }).onConflictDoNothing().returning({ id: commissionImportReviews.sourceId });
           if (inserted.length) { result.created++; continue; }
+          const imported = await tx.select({ status: commissionImportReviews.status }).from(commissionImportReviews)
+            .where(and(eq(commissionImportReviews.sourceId, row.sourceId), eq(commissionImportReviews.status, 'imported'))).limit(1);
+          if (imported.length) { result.unchanged++; continue; }
           const changed = await tx.update(commissionImportReviews).set({
             sourceHash: row.sourceHash, source: row.source, review: emptyImportReview(),
             active: true, status: 'needs_attention', updatedAt: sql`now()`, revision: sql`${commissionImportReviews.revision} + 1`,
@@ -101,6 +104,56 @@ export function dbRepo(db: Database): Repo {
         revision: sql`${commissionImportReviews.revision} + 1`,
       }).where(and(eq(commissionImportReviews.sourceId, id), eq(commissionImportReviews.revision, revision), eq(commissionImportReviews.active, true))).returning();
       return rows[0] ? toImportReview(rows[0]) : null;
+    },
+    async commitReviewedImport(id, revision, plan, actorRepId) {
+      return db.transaction(async (tx) => {
+        const staged = await tx.select().from(commissionImportReviews)
+          .where(and(eq(commissionImportReviews.sourceId, id), eq(commissionImportReviews.revision, revision), eq(commissionImportReviews.active, true), eq(commissionImportReviews.status, 'reviewed')))
+          .for('update').limit(1);
+        const row = staged[0];
+        if (!row) throw new Error('Staged review is missing, no longer active, or is not reviewed');
+        const source = row.source as ImportReview['source'];
+        const repIds = ((row.review as ImportReviewDecision).repPayments ?? []).map((p) => p.repId);
+        for (const repId of [...new Set(repIds)].sort()) await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'payroll-rep:' + repId}))`);
+        const parentId = ((row.review as ImportReviewDecision).terms?.parent ?? source.parent) || source.id;
+        const dealIds = [...new Set([parentId, source.id])].sort();
+        for (const dealId of dealIds) {
+          await tx.select({ id: commissionDeals.id }).from(commissionDeals).where(eq(commissionDeals.id, dealId)).for('update');
+          await tx.select({ id: commissionDealDraws.id }).from(commissionDealDraws).where(eq(commissionDealDraws.dealId, dealId)).for('update');
+        }
+        const txRepo = dbRepo(tx as unknown as Database);
+        const result = await plan(txRepo);
+        if (result.previewToken !== result.expectedToken) throw new Error('Reviewed import preview token does not match authoritative state');
+        if (result.deal && result.action === 'new') await txRepo.insertDeal(result.deal);
+        if (result.deal && result.action !== 'new') {
+          const current = (await txRepo.loadContext()).deals.find((d) => d.id === result.deal!.id);
+          if (current && (current.commCollected !== result.deal.commCollected || JSON.stringify(current.commSchedule) !== JSON.stringify(result.deal.commSchedule) || current.lenderPaid !== result.deal.lenderPaid)) {
+            await txRepo.updateDeal(current.id, { commCollected: result.deal.commCollected, commSchedule: result.deal.commSchedule, lenderPaid: result.deal.lenderPaid });
+          }
+        }
+        if (result.draw) await txRepo.insertDraw(result.deal!.id, result.draw);
+        if (result.clawback) await txRepo.insertClawback(result.clawback);
+        let lines = result.lines;
+        if (lines.length) {
+          const runIds = [...new Set(lines.map((l) => l.runId).filter((x): x is string => !!x))];
+          if (!runIds.length) {
+            const runId = `import-review-${id}`;
+            const dates = lines.map((l) => l.paidAt).sort();
+            await txRepo.insertRun({ id: runId, label: 'Historical import', start: dates[0]!, end: dates.at(-1)!, status: 'paid' });
+            lines = lines.map((l) => ({ ...l, runId }));
+          }
+          await txRepo.commitPayout({ lines, clawbackUpdates: [], dealsFullyPaid: [], paidAt: lines.map((l) => l.paidAt).sort().at(-1)! });
+          const context = await txRepo.loadContext();
+          const current = context.deals.find((d) => d.id === result.deal?.id);
+          if (current && !current.repPaid && isDealFullyPaid(current, context.lines))
+            await txRepo.updateDeal(current.id, { repPaid: lines.map((l) => l.paidAt).sort().at(-1)! });
+        }
+        await txRepo.writeAudit({ actorRepId, action: 'import-review.commit', targetRepId: null, path: `/api/admin/import-review/${id}/commit`, detail: { sourceId: id, revision, action: result.action, lines: lines.length } });
+        const marked = await tx.update(commissionImportReviews).set({ status: 'imported', active: false, revision: sql`${commissionImportReviews.revision} + 1`, updatedBy: actorRepId, updatedAt: sql`now()` })
+          .where(and(eq(commissionImportReviews.sourceId, id), eq(commissionImportReviews.revision, revision), eq(commissionImportReviews.status, 'reviewed'))).returning({ sourceId: commissionImportReviews.sourceId });
+        if (!marked.length) throw new Error('Staged review changed while committing');
+        return { sourceId: id, action: result.action };
+      }, { isolationLevel: 'serializable' });
     },
     async listJournals(filter = {}) {
       const where = [filter.from ? sql`${commissionJournals.date} >= ${filter.from}` : undefined, filter.to ? sql`${commissionJournals.date} <= ${filter.to}` : undefined, filter.sourceKey ? eq(commissionJournals.sourceKey, filter.sourceKey) : undefined].filter(Boolean);

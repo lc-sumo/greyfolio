@@ -236,10 +236,10 @@ export interface ImportResult {
 /** Commit a clean file. Refuses if the preview has any problem. */
 export async function commitImport(repo: Repo, csv: string, actorRepId: string, opts: ImportOptions = {}): Promise<ImportResult> {
   const preview = await previewImport(repo, csv, opts);
-  const staged = await repo.listImportReviews();
+  const staged = await repo.listImportReviews(true);
   const stagedIds = new Set(staged.map((r) => r.source.id));
-  if (preview.rows.some((r) => stagedIds.has(r.id) && r.action !== 'skip' && r.action !== 'update'))
-    throw new HttpError(409, 'This deal is staged for historical review. Direct import can infer receipts and paid payroll from sheet status; do not use it for staged deals.');
+  if (preview.rows.some((r) => stagedIds.has(r.id)))
+    throw new HttpError(409, 'This deal is staged for historical review. Direct import (including skip/update) can bypass verified receipts and payroll; use the reviewed import.');
   if (preview.summary.problems > 0) throw new HttpError(400, `Fix the ${preview.summary.problems} problem(s) in the preview before importing`);
   const [settings, reps, ctx] = await Promise.all([repo.getSettings(), repo.listReps(), repo.loadContext()]);
   const read = opts.grid ? readFundedDealsTable(opts.grid) : readFundedDealsCsv(csv);

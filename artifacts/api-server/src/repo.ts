@@ -18,13 +18,17 @@ export interface ImportReviewDecision {
   repAmount: number | null;
   repDate: string | null;
   notes: string;
+  /** Historical payments are explicit facts; the importer never infers these from rates. */
+  repPayments: Array<{ repId: string; role: 'Opener' | 'Closer' | 'Override'; amount: number; paidAt: string }>;
+  /** Number of lender receipt weeks actually received, or null when not a schedule. */
+  lenderWeeks: number | null;
 }
 
 export interface ImportReview {
   sourceId: string;
   sourceHash: string;
   source: SheetRow;
-  status: 'not_reviewed' | 'in_progress' | 'needs_attention' | 'reviewed';
+  status: 'not_reviewed' | 'in_progress' | 'needs_attention' | 'reviewed' | 'imported';
   review: ImportReviewDecision;
   revision: number;
   updatedAt: string;
@@ -196,9 +200,10 @@ export type DealPatch = Partial<Omit<Deal, 'id' | 'draws'>>;
  * touch the database directly.
  */
 export interface Repo {
-  listImportReviews(): Promise<ImportReview[]>;
+  listImportReviews(includeInactive?: boolean): Promise<ImportReview[]>;
   stageImportReviews(rows: ImportReviewSeed[]): Promise<{ created: number; unchanged: number; changed: number }>;
   saveImportReview(id: string, revision: number, review: ImportReviewDecision, status: ImportReview['status'], actorRepId: string): Promise<ImportReview | null>;
+  commitReviewedImport(id: string, revision: number, plan: (snapshot: Repo) => Promise<{ previewToken: string; expectedToken: string; deal: Deal | null; draw: DealDraw | null; clawback: Clawback | null; lines: PayoutLine[]; action: string }>, actorRepId: string): Promise<{ sourceId: string; action: string }>;
   findRepByEmail(email: string): Promise<Rep | null>;
   findRep(id: string): Promise<Rep | null>;
   listReps(): Promise<Rep[]>;

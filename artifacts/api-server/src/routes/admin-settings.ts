@@ -6,7 +6,7 @@ import { beginInvite, setRepPassword } from '../services/passwords.js';
 import type { NotifyDeps } from '../services/notify.js';
 import { commitImport, previewImport } from '../services/import.js';
 import { sheetSource } from '../services/sheet-source.js';
-import { listTrackerReviews, saveTrackerReview, stageTracker } from '../services/import-review.js';
+import { commitTrackerReview, listTrackerReviews, previewTrackerReview, saveTrackerReview, stageTracker } from '../services/import-review.js';
 import { commitRemittance, previewRemittance } from '../services/remittance.js';
 
 /** Settings writes: lenders, partners, product rules, thresholds, CRM, teams, reps. Admin only. */
@@ -19,6 +19,10 @@ export function adminSettingsRouter(repo: Repo, notify: Omit<NotifyDeps, 'repo'>
   r.post('/import-review/stage', async (req, res) => res.json(await stageTracker(repo, String(req.body?.csv ?? ''), actor(req))));
   r.patch('/import-review/:id', async (req, res) => res.json(await saveTrackerReview(
     repo, String(req.params.id), Number(req.body?.revision), req.body?.review, String(req.body?.status) as import('../repo.js').ImportReview['status'], actor(req),
+  )));
+  r.post('/import-review/:id/preview', async (req, res) => res.json(await previewTrackerReview(repo, String(req.params.id))));
+  r.post('/import-review/:id/commit', async (req, res) => res.status(201).json(await commitTrackerReview(
+    repo, String(req.params.id), Number(req.body?.revision), String(req.body?.previewToken ?? ''), actor(req),
   )));
 
   r.get('/settings/usage', async (_req, res) => res.json(await usage(repo)));

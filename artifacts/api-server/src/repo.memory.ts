@@ -1,4 +1,4 @@
-import { assertBalanced, cents, journalFingerprint, projectAccounting, type AccountingJournal, type Clawback, type Deal, type DealDraw, type LedgerContext, type PayoutLine, type PayrollRun, type Rep, type Team, type WeeklySchedule, type WalletAdjustment } from '@greystone/commission';
+import { assertBalanced, cents, isDealFullyPaid, journalFingerprint, projectAccounting, type AccountingJournal, type Clawback, type Deal, type DealDraw, type LedgerContext, type PayoutLine, type PayrollRun, type Rep, type Team, type WeeklySchedule, type WalletAdjustment } from '@greystone/commission';
 import { NOTIFICATION_DEFAULTS, PERMISSION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AccountingPeriod, type AuditEntry, type ClawbackMutationContext, type DealFile, type DealNote, type DealPatch, type ImportReview, type ImportReviewDecision, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Reconciliation, type Repo, type RepFile, type RepTask, type Settings, type StoredJournal, type SyncIdempotencyRecord, type TotpState, type TrustedDevice } from './repo.js';
 import { requestMeta } from './auth/request-context.js';
 
@@ -21,7 +21,7 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
   const audit: AuditEntry[] = [];
   const importReviews = new Map<string, ImportReview>();
   const activeImportReviews = new Set<string>();
-  const emptyImportReview = (): ImportReviewDecision => ({ termsConfirmed: false, lender: 'unknown', lenderAmount: null, lenderDate: null, reps: 'unknown', repAmount: null, repDate: null, notes: '' });
+  const emptyImportReview = (): ImportReviewDecision => ({ termsConfirmed: false, lender: 'unknown', lenderAmount: null, lenderDate: null, reps: 'unknown', repAmount: null, repDate: null, notes: '', repPayments: [], lenderWeeks: null });
   const ctx: LedgerContext = data;
   const passwords = new Map<string, string>();
   const resets: PasswordReset[] = [];
@@ -41,6 +41,7 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
   const chains = new Map<string, { version: number; effectiveId: string | null; fingerprint: string | null }>();
   const syncIdempotency = new Map<string, SyncIdempotencyRecord>();
   const syncQueues = new Map<string, Promise<void>>();
+  let reviewedImportQueue: Promise<void> = Promise.resolve();
   let bookId = 0;
   let initialAccountingSyncCompleted = false;
   let accountingQueue: Promise<void> = Promise.resolve();
@@ -98,13 +99,14 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
     return candidates[0] ?? null;
   };
   return {
-    async listImportReviews() { return [...importReviews.values()].filter((row) => activeImportReviews.has(row.sourceId)).sort((a, b) => a.sourceId.localeCompare(b.sourceId)); },
+    async listImportReviews(includeInactive = false) { return [...importReviews.values()].filter((row) => includeInactive || activeImportReviews.has(row.sourceId)).sort((a, b) => a.sourceId.localeCompare(b.sourceId)); },
     async stageImportReviews(rows) {
       const result = { created: 0, unchanged: 0, changed: 0 };
       activeImportReviews.clear();
       for (const row of rows) {
         activeImportReviews.add(row.sourceId);
         const old = importReviews.get(row.sourceId);
+        if (old?.status === 'imported') { activeImportReviews.delete(row.sourceId); result.unchanged++; continue; }
         if (old?.sourceHash === row.sourceHash) { importReviews.set(row.sourceId, { ...old, source: row.source }); result.unchanged++; continue; }
         const next: ImportReview = {
           ...row, review: emptyImportReview(), status: old ? 'needs_attention' : 'not_reviewed',
@@ -121,6 +123,63 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
       const next: ImportReview = { ...current, review, status, revision: revision + 1, updatedAt: new Date().toISOString() };
       importReviews.set(id, next);
       return next;
+    },
+    async commitReviewedImport(id, revision, plan, actorRepId) {
+      let release!: () => void;
+      const prior = reviewedImportQueue;
+      reviewedImportQueue = new Promise<void>((resolve) => { release = resolve; });
+      await prior.catch(() => undefined);
+      try {
+        const rollback = {
+          deals: structuredClone(data.deals), lines: structuredClone(data.lines), clawbacks: structuredClone(data.clawbacks),
+          runs: structuredClone(data.runs), auditLength: audit.length,
+        };
+        try {
+        const staged = importReviews.get(id);
+        if (!staged || !activeImportReviews.has(id) || staged.revision !== revision || staged.status !== 'reviewed')
+          throw new Error('Staged review is missing, no longer active, or is not reviewed');
+        const result = await plan(this as unknown as Repo);
+        if (result.previewToken !== result.expectedToken) throw new Error('Reviewed import preview token does not match authoritative state');
+        if (result.deal && result.action === 'new') await (this as unknown as Repo).insertDeal(result.deal);
+        if (result.deal && result.action !== 'new') {
+          const current = data.deals.find((d) => d.id === result.deal!.id);
+          if (current && (current.commCollected !== result.deal.commCollected || JSON.stringify(current.commSchedule) !== JSON.stringify(result.deal.commSchedule) || current.lenderPaid !== result.deal.lenderPaid)) {
+            await (this as unknown as Repo).updateDeal(current.id, { commCollected: result.deal.commCollected, commSchedule: result.deal.commSchedule, lenderPaid: result.deal.lenderPaid });
+          }
+        }
+        if (result.draw) await (this as unknown as Repo).insertDraw(result.deal!.id, result.draw);
+        if (result.clawback) await (this as unknown as Repo).insertClawback(result.clawback);
+        let lines = result.lines;
+        if (lines.length) {
+          const runIds = [...new Set(lines.map((l) => l.runId).filter((x): x is string => !!x))];
+          if (!runIds.length) {
+            const runId = `import-review-${id}`;
+            const dates = lines.map((l) => l.paidAt).sort();
+            await (this as unknown as Repo).insertRun({ id: runId, label: 'Historical import', start: dates[0]!, end: dates.at(-1)!, status: 'paid' });
+            lines = lines.map((l) => ({ ...l, runId }));
+          }
+          await (this as unknown as Repo).commitPayout({ lines, clawbackUpdates: [], dealsFullyPaid: [], paidAt: lines.map((l) => l.paidAt).sort().at(-1)! });
+          const current = data.deals.find((d) => d.id === result.deal?.id);
+          if (current && !current.repPaid && isDealFullyPaid(current, data.lines))
+            await (this as unknown as Repo).updateDeal(current.id, { repPaid: lines.map((l) => l.paidAt).sort().at(-1)! });
+        }
+        await (this as unknown as Repo).writeAudit({ actorRepId, action: 'import-review.commit', targetRepId: null, path: `/api/admin/import-review/${id}/commit`, detail: { sourceId: id, revision, action: result.action, lines: lines.length } });
+        const current = importReviews.get(id);
+        if (!current || current.revision !== revision || current.status !== 'reviewed') throw new Error('Staged review changed while committing');
+        importReviews.set(id, { ...current, status: 'imported', revision: revision + 1, updatedAt: new Date().toISOString() });
+        activeImportReviews.delete(id);
+        return { sourceId: id, action: result.action };
+        } catch (error) {
+          data.deals.splice(0, data.deals.length, ...rollback.deals);
+          data.lines.splice(0, data.lines.length, ...rollback.lines);
+          data.clawbacks.splice(0, data.clawbacks.length, ...rollback.clawbacks);
+          data.runs.splice(0, data.runs.length, ...rollback.runs);
+          audit.splice(rollback.auditLength);
+          throw error;
+        }
+      } finally {
+        release();
+      }
     },
     async listJournals(filter = {}) {
       return journals.filter((j) => (!filter.from || j.date >= filter.from) && (!filter.to || j.date <= filter.to) && (!filter.sourceKey || j.sourceKey === filter.sourceKey) && (!filter.accountCode || j.lines.some((l) => l.accountCode === filter.accountCode))).map((j) => ({ ...j, lines: [...j.lines] }));

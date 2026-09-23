@@ -151,11 +151,30 @@ export function isLinePaid(line: Pick<RepLine, 'key' | 'dealId' | 'role' | 'segm
 /** Earned lines not yet in the ledger. */
 export function payableLines(deals: Deal[], lines: PayoutLine[], repId?: string, today?: string): RepLine[] {
   const paid = paidKeys(lines);
+  // A canonical row may pay only the remainder after a historical partial.
+  // Compare the sum of both standing portions to the earned amount, even
+  // after either portion is voided.
+  const historicalBase = (key: string) => {
+    const base = rowBase(key);
+    const marker = base.match(/\|historical-partial(?::\d+)?$/);
+    return marker ? base.slice(0, -marker[0].length) : null;
+  };
+  const partialHistory = new Set(lines.map((l) => historicalBase(l.key)).filter((key): key is string => key !== null));
+  const settled = new Map<string, number>();
+  for (const row of standingLines(lines)) {
+    if (row.amount <= 0) continue;
+    const base = rowBase(row.key);
+    const key = historicalBase(base) ?? base;
+    if (partialHistory.has(key)) settled.set(key, cents((settled.get(key) ?? 0) + row.amount));
+  }
   const out: RepLine[] = [];
   for (const d of deals) {
     for (const l of dealLines(d, today)) {
       if (repId && l.repId !== repId) continue;
-      if (!isLinePaid(l, paid)) out.push(l);
+      if (partialHistory.has(l.key)) {
+        const remaining = cents(l.amount - (settled.get(l.key) ?? 0));
+        if (remaining > 0) out.push({ ...l, amount: remaining });
+      } else if (!isLinePaid(l, paid)) out.push(l);
     }
   }
   return out;
@@ -165,20 +184,19 @@ export function payableLines(deals: Deal[], lines: PayoutLine[], repId?: string,
 export function isDealFullyPaid(deal: Deal, lines: PayoutLine[]): boolean {
   const all = dealLines(deal);
   if (all.length === 0) return false;
-  const paid = paidKeys(lines);
-  return all.every((l) => isLinePaid(l, paid));
+  return payableLines([deal], lines).length === 0;
 }
 
 /** How many payable units of a segment each rep has been paid — the "4 of 20 increments paid" figure. */
 export function unitsPaid(deal: Deal, lines: PayoutLine[], repId: string, sk: SegmentKey): { paid: number; total: number; collected: number } {
-  const paid = paidKeys(lines);
+  const unpaid = new Set(payableLines([deal], lines, repId).map((l) => l.key));
   const mine = dealLines(deal).filter((l) => l.repId === repId && l.segmentKey === sk);
   const byUnit = new Map<number, RepLine[]>();
   for (const l of mine) byUnit.set(l.unit?.n ?? -1, [...(byUnit.get(l.unit?.n ?? -1) ?? []), l]);
   const units = [...byUnit.values()];
   return {
     total: units.length,
-    paid: units.filter((ls) => ls.every((l) => isLinePaid(l, paid))).length,
+    paid: units.filter((ls) => ls.every((l) => !unpaid.has(l.key))).length,
     collected: units.filter((ls) => ls.every((l) => l.collected)).length,
   };
 }

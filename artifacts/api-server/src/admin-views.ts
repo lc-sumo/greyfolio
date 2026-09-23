@@ -1,5 +1,5 @@
 /** Admin projections: everything, including house net, referral and every rep's name. Never served to reps. */
-import { RENEWAL_BUCKET_LABEL, cents, clawbackSlices, clawbackWindow, collectedGross, collectedOf, collectionLabel, crmUrl, dealCommissionStatus, dealLines, dealPayback, disbursementOf, effectiveDealStatus, effectiveIncrements, houseNet, isLinePaid, lenderClawbackBase, outstandingGross, outstandingOf, paidKeys, paymentFor, renewalOf, roleAssignments, scheduleEvents, scheduleParts, segmentStatus, segments, settlementOf, standingLines, sum, totalFunded, totalGross, totalNet, totalRepPayout, type Clawback, type ClawbackWindow, type Deal, type LedgerContext, type RenewalBucket, type Rep, type Role, type ScheduleEvent, type Segment, unitsPaid } from '@greystone/commission';
+import { RENEWAL_BUCKET_LABEL, cents, clawbackSlices, clawbackWindow, collectedGross, collectedOf, collectionLabel, crmUrl, dealCommissionStatus, dealLines, dealPayback, disbursementOf, effectiveDealStatus, effectiveIncrements, houseNet, lenderClawbackBase, outstandingGross, outstandingOf, payableLines, paymentFor, renewalOf, roleAssignments, scheduleEvents, scheduleParts, segmentStatus, segments, settlementOf, standingLines, sum, totalFunded, totalGross, totalNet, totalRepPayout, type Clawback, type ClawbackWindow, type Deal, type LedgerContext, type RenewalBucket, type Rep, type Role, type ScheduleEvent, type Segment, unitsPaid } from '@greystone/commission';
 import type { Settings } from './repo.js';
 
 export interface RoleView {
@@ -86,10 +86,10 @@ export interface AdminDealRow {
 export function adminDealRow(deal: Deal, ctx: LedgerContext, reps: Rep[], settings: Settings, today: string): AdminDealRow {
   const name = (id: string | null) => (id ? reps.find((r) => r.id === id)?.name ?? id : null);
   const lines = dealLines(deal);
-  const paidSet = paidKeys(ctx.lines);
+  const unpaid = new Map(payableLines([deal], ctx.lines).map((l) => [l.key, l.amount]));
   const roleView = (role: Role, repId: string | null, rate: number): RoleView => {
     const mine = lines.filter((l) => l.role === role);
-    return { role, repId, name: name(repId), rate, amount: sum(mine.map((l) => l.amount)), paid: sum(mine.filter((l) => isLinePaid(l, paidSet)).map((l) => l.amount)) };
+    return { role, repId, name: name(repId), rate, amount: sum(mine.map((l) => l.amount)), paid: sum(mine.map((l) => cents(l.amount - (unpaid.get(l.key) ?? 0)))) };
   };
   const segs = segments(deal);
   const full = segs.filter((s) => outstandingOf(s) === 0 && s.gross > 0).length;

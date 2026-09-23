@@ -318,7 +318,9 @@ export const commissionImportReviews = pgTable('commission_import_reviews', {
   updatedBy: text('updated_by').references(() => commissionReps.id),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
-});
+}, (t) => [
+  index('commission_import_reviews_active_source_idx').on(t.sourceId).where(sql`${t.active}`),
+]);
 
 /* ------------------------------------------------------------------ */
 /* Settings and integrations                                           */

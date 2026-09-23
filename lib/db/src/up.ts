@@ -82,6 +82,9 @@ const FINGERPRINTS: Record<string, Fingerprint> = {
   ] },
   '0023_import_review': { table: 'commission_import_reviews' },
   '0024_import_review_active': { table: 'commission_import_reviews', column: 'active' },
+  '0025_import_review_contract': { checks: [
+    { kind: 'index', table: 'commission_import_reviews', name: 'commission_import_reviews_active_source_idx' },
+  ] },
 };
 
 interface JournalEntry { idx: number; when: number; tag: string }

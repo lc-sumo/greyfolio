@@ -40,3 +40,19 @@
 @media(max-width:850px) { .review-layout { grid-template-columns:1fr; }.review-list { position:static; }.review-scroll { max-height:230px; }.review-answers { grid-template-columns:1fr; }.review-intro { flex-wrap:wrap; } }
 @media(max-width:700px) { .review-form-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .review-detail { padding:15px; } }
 @media(max-width:480px) { .review-form-grid { grid-template-columns:1fr; } }
+.review-payouts,.review-weeks { border:1px solid var(--border); border-radius:8px; margin:0; padding:14px; display:grid; gap:10px; }
+.review-payouts legend { font-size:14px; font-weight:700; padding:0 4px; }
+.review-payouts small,.review-weeks small { color:var(--muted); line-height:1.4; }
+.review-payout-row { display:grid; grid-template-columns:1.2fr 1fr 1fr 1.1fr auto; gap:8px; align-items:end; padding:10px 0; border-top:1px solid var(--border); }
+.review-payout-row label,.review-weeks { display:grid; gap:6px; font-size:13px; font-weight:600; }
+.review-payout-row .btn { white-space:nowrap; }.btn.subtle { padding:8px 10px; }
+.review-import-actions { border:1px solid var(--border-strong); border-radius:9px; padding:15px; display:grid; gap:14px; background:var(--input-bg); }
+.review-import-actions p { color:var(--muted); margin:4px 0 0; font-size:13px; }
+.review-preview { display:grid; gap:10px; padding-top:12px; border-top:1px solid var(--border); }
+.review-preview-title { display:flex; justify-content:space-between; gap:10px; }.review-preview-title span { color:var(--muted); font-size:12px; }
+.review-preview-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
+.review-preview-grid span { display:grid; gap:5px; color:var(--muted); font-size:12px; min-width:0; }
+.review-preview-grid b { color:var(--text); overflow-wrap:anywhere; font-size:12px; font-weight:500; }
+.review-preview h4 { margin:3px 0 0; }.review-payout-list { margin:0; padding-left:20px; font-size:13px; line-height:1.8; }
+.review-already { color:var(--amber-deep); margin-left:5px; }
+@media(max-width:700px) { .review-payout-row,.review-preview-grid { grid-template-columns:1fr; } }

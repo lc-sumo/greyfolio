@@ -7,7 +7,7 @@
  * override amounts belonging to someone else, other reps' ids or names.
  * `assertRepSafe` is the guard tests run over every projection.
  */
-import { RENEWAL_BUCKET_LABEL, cents, clawbackWindow, collectionLabel, dealCommissionStatus, dealPayback, disbursementOf, isLinePaid, linesInPeriod, monthlySeries, paidFigures, paidKeys, renewalOf, repClawback, repDeals, repLedger, repLines, repShare, scheduleEvents, segments, standingLines, sum, totalFunded, type Clawback, type ClawbackWindow, type CommissionStatus, type Deal, type LedgerContext, type Lender, type PayoutLine, type PayrollRun, type ProductRule, type RenewalBucket, type RenewalSettings, type Rep, type Role, unitsPaid, voidedKeys } from '@greystone/commission';
+import { RENEWAL_BUCKET_LABEL, cents, clawbackWindow, collectionLabel, dealCommissionStatus, dealPayback, disbursementOf, linesInPeriod, monthlySeries, paidFigures, payableLines, renewalOf, repClawback, repDeals, repLedger, repLines, repShare, scheduleEvents, segments, standingLines, sum, totalFunded, type Clawback, type ClawbackWindow, type CommissionStatus, type Deal, type LedgerContext, type Lender, type PayoutLine, type PayrollRun, type ProductRule, type RenewalBucket, type RenewalSettings, type Rep, type Role, unitsPaid, voidedKeys } from '@greystone/commission';
 
 /** Keys that must never appear anywhere in a rep-scoped payload. */
 export const REP_FORBIDDEN_KEYS: readonly string[] = [
@@ -117,7 +117,7 @@ const DEFAULT_CLAWBACK_SETTINGS: ClawbackSettings = { lenders: [], products: [],
 
 export function repDealView(deal: Deal, repId: string, lines: PayoutLine[], clawbacks: Clawback[] = [], settings: ClawbackSettings = DEFAULT_CLAWBACK_SETTINGS): RepDealView {
   const mine = repLines(deal, repId);
-  const paidSet = paidKeys(lines.filter((l) => l.repId === repId));
+  const unpaid = new Map(payableLines([deal], lines, repId).map((l) => [l.key, l.amount]));
   const share = repShare(deal, repId);
   const accrued = sum(mine.filter((l) => l.collected).map((l) => l.amount));
   const grouped = new Map<string, typeof mine>();
@@ -151,15 +151,15 @@ export function repDealView(deal: Deal, repId: string, lines: PayoutLine[], claw
     roles: [...new Set(mine.map((l) => l.role))],
     lines: [...grouped.values()].map((ls) => {
       const f = ls[0]!;
-      const paidLs = ls.filter((l) => isLinePaid(l, paidSet));
+      const paidAmount = sum(ls.map((l) => cents(l.amount - (unpaid.get(l.key) ?? 0))));
       return {
         role: f.role,
         rate: f.rate,
         amount: sum(ls.map((l) => l.amount)),
         segment: f.segment.label,
         segmentKey: f.segmentKey,
-        paid: paidLs.length === ls.length,
-        paidAmount: sum(paidLs.map((l) => l.amount)),
+        paid: paidAmount >= sum(ls.map((l) => l.amount)),
+        paidAmount,
         units: f.unit ? unitsPaid(deal, lines, repId, f.segmentKey) : null,
       };
     }),

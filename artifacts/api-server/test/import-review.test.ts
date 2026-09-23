@@ -87,7 +87,8 @@ describe('resumable tracker reviews', () => {
     expect(initial.issues.some((x: string) => x.includes('Missing Lender'))).toBe(true);
     const saved = await admin.patch('/api/admin/import-review/F990').send({
       revision: initial.revision,
-      review: { ...initial.review, lender: 'unpaid', termsConfirmed: true, terms: { lender: 'MBC' }, notes: '' },
+      review: { ...initial.review, lender: 'unpaid', termsConfirmed: true, terms: { lender: 'MBC' }, notes: '',
+        repPayments: [{ repId: 'rep-leor', role: 'Opener', amount: 200, paidAt: '2025-01-11' }] },
       status: 'reviewed',
     });
     expect(saved.status).toBe(200);

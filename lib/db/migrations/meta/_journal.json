@@ -176,6 +176,13 @@
       "when": 1788723000000,
       "tag": "0024_import_review_active",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788724000000,
+      "tag": "0025_import_review_contract",
+      "breakpoints": true
     }
   ]
 }

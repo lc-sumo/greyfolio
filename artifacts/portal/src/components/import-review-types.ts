@@ -17,6 +17,8 @@ export interface Decision {
   terms?: Partial<Source>;
   lender: Answer; lenderAmount: number | null; lenderDate: string | null;
   reps: Answer; repAmount: number | null; repDate: string | null; notes: string;
+  repPayments: Array<{ repId: string; role: string; amount: number; paidAt: string }>;
+  lenderWeeks: number | null;
 }
 
 export interface ReviewRow {

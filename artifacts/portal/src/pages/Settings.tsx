@@ -4,11 +4,12 @@ import { Shell } from '../components/Shell';
 import { Card, Drawer, Loading, Pill } from '../components/ui';
 import { FilesPanel } from '../components/FilesPanel';
 import { PlaybooksTab } from '../components/PlaybooksTab';
+import { ImportReviewTab } from '../components/ImportReviewTab';
 import { DEMO, api, post, type ClawbackBasis, type Lender, type ProductRule, type ReferralPartner, type RemittancePreview, type RosterRep, type Settings as SettingsData, type Team, type Usage } from '../lib/api';
 import { compact, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 
-type TabKey = 'portal' | 'lenders' | 'partners' | 'products' | 'teams' | 'reps' | 'crm' | 'playbooks' | 'import' | 'remittance';
+type TabKey = 'portal' | 'lenders' | 'partners' | 'products' | 'teams' | 'reps' | 'crm' | 'playbooks' | 'review' | 'import' | 'remittance';
 const TABS: Array<{ key: TabKey; label: string; hint: string }> = [
   { key: 'portal', label: 'Portal', hint: 'Names, automatic emails, security and the dropdown lists — everything about how the portal itself behaves.' },
   { key: 'lenders', label: 'Lenders', hint: 'Each lender funds certain products and has its own clawback policy. Lenders that fund consolidations pay commission in increments; everyone else pays straight commission.' },
@@ -18,7 +19,8 @@ const TABS: Array<{ key: TabKey; label: string; hint: string }> = [
   { key: 'reps', label: 'Users', hint: 'Give people portal access and choose whether they can participate in commissions. Deactivating never changes history.' },
   { key: 'crm', label: 'CRM & thresholds', hint: 'CRM deep link template and the day counts that drive at-risk, Prospecting and renewals.' },
   { key: 'playbooks', label: 'Playbooks', hint: 'If/then rules on the renewal engine: when a deal reaches a paid-in mark, a stage, an unused line or a maturity date, open a task for the rep, email them, email you, or set a status. Dry-run any rule to see exactly which deals it would touch today.' },
-  { key: 'import', label: 'Import from sheet', hint: 'Bring the FUNDED DEALS tab in from a CSV export. Preview first; nothing is written until the file is clean.' },
+  { key: 'review', label: 'Review old tracker', hint: 'Save your progress deal by deal. No lender receipt or rep payout is posted from the sheet.' },
+  { key: 'import', label: 'Direct import (advanced)', hint: 'Legacy direct import can post inferred collection and sheet-paid payouts. Do not use for unverified history; use Review old tracker first.' },
   { key: 'remittance', label: 'Lender remittance', hint: 'Paste the lender’s weekly payment report. Each line is matched to a deal and marks the increments or dollars that arrived — no ticking receipts one by one.' },
 ];
 
@@ -29,7 +31,10 @@ export function Settings() {
   const usage = useQuery({ queryKey: ['usage'], queryFn: () => api<Usage>('/api/admin/settings/usage') });
   const teams = useQuery({ queryKey: ['teams'], queryFn: () => api<{ teams: Team[] }>('/api/admin/teams') });
   const roster = useQuery({ queryKey: ['roster'], queryFn: () => api<{ reps: RosterRep[] }>('/api/admin/reps') });
-  const [tab, setTab] = useState<TabKey>('portal');
+  const [tab, setTab] = useState<TabKey>(() => {
+    const requested = new URLSearchParams(window.location.search).get('tab');
+    return TABS.some((item) => item.key === requested) ? requested as TabKey : 'portal';
+  });
   const [err, setErr] = useState('');
 
   async function run(label: string, fn: () => Promise<unknown>) {
@@ -58,7 +63,7 @@ export function Settings() {
           </div>
           <nav aria-label="Settings sections">
             {TABS.map((t) => (
-              <button key={t.key} className={tab === t.key ? 'on' : ''} onClick={() => { setTab(t.key); setErr(''); }}>
+              <button key={t.key} className={tab === t.key ? 'on' : ''} onClick={() => { setTab(t.key); setErr(''); window.history.replaceState(null, '', `${window.location.pathname}?tab=${t.key}`); }}>
                 {t.label}
               </button>
             ))}
@@ -87,6 +92,7 @@ export function Settings() {
                 {tab === 'playbooks' && <PlaybooksTab settings={settings.data!} teams={teams.data!.teams} reps={roster.data!.reps} run={run} />}
                 {tab === 'crm' && <CrmTab settings={settings.data!} run={run} />}
                 {tab === 'import' && <ImportTab />}
+                {tab === 'review' && <ImportReviewTab />}
                 {tab === 'remittance' && <RemittanceTab />}
               </>
             )}
@@ -499,6 +505,7 @@ function ImportTab() {
   return (
     <Card title="Import the FUNDED DEALS tab" extra="upload the Google Sheet itself (File → Download → Microsoft Excel) or a CSV of the FUNDED DEALS tab · anything the sheet mentions that Settings does not know is listed for you to add">
       <div style={{ display: 'grid', gap: 10 }}>
+        <div className="note" role="alert" style={{ background: 'var(--red-light)', borderColor: 'var(--red-light-2)', color: 'var(--red)' }}><b>Do not use direct import for the historical tracker.</b> It infers lender collection from sheet status and creates paid payroll lines from a Rep Paid Date. Use <b>Review old tracker</b> instead; staged deals are blocked from direct import.</div>
         <div className="note" style={{ background: 'var(--amber-light)', borderColor: 'var(--amber-light-3)', color: 'var(--amber-deep)' }}><b>Required columns:</b> Business Name, Lender, Product, Funded or Draw Amount, and Date. Every deal row must have all five fields; month banners and totals are skipped. Use CSV or <b>.xlsx</b> (not legacy .xls).</div>
         <div className="toolbar">
           <input type="file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(e) => void file(e.target.files?.[0])} />

@@ -6,6 +6,7 @@ import { beginInvite, setRepPassword } from '../services/passwords.js';
 import type { NotifyDeps } from '../services/notify.js';
 import { commitImport, previewImport } from '../services/import.js';
 import { sheetSource } from '../services/sheet-source.js';
+import { listTrackerReviews, saveTrackerReview, stageTracker } from '../services/import-review.js';
 import { commitRemittance, previewRemittance } from '../services/remittance.js';
 
 /** Settings writes: lenders, partners, product rules, thresholds, CRM, teams, reps. Admin only. */
@@ -13,6 +14,12 @@ export function adminSettingsRouter(repo: Repo, notify: Omit<NotifyDeps, 'repo'>
   const r = Router();
   r.use(requireRole('admin'));
   const actor = (req: Parameters<Router>[0]) => currentUser(req)!.repId;
+
+  r.get('/import-review', async (_req, res) => res.json({ rows: await listTrackerReviews(repo) }));
+  r.post('/import-review/stage', async (req, res) => res.json(await stageTracker(repo, String(req.body?.csv ?? ''), actor(req))));
+  r.patch('/import-review/:id', async (req, res) => res.json(await saveTrackerReview(
+    repo, String(req.params.id), Number(req.body?.revision), req.body?.review, String(req.body?.status) as import('../repo.js').ImportReview['status'], actor(req),
+  )));
 
   r.get('/settings/usage', async (_req, res) => res.json(await usage(repo)));
   r.put('/settings/lenders', async (req, res) => res.json({ lenders: await saveLenders(repo, req.body?.lenders, actor(req)) }));

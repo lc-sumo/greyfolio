@@ -194,4 +194,10 @@ describe('FUNDED DEALS import validation', () => {
     expect(read.rows).toHaveLength(1);
     expect(read.skipped).toBe(2);
   });
+
+  it('ignores empty tracker template rows even when their hidden count formulas have values', () => {
+    const read = readFundedDealsCsv('Deal ID,Date,Business Name,Lender,Product,Funded / Draw Amount ($),count\nF8,4/1/2026,Acme,MBC,MCA,1000,0\n,,,,,,0\n,,,,,,1');
+    expect(read.rows.map((r) => r.id)).toEqual(['F8']);
+    expect(read.skipped).toBe(2);
+  });
 });

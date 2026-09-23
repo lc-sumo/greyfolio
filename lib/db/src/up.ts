@@ -80,6 +80,8 @@ const FINGERPRINTS: Record<string, Fingerprint> = {
     { kind: 'constraint', table: 'commission_wallet_adjustments', name: 'commission_wallet_adjustments_reversal_of_fkey', constraintType: 'f' },
     { kind: 'account', name: '5020', value: 'wallet_adjustment' },
   ] },
+  '0023_import_review': { table: 'commission_import_reviews' },
+  '0024_import_review_active': { table: 'commission_import_reviews', column: 'active' },
 };
 
 interface JournalEntry { idx: number; when: number; tag: string }

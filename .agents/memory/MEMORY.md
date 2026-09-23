@@ -7,3 +7,4 @@
 - [Consolidation commission schedule](consolidation-commission-schedule.md) — Base commission on funding increments, not the merchant’s longer repayment term.
 - [Dedicated Sheets sync](dedicated-sheets-sync.md) — Bind one spreadsheet and favor at-most-once receipt handling over duplicate monetary mutations.
 - [pnpm filtered scripts](pnpm-filtered-scripts.md) — Include `run` when invoking filtered package scripts; otherwise pnpm may update dependencies instead.
+- [Historical tracker review](historical-tracker-review.md) — Save confirmed history separately; never derive cash receipts or paid payroll from ambiguous sheet status.

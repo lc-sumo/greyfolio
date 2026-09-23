@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import { assertBalanced, cents, journalFingerprint, projectAccounting, SYSTEM_CHART, type AccountingJournal, type Clawback, type Deal, type DealDraw, type LedgerContext, type PayrollRun, type Rep, type Team, type WeeklySchedule } from '@greystone/commission';
 import {
   commissionAuditLog,
@@ -14,6 +14,7 @@ import {
   commissionDealFiles,
   commissionDealNotes,
   commissionDeals,
+  commissionImportReviews,
   commissionPasswordResets,
   commissionPayoutLines,
   commissionPayrollRuns,
@@ -35,12 +36,18 @@ import {
   toTeam,
   type Database,
 } from '@greystone/db';
-import { NOTIFICATION_DEFAULTS, PERMISSION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AccountingPeriod, type AuditEntry, type ClawbackMutationContext, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Reconciliation, type Repo, type RepFile, type RepTask, type Settings, type StoredJournal, type TotpState, type TrustedDevice } from './repo.js';
+import { NOTIFICATION_DEFAULTS, PERMISSION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AccountingPeriod, type AuditEntry, type ClawbackMutationContext, type DealFile, type DealNote, type DealPatch, type ImportReview, type ImportReviewDecision, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Reconciliation, type Repo, type RepFile, type RepTask, type Settings, type StoredJournal, type TotpState, type TrustedDevice } from './repo.js';
 import type { WalletAdjustment } from '@greystone/commission';
 import type { PlaybookRule } from './services/playbook-rules.js';
 import { requestMeta } from './auth/request-context.js';
 
 let accountingSyncTail = Promise.resolve();
+const emptyImportReview = (): ImportReviewDecision => ({ termsConfirmed: false, lender: 'unknown', lenderAmount: null, lenderDate: null, reps: 'unknown', repAmount: null, repDate: null, notes: '' });
+const toImportReview = (row: typeof commissionImportReviews.$inferSelect): ImportReview => ({
+  sourceId: row.sourceId, sourceHash: row.sourceHash, source: row.source as ImportReview['source'],
+  status: row.status as ImportReview['status'], review: row.review as ImportReviewDecision,
+  revision: row.revision, updatedAt: row.updatedAt.toISOString(),
+});
 const toWalletAdjustment = (row: typeof commissionWalletAdjustments.$inferSelect): WalletAdjustment => ({ ...row, createdAt: row.createdAt.toISOString() });
 
 async function serializeAccountingSync<T>(work: () => Promise<T>): Promise<T> {
@@ -60,6 +67,41 @@ export function dbRepo(db: Database): Repo {
   const toTask = (t: typeof commissionTasks.$inferSelect): RepTask => ({ id: t.id, dealId: t.dealId, repId: t.repId, playbookId: t.playbookId, title: t.title, dueDate: t.dueDate, status: t.status as RepTask['status'], outcome: t.outcome as RepTask['outcome'], note: t.note, createdBy: t.createdBy, createdAt: t.createdAt.toISOString(), doneAt: iso(t.doneAt) });
   const toDevice = (d: typeof commissionTrustedDevices.$inferSelect): TrustedDevice => ({ id: d.id, repId: d.repId, tokenHash: d.tokenHash, label: d.label, ip: d.ip, createdAt: d.createdAt.toISOString(), lastUsedAt: d.lastUsedAt.toISOString(), expiresAt: d.expiresAt.toISOString() });
   return {
+    async listImportReviews() {
+      return (await db.select().from(commissionImportReviews).where(eq(commissionImportReviews.active, true)).orderBy(commissionImportReviews.sourceId)).map(toImportReview);
+    },
+    async stageImportReviews(rows) {
+      return db.transaction(async (tx) => {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext('commission_import_review_stage'))`);
+        // Keep old reviews for a later re-upload, but hide rows omitted from this export.
+        await tx.update(commissionImportReviews).set({ active: false });
+        const result = { created: 0, unchanged: 0, changed: 0 };
+        for (const row of rows) {
+          const inserted = await tx.insert(commissionImportReviews).values({
+            ...row, source: row.source, review: emptyImportReview(), status: 'not_reviewed',
+          }).onConflictDoNothing().returning({ id: commissionImportReviews.sourceId });
+          if (inserted.length) { result.created++; continue; }
+          const changed = await tx.update(commissionImportReviews).set({
+            sourceHash: row.sourceHash, source: row.source, review: emptyImportReview(),
+            active: true, status: 'needs_attention', updatedAt: sql`now()`, revision: sql`${commissionImportReviews.revision} + 1`,
+          }).where(and(eq(commissionImportReviews.sourceId, row.sourceId), ne(commissionImportReviews.sourceHash, row.sourceHash)))
+            .returning({ id: commissionImportReviews.sourceId });
+          if (changed.length) result.changed++;
+          else {
+            await tx.update(commissionImportReviews).set({ active: true, source: row.source }).where(eq(commissionImportReviews.sourceId, row.sourceId));
+            result.unchanged++;
+          }
+        }
+        return result;
+      });
+    },
+    async saveImportReview(id, revision, review, status, actorRepId) {
+      const rows = await db.update(commissionImportReviews).set({
+        review, status, updatedBy: actorRepId, updatedAt: sql`now()`,
+        revision: sql`${commissionImportReviews.revision} + 1`,
+      }).where(and(eq(commissionImportReviews.sourceId, id), eq(commissionImportReviews.revision, revision), eq(commissionImportReviews.active, true))).returning();
+      return rows[0] ? toImportReview(rows[0]) : null;
+    },
     async listJournals(filter = {}) {
       const where = [filter.from ? sql`${commissionJournals.date} >= ${filter.from}` : undefined, filter.to ? sql`${commissionJournals.date} <= ${filter.to}` : undefined, filter.sourceKey ? eq(commissionJournals.sourceKey, filter.sourceKey) : undefined].filter(Boolean);
       const rows = where.length ? await db.select().from(commissionJournals).where(and(...(where as never[]))).orderBy(commissionJournals.date, commissionJournals.sourceKey) : await db.select().from(commissionJournals).orderBy(commissionJournals.date, commissionJournals.sourceKey);

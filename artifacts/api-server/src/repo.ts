@@ -1,5 +1,29 @@
 import type { AccountingJournal, Clawback, Deal, DealDraw, Lender, LedgerContext, PayoutLine, PayrollRun, ProductRule, ReferralPartner, Rep, SegmentKey, Team, WeeklySchedule, WalletAdjustment } from '@greystone/commission';
+import type { SheetRow } from '@greystone/db/seed/csv';
 import type { PlaybookRule } from './services/playbook-rules.js';
+
+export interface ImportReviewDecision {
+  termsConfirmed: boolean;
+  lender: 'unknown' | 'unpaid' | 'paid';
+  lenderAmount: number | null;
+  lenderDate: string | null;
+  reps: 'unknown' | 'unpaid' | 'paid';
+  repAmount: number | null;
+  repDate: string | null;
+  notes: string;
+}
+
+export interface ImportReview {
+  sourceId: string;
+  sourceHash: string;
+  source: SheetRow;
+  status: 'not_reviewed' | 'in_progress' | 'needs_attention' | 'reviewed';
+  review: ImportReviewDecision;
+  revision: number;
+  updatedAt: string;
+}
+
+export interface ImportReviewSeed { sourceId: string; sourceHash: string; source: SheetRow }
 
 export interface AuditEntry {
   actorRepId: string;
@@ -165,6 +189,9 @@ export type DealPatch = Partial<Omit<Deal, 'id' | 'draws'>>;
  * touch the database directly.
  */
 export interface Repo {
+  listImportReviews(): Promise<ImportReview[]>;
+  stageImportReviews(rows: ImportReviewSeed[]): Promise<{ created: number; unchanged: number; changed: number }>;
+  saveImportReview(id: string, revision: number, review: ImportReviewDecision, status: ImportReview['status'], actorRepId: string): Promise<ImportReview | null>;
   findRepByEmail(email: string): Promise<Rep | null>;
   findRep(id: string): Promise<Rep | null>;
   listReps(): Promise<Rep[]>;

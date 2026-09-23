@@ -1,5 +1,5 @@
 import { assertBalanced, cents, journalFingerprint, projectAccounting, type AccountingJournal, type Clawback, type Deal, type DealDraw, type LedgerContext, type PayoutLine, type PayrollRun, type Rep, type Team, type WeeklySchedule, type WalletAdjustment } from '@greystone/commission';
-import { NOTIFICATION_DEFAULTS, PERMISSION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AccountingPeriod, type AuditEntry, type ClawbackMutationContext, type DealFile, type DealNote, type DealPatch, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Reconciliation, type Repo, type RepFile, type RepTask, type Settings, type StoredJournal, type SyncIdempotencyRecord, type TotpState, type TrustedDevice } from './repo.js';
+import { NOTIFICATION_DEFAULTS, PERMISSION_DEFAULTS, PORTAL_DEFAULTS, SECURITY_DEFAULTS, TEMPLATE_DEFAULTS, type AccountingPeriod, type AuditEntry, type ClawbackMutationContext, type DealFile, type DealNote, type DealPatch, type ImportReview, type ImportReviewDecision, type PasswordReset, type PayoutCommit, type Playbook, type PlaybookFiring, type Reconciliation, type Repo, type RepFile, type RepTask, type Settings, type StoredJournal, type SyncIdempotencyRecord, type TotpState, type TrustedDevice } from './repo.js';
 import { requestMeta } from './auth/request-context.js';
 
 export interface MemoryData {
@@ -19,6 +19,9 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
   // predate this additive column to that same active representation.
   for (const clawback of data.clawbacks) clawback.forgivenAt ??= null;
   const audit: AuditEntry[] = [];
+  const importReviews = new Map<string, ImportReview>();
+  const activeImportReviews = new Set<string>();
+  const emptyImportReview = (): ImportReviewDecision => ({ termsConfirmed: false, lender: 'unknown', lenderAmount: null, lenderDate: null, reps: 'unknown', repAmount: null, repDate: null, notes: '' });
   const ctx: LedgerContext = data;
   const passwords = new Map<string, string>();
   const resets: PasswordReset[] = [];
@@ -95,6 +98,30 @@ export function memoryRepo(data: MemoryData): Repo & { audit: AuditEntry[]; data
     return candidates[0] ?? null;
   };
   return {
+    async listImportReviews() { return [...importReviews.values()].filter((row) => activeImportReviews.has(row.sourceId)).sort((a, b) => a.sourceId.localeCompare(b.sourceId)); },
+    async stageImportReviews(rows) {
+      const result = { created: 0, unchanged: 0, changed: 0 };
+      activeImportReviews.clear();
+      for (const row of rows) {
+        activeImportReviews.add(row.sourceId);
+        const old = importReviews.get(row.sourceId);
+        if (old?.sourceHash === row.sourceHash) { importReviews.set(row.sourceId, { ...old, source: row.source }); result.unchanged++; continue; }
+        const next: ImportReview = {
+          ...row, review: emptyImportReview(), status: old ? 'needs_attention' : 'not_reviewed',
+          revision: (old?.revision ?? 0) + 1, updatedAt: new Date().toISOString(),
+        };
+        importReviews.set(row.sourceId, next);
+        if (old) result.changed++; else result.created++;
+      }
+      return result;
+    },
+    async saveImportReview(id, revision, review, status) {
+      const current = importReviews.get(id);
+      if (!current || !activeImportReviews.has(id) || current.revision !== revision) return null;
+      const next: ImportReview = { ...current, review, status, revision: revision + 1, updatedAt: new Date().toISOString() };
+      importReviews.set(id, next);
+      return next;
+    },
     async listJournals(filter = {}) {
       return journals.filter((j) => (!filter.from || j.date >= filter.from) && (!filter.to || j.date <= filter.to) && (!filter.sourceKey || j.sourceKey === filter.sourceKey) && (!filter.accountCode || j.lines.some((l) => l.accountCode === filter.accountCode))).map((j) => ({ ...j, lines: [...j.lines] }));
     },

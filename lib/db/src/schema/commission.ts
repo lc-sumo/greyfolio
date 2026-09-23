@@ -306,6 +306,20 @@ export const commissionWalletAdjustments = pgTable(
   ],
 );
 
+/** Staged legacy tracker data. Reviews are saved independently of live deals/ledger. */
+export const commissionImportReviews = pgTable('commission_import_reviews', {
+  sourceId: text('source_id').primaryKey(),
+  sourceHash: text('source_hash').notNull(),
+  source: jsonb('source').notNull(),
+  active: boolean('active').notNull().default(true),
+  status: text('status').notNull().default('not_reviewed'),
+  review: jsonb('review').notNull().default(sql`'{}'::jsonb`),
+  revision: integer('revision').notNull().default(1),
+  updatedBy: text('updated_by').references(() => commissionReps.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
 /* ------------------------------------------------------------------ */
 /* Settings and integrations                                           */
 /* ------------------------------------------------------------------ */

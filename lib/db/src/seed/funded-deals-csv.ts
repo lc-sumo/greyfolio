@@ -48,6 +48,8 @@ export interface SheetRow {
   psfDollars: number | null;
   /** The sheet's own Gross Commission ($) and per-role dollars — when a role's dollars disagree with rate × gross, someone typed an amount by hand. */
   gross: number | null;
+  referralFee: number | null;
+  totalRepPayout: number | null;
   openerDollars: number | null;
   closerDollars: number | null;
   overrideDollars: number | null;
@@ -195,7 +197,10 @@ export function readFundedDealsTable(grid: string[][]): SheetRead {
     const first = (r[0] ?? '').trim();
     // Banners, blanks and totals are intentionally skippable. Every other line is
     // retained, even when a required cell is blank, so preview can block the import.
-    if ((!r.some((c) => c.trim()) || /^▼|^▶|grand tot|^total|total$/i.test(first) || /^▼|^▶/.test(business) || /^\d+ units$/i.test(business))) { skipped++; continue; }
+    // Template rows may have formulas or running counts in the last columns
+    // even though every actual deal input is empty. Do not treat those as deals.
+    if ((!first && !business && !col(r, 'C') && !col(r, 'E') && !col(r, 'F') && !col(r, 'G'))
+      || /^▼|^▶|grand tot|total/i.test(first) || /^▼|^▶/.test(business) || /^\d+ units$/i.test(business)) { skipped++; continue; }
     rows.push({
       line: n + 1,
       id: (col(r, 'A') ?? '').toUpperCase(),
@@ -212,6 +217,8 @@ export function readFundedDealsTable(grid: string[][]): SheetRead {
       psf: num(col(r, 'M')),
       psfDollars: num(col(r, 'N')),
       gross: num(col(r, 'O')),
+      referralFee: num(col(r, 'R')),
+      totalRepPayout: num(col(r, 'AC')),
       openerDollars: num(col(r, 'V')),
       closerDollars: num(col(r, 'Y')),
       overrideDollars: num(col(r, 'AB')),

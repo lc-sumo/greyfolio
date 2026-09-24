@@ -437,9 +437,18 @@ export async function merchantPreview(repo: Repo, deal: Deal, repId: string, tem
   return { to: deal.merchantEmail, subject: renderTemplate(template.subject, fields), body: renderTemplate(template.body, fields), template };
 }
 
+/** Merchant mail goes out from the company address: at most this many per rep per day, so a compromised rep login cannot turn it into a relay. */
+export const MERCHANT_MAIL_DAILY_CAP = 30;
+const merchantMailCount = new Map<string, { day: string; n: number }>();
+
 export async function sendMerchantEmail(deps: PlaybookDeps, deal: Deal, repId: string, input: { templateId?: unknown; subject?: unknown; body?: unknown }, today: string): Promise<{ ok: true; to: string }> {
   const { repo, mailer } = deps;
   if (!mailer.live && mailer.kind !== 'log') throw new HttpError(503, 'Email is not set up on this portal (MAIL_PROVIDER)');
+  if (!input.templateId) throw new HttpError(400, 'Pick a template — merchant emails start from one set up by an admin');
+  const tally = merchantMailCount.get(repId);
+  const n = tally && tally.day === today ? tally.n : 0;
+  if (n >= MERCHANT_MAIL_DAILY_CAP) throw new HttpError(429, `Daily limit reached: ${MERCHANT_MAIL_DAILY_CAP} merchant emails per rep per day`);
+  merchantMailCount.set(repId, { day: today, n: n + 1 });
   const to = deal.merchantEmail.trim();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) throw new HttpError(400, 'This deal has no merchant email — add one under contact details first');
   const rep = await repo.findRep(repId);

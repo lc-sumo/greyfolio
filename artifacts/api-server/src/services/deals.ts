@@ -558,6 +558,8 @@ export interface ContactInput {
   merchantPhone?: unknown;
   /** Also update every other deal that shares the merchant's current email. */
   applyToMerchant?: unknown;
+  /** When set, applyToMerchant never reaches a deal outside this set (a rep's own deals). */
+  onlyDealIds?: Set<string>;
 }
 
 /**
@@ -576,7 +578,7 @@ export async function updateContact(repo: Repo, id: string, input: ContactInput,
   };
   if (!patch.business) throw new HttpError(400, 'Business name is required');
   if (patch.merchantEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(patch.merchantEmail)) throw new HttpError(400, 'That merchant email does not look right');
-  const targets = input.applyToMerchant && deal.merchantEmail ? (await repo.loadContext()).deals.filter((d) => d.merchantEmail.toLowerCase() === deal.merchantEmail.toLowerCase()) : [deal];
+  const targets = input.applyToMerchant && deal.merchantEmail ? (await repo.loadContext()).deals.filter((d) => d.merchantEmail.toLowerCase() === deal.merchantEmail.toLowerCase() && (d.id === id || !input.onlyDealIds || input.onlyDealIds.has(d.id))) : [deal];
   for (const t of targets) {
     // Business name follows only the deal being edited unless the merchant-wide switch is on.
     await repo.updateDeal(t.id, t.id === id || input.applyToMerchant ? patch : { merchantContact: patch.merchantContact, merchantEmail: patch.merchantEmail, merchantPhone: patch.merchantPhone });

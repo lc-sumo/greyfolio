@@ -4,14 +4,17 @@
  * and the maturity date. Subscribed once in Google/Apple/Outlook, it stays
  * current. The URL carries a secret token; revoking it makes a new one.
  */
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { renewalOf, repDeals, totalFunded, type LedgerContext, type Rep } from '@greystone/commission';
 import { HttpError } from '../http-error.js';
 import type { Repo, RepTask, Settings } from '../repo.js';
 
+/** Only a hash of the feed token is stored, like reset and device tokens: the link is shown once, when it is made. */
+const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
+
 export async function issueCalendarToken(repo: Repo, repId: string): Promise<string> {
   const token = randomBytes(24).toString('base64url');
-  await repo.setCalendarToken(repId, token);
+  await repo.setCalendarToken(repId, hashToken(token));
   await repo.writeAudit({ actorRepId: repId, action: 'rep.calendar', targetRepId: null, path: '/api/me/calendar', detail: { issued: true } });
   return token;
 }
@@ -51,7 +54,12 @@ export function buildIcs(rep: Rep, ctx: LedgerContext, settings: Settings, tasks
 }
 
 export async function calendarForToken(repo: Repo, token: string, today: string, appName: string): Promise<{ rep: Rep; ics: string }> {
-  const rep = token ? await repo.findRepByCalendarToken(token) : null;
+  let rep = token ? await repo.findRepByCalendarToken(hashToken(token)) : null;
+  if (!rep && token && !/^[0-9a-f]{64}$/.test(token)) {
+    // A feed issued before tokens were hashed: accept it once and store the hash from now on. The stored hash itself is never a valid token.
+    rep = await repo.findRepByCalendarToken(token);
+    if (rep) await repo.setCalendarToken(rep.id, hashToken(token));
+  }
   if (!rep || !rep.active) throw new HttpError(404, 'Not found');
   const [ctx, settings, tasks] = await Promise.all([repo.loadContext(), repo.getSettings(), repo.listTasks({ repId: rep.id })]);
   return { rep, ics: buildIcs(rep, ctx, settings, tasks, today, appName) };

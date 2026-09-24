@@ -6,6 +6,7 @@ export interface OidcConfig {
   scope: string;
 }
 
+import { randomBytes } from 'node:crypto';
 import { mailConfigFromEnv, type MailConfig } from './services/mail.js';
 
 export interface AppConfig {
@@ -35,14 +36,18 @@ export interface AppConfig {
   superAdminEmail: string;
   /** Shared secret for the Google Sheets integration; unset disables sync. */
   sheetsSyncSecret: string | null;
+  /** One-time code the first-run setup screen must present (SETUP_TOKEN, else generated at boot and printed to the log). */
+  setupToken: string;
 }
 
 export function configFromEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const production = env.NODE_ENV === 'production';
   const baseUrl = (env.BASE_URL ?? `http://localhost:${env.PORT ?? 8080}`).replace(/\/$/, '');
   const sessionSecret = env.SESSION_SECRET ?? '';
-  if (production && sessionSecret.length < 32) throw new Error('SESSION_SECRET must be at least 32 characters in production');
   const devAuth = env.AUTH_MODE === 'dev';
+  const test = env.NODE_ENV === 'test' || !!env.VITEST || !!process.env.VITEST;
+  // Sessions are signed cookies: a guessable key lets anyone mint an admin session. Only local dev (AUTH_MODE=dev) and tests may run without one.
+  if (!devAuth && !test && sessionSecret.length < 32) throw new Error('SESSION_SECRET must be at least 32 random characters (set AUTH_MODE=dev for local development only)');
   if (production && devAuth) throw new Error('AUTH_MODE=dev is not allowed in production');
   const oidc: OidcConfig | null = env.OIDC_ISSUER
     ? {
@@ -72,5 +77,6 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
     geo: env.GEO_PROVIDER === 'off' || env.NODE_ENV === 'test' || env.VITEST || process.env.VITEST ? 'off' : 'ipapi',
     superAdminEmail: (env.SUPER_ADMIN_EMAIL || 'lc@greystoneus.com').trim().toLowerCase(),
     sheetsSyncSecret: env.SHEETS_SYNC_SECRET || null,
+    setupToken: env.SETUP_TOKEN || randomBytes(18).toString('base64url'),
   };
 }

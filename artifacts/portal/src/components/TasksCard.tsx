@@ -121,18 +121,35 @@ function CalendarFeed() {
   const { notify } = useSession();
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['calendar-feed'], queryFn: () => api<{ url: string | null; enabled: boolean }>('/api/me/calendar') });
-  const [show, setShow] = useState(false);
+  // The server keeps only a hash of the link, so it is shown once, right after it is made.
+  const [link, setLink] = useState<string | null>(null);
   if (!q.data) return null;
+  const make = async () => {
+    const r = await post<{ url: string }>('/api/me/calendar', {});
+    setLink(r.url);
+    await qc.invalidateQueries({ queryKey: ['calendar-feed'] });
+  };
+  const off = async () => {
+    await post('/api/me/calendar', {}, 'DELETE');
+    setLink(null);
+    await qc.invalidateQueries({ queryKey: ['calendar-feed'] });
+  };
   return (
-    <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-      {q.data.url && show ? (
+    <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+      {link ? (
         <>
-          <input readOnly value={q.data.url} onFocus={(e) => e.target.select()} style={{ height: 28, width: 280, fontFamily: 'var(--mono)', fontSize: 12 }} />
-          <button className="btn" style={{ height: 28, padding: '0 8px' }} onClick={() => { void navigator.clipboard?.writeText(q.data!.url!); notify('Feed link copied — add it as a calendar subscription (URL) in Google, Apple or Outlook'); }}>Copy</button>
-          <button className="btn" style={{ height: 28, padding: '0 8px' }} title="Revoke this link; a new one can be made any time" onClick={async () => { await post('/api/me/calendar', {}, 'DELETE'); await qc.invalidateQueries({ queryKey: ['calendar-feed'] }); setShow(false); }}>Revoke</button>
+          <input readOnly value={link} onFocus={(e) => e.target.select()} style={{ height: 28, width: 280, fontFamily: 'var(--mono)', fontSize: 12 }} />
+          <button className="btn" style={{ height: 28, padding: '0 8px' }} onClick={() => { void navigator.clipboard?.writeText(link); notify('Feed link copied — add it as a calendar subscription (URL) in Google, Apple or Outlook. It is shown only now; make a new one if you lose it.'); }}>Copy</button>
+          <button className="btn" style={{ height: 28, padding: '0 8px' }} onClick={() => setLink(null)}>Done</button>
+        </>
+      ) : q.data.enabled ? (
+        <>
+          <span className="subtle" style={{ fontSize: 12 }}>Calendar feed on</span>
+          <button className="btn" style={{ height: 28, padding: '0 8px' }} title="Make a fresh link; the old one stops working" onClick={() => void make()}>New link</button>
+          <button className="btn" style={{ height: 28, padding: '0 8px' }} title="Turn the feed off" onClick={() => void off()}>Turn off</button>
         </>
       ) : (
-        <button className="btn" style={{ height: 28, padding: '0 8px' }} disabled={DEMO} title={DEMO ? 'Available on the live portal' : 'A private calendar link with your tasks, eligibility and maturity dates'} onClick={async () => { if (!q.data!.url) { await post('/api/me/calendar', {}); await qc.invalidateQueries({ queryKey: ['calendar-feed'] }); } setShow(true); }}>{q.data.enabled ? 'Calendar link' : 'Add to my calendar'}</button>
+        <button className="btn" style={{ height: 28, padding: '0 8px' }} disabled={DEMO} title={DEMO ? 'Available on the live portal' : 'A private calendar link with your tasks, eligibility and maturity dates'} onClick={() => void make()}>Add to my calendar</button>
       )}
     </span>
   );

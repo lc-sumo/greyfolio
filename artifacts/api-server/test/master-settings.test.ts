@@ -19,20 +19,23 @@ async function harness(env: Record<string, string> = {}) {
 describe('first-run setup', () => {
   it('offers setup only while nobody has a password, takes the roster admin, and closes itself', async () => {
     const repo = memoryRepo();
-    const app = createApp(configFromEnv({ SESSION_SECRET: 'x'.repeat(32) }), repo, { mailer: memoryMailer() });
+    const app = createApp(configFromEnv({ SESSION_SECRET: 'x'.repeat(32), SETUP_TOKEN: 'first-boot-code' }), repo, { mailer: memoryMailer() });
     const methods = (await request(app).get('/auth/methods')).body;
     expect(methods).toMatchObject({ oidc: false, devAuth: false, password: true, setup: true });
     expect(methods.branding.company).toBe('Greystone Merchant Partners');
     // Only an active admin from the roster can claim the first password.
-    expect((await request(app).post('/auth/setup').send({ email: 'julian.ribak@greystoneus.com', password: 'Harbor-Cedar-1234' })).status).toBe(403);
-    expect((await request(app).post('/auth/setup').send({ email: 'leor@greystoneus.com', password: 'short' })).status).toBe(400);
+    expect((await request(app).post('/auth/setup').send({ token: 'first-boot-code', email: 'julian.ribak@greystoneus.com', password: 'Harbor-Cedar-1234' })).status).toBe(403);
+    // The setup code from the server log (or SETUP_TOKEN) is required: without it a passer-by cannot claim the owner account.
+    expect((await request(app).post('/auth/setup').send({ email: 'leor@greystoneus.com', password: 'Harbor-Cedar-1234' })).status).toBe(403);
+    expect((await request(app).post('/auth/setup').send({ token: 'wrong-code', email: 'leor@greystoneus.com', password: 'Harbor-Cedar-1234' })).status).toBe(403);
+    expect((await request(app).post('/auth/setup').send({ token: 'first-boot-code', email: 'leor@greystoneus.com', password: 'short' })).status).toBe(400);
     const me = request.agent(app);
-    const done = await me.post('/auth/setup').send({ email: 'leor@greystoneus.com', password: 'Harbor-Cedar-1234' });
+    const done = await me.post('/auth/setup').send({ token: 'first-boot-code', email: 'leor@greystoneus.com', password: 'Harbor-Cedar-1234' });
     expect(done.status).toBe(201);
     expect(done.body.user.role).toBe('admin');
     expect((await me.get('/api/admin/settings')).status).toBe(200);
     // Closed for good: a second call is refused and the login screen stops offering it.
-    expect((await request(app).post('/auth/setup').send({ email: 'leor@greystoneus.com', password: 'Maple-River-5678' })).status).toBe(403);
+    expect((await request(app).post('/auth/setup').send({ token: 'first-boot-code', email: 'leor@greystoneus.com', password: 'Maple-River-5678' })).status).toBe(403);
     expect((await request(app).get('/auth/methods')).body.setup).toBe(false);
     expect((await request(app).post('/auth/password-login').send({ email: 'leor@greystoneus.com', password: 'Harbor-Cedar-1234' })).body.ok).toBe(true);
   });

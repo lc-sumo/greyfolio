@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import { Router } from 'express';
 import * as oidc from 'openid-client';
 import type { AppConfig } from '../config.js';
@@ -197,6 +198,9 @@ export function authRouter(config: AppConfig, repo: Repo, mailer: Mailer): Route
   if (config.passwordAuth) {
     r.post('/setup', async (req, res) => {
       if (config.oidc || (await repo.repsWithPassword()).length > 0) throw new HttpError(403, 'Setup is already complete — sign in, or use Forgot password');
+      const code = String(req.body?.token ?? '');
+      const want = config.setupToken;
+      if (code.length !== want.length || !timingSafeEqual(Buffer.from(code), Buffer.from(want))) throw new HttpError(403, 'Enter the setup code from the server log (SETUP_TOKEN)');
       const email = String(req.body?.email ?? '').trim().toLowerCase();
       const rep = await repo.findRepByEmail(email);
       if (!rep || !rep.active || rep.role !== 'admin') throw new HttpError(403, 'Enter the email of the admin on the roster');

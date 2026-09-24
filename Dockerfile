@@ -16,7 +16,7 @@ FROM node:22-alpine
 RUN corepack enable && corepack prepare pnpm@10 --activate
 WORKDIR /app
 COPY --from=build /app /app
-ENV NODE_ENV=development PORT=8080 PORTAL_DIST=/app/artifacts/portal/dist
+ENV NODE_ENV=production PORT=8080 PORTAL_DIST=/app/artifacts/portal/dist
 EXPOSE 8080
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh

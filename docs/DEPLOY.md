@@ -46,12 +46,13 @@ Set `SEED=workbook` for the very first boot only, then `none`.
 | Variable | Required | Notes |
 |---|---|---|
 | `DATABASE_URL` | yes | Postgres connection string |
-| `SESSION_SECRET` | yes | 32+ random characters; rotating it signs everyone out |
+| `SESSION_SECRET` | yes | 32+ random characters; rotating it signs everyone out. The server refuses to start without one (only `AUTH_MODE=dev` may skip it) |
 | `BASE_URL`, `APP_ORIGIN` | yes | Public URL; used in emails and reset links |
 | `NODE_ENV=production` | yes | Secure cookies, refuses dev sign-in, requires the above |
 | `AUTH_PASSWORD` | no | `off` to disable email + password sign-in (then SSO is required) |
 | `MAIL_PROVIDER` | no | `sendgrid`, `resend`, `postmark`, `log` (dev) or `off` |
 | `SENDGRID_API_KEY` | no | Accepted in place of `MAIL_API_KEY` when the provider is SendGrid |
+| `SETUP_TOKEN` | no | First-run only: the code the setup screen asks for before the first admin password can be set. Unset, a random one is printed to the server log at boot while setup is open |
 | `SUPER_ADMIN_EMAIL` | no | Guaranteed on every boot as an active super admin (default `lc@greystoneus.com`) |
 | `GEO_PROVIDER` | no | `ipapi` (default: IP → city on the audit log and device list, one lookup per address, cached) or `off` |
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | no | SSO (Google Workspace, Okta, Entra) |

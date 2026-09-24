@@ -10,6 +10,7 @@ export function Login({ oidc, devAuth, password: passwordAuth = true, setup = fa
   const [remember, setRemember] = useState(true);
   const [rememberDays, setRememberDays] = useState(7);
   const [again, setAgain] = useState('');
+  const [setupCode, setSetupCode] = useState('');
   const brand = window.__GS_BRAND__;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -68,7 +69,7 @@ export function Login({ oidc, devAuth, password: passwordAuth = true, setup = fa
     e.preventDefault();
     if (password !== again) return setErr('The two passwords do not match');
     void guard(async () => {
-      await post('/auth/setup', { email, password });
+      await post('/auth/setup', { email, password, token: setupCode.trim() });
       await refresh();
     }, 'Could not finish setup');
   }
@@ -92,11 +93,12 @@ export function Login({ oidc, devAuth, password: passwordAuth = true, setup = fa
         {mode === 'setup' ? (
           <form onSubmit={firstAdmin}>
             <h2>Set up the first admin</h2>
-            <div className="note">Nobody has a password yet. Enter the admin email from the roster and choose a password — this screen closes itself once any password exists.</div>
-            <input type="email" placeholder="leor@greystoneus.com" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus autoComplete="username" />
+            <div className="note">Nobody has a password yet. Enter the setup code printed in the server log (or your SETUP_TOKEN), the admin email from the roster, and choose a password — this screen closes itself once any password exists.</div>
+            <input placeholder="Setup code from the server log" value={setupCode} onChange={(e) => setSetupCode(e.target.value)} autoFocus autoComplete="off" spellCheck={false} />
+            <input type="email" placeholder="leor@greystoneus.com" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
             <input type="password" placeholder="Password (10+ chars, a letter and a number)" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
             <input type="password" placeholder="Type it again" value={again} onChange={(e) => setAgain(e.target.value)} autoComplete="new-password" />
-            <button className="btn primary big" disabled={busy || !email || password.length < 10 || !again}>{busy ? 'Setting up…' : 'Create password and sign in'}</button>
+            <button className="btn primary big" disabled={busy || !setupCode.trim() || !email || password.length < 10 || !again}>{busy ? 'Setting up…' : 'Create password and sign in'}</button>
             <div className="subtle" style={{ fontSize: 13 }}>{linkBtn('I already have a password', () => { setMode('signin'); setErr(''); })}</div>
             {err && <div className="err">{err}</div>}
           </form>

@@ -51,7 +51,7 @@ export function requestLog(enabled: boolean): RequestHandler {
     res.on('finish', () => {
       const ms = Number(process.hrtime.bigint() - start) / 1e6;
       const actor = req.session?.user?.repId ?? null;
-      console.error(JSON.stringify({ t: new Date().toISOString(), m: req.method, p: req.originalUrl.split('?')[0], s: res.statusCode, ms: Math.round(ms), actor, ip: req.ip }));
+      console.error(JSON.stringify({ t: new Date().toISOString(), m: req.method, p: (req.originalUrl.split('?')[0] ?? '').replace(/^\/calendar\/.+/, '/calendar/[token].ics'), s: res.statusCode, ms: Math.round(ms), actor, ip: req.ip }));
     });
     next();
   };

@@ -59,6 +59,7 @@ export function meRouter(repo: Repo, appName = 'Greystone Commission Portal', no
   /** Browsers remembered after a two-factor sign-in. "This device" is the one making the request. */
   r.get('/devices', async (req, res) => {
     const scope = scopeOf(req);
+    if (scope.viewAs) throw new HttpError(403, 'Devices belong to the account holder');
     const list = await repo.listTrustedDevices(scope.effectiveRepId);
     const cookie = readCookie(req, DEVICE_COOKIE);
     const thisId = cookie ? cookie.slice(0, cookie.indexOf('.')) : null;
@@ -194,8 +195,8 @@ export function meRouter(repo: Repo, appName = 'Greystone Commission Portal', no
   const feedUrl = (token: string) => `${notify?.origin ?? ''}/calendar/${token}.ics`;
   r.get('/calendar', async (req, res) => {
     const s = scopeOf(req);
-    const token = await repo.getCalendarToken(s.effectiveRepId);
-    res.json({ url: token && !s.viewAs ? feedUrl(token) : null, enabled: !!token });
+    // The stored value is a hash, so the link itself is only ever returned by POST, when it is made.
+    res.json({ url: null, enabled: !!(await repo.getCalendarToken(s.effectiveRepId)) });
   });
   r.post('/calendar', async (req, res) => {
     const s = scopeOf(req);
@@ -214,7 +215,9 @@ export function meRouter(repo: Repo, appName = 'Greystone Commission Portal', no
     if (scopeOf(req).viewAs) throw new HttpError(403, 'Contact details are edited by the rep, not from View as');
     const { s, deal } = await myDeal(req);
     if (!(await repo.getSettings()).permissions.contactEdit) throw new HttpError(403, 'Editing merchant details is turned off for reps — ask an admin');
-    const r2 = await updateContact(repo, deal.id, { merchantContact: req.body?.merchantContact, merchantEmail: req.body?.merchantEmail, merchantPhone: req.body?.merchantPhone, applyToMerchant: req.body?.applyToMerchant }, s.actor.repId);
+    // "Apply to the merchant" reaches only the rep's own deals; other reps' deals stay theirs.
+    const mine = new Set(repDeals((await repo.loadContext()).deals, s.actor.repId).map((d) => d.id));
+    const r2 = await updateContact(repo, deal.id, { merchantContact: req.body?.merchantContact, merchantEmail: req.body?.merchantEmail, merchantPhone: req.body?.merchantPhone, applyToMerchant: req.body?.applyToMerchant, onlyDealIds: mine }, s.actor.repId);
     const [ctx, settings] = await Promise.all([repo.loadContext(), repo.getSettings()]);
     res.json({ ...repDealView(r2.deal, s.actor.repId, ctx.lines, ctx.clawbacks, settings), updatedDeals: r2.updated });
   });
@@ -256,7 +259,10 @@ export function meRouter(repo: Repo, appName = 'Greystone Commission Portal', no
     res.status(201).json({ files: await repo.listRepFiles(scope.actor.repId) });
   });
   r.get('/files/:fileId', async (req, res) => {
-    const f = await fetchRepFile(repo, scopeOf(req).effectiveRepId, String(req.params.fileId));
+    const scope = scopeOf(req);
+    // A W-9 carries an SSN: the rep and admins only. A team lead under View as sees that a file exists, not its contents.
+    if (scope.viewAs && scope.actor.role !== 'admin') throw new HttpError(403, 'Files are downloaded by the account holder or an admin');
+    const f = await fetchRepFile(repo, scope.effectiveRepId, String(req.params.fileId));
     res.setHeader('content-type', f.mime);
     res.setHeader('content-disposition', `attachment; filename="${encodeURIComponent(f.name)}"`);
     res.setHeader('cache-control', 'private, max-age=0');

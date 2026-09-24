@@ -40,7 +40,7 @@ export function ImportReviewTerms({ terms, settings, roster, onChange }: {
     </div>
     <details className="review-more"><summary>Additional terms and rep splits</summary>
       <div className="review-form-grid">
-        <Text label="Parent deal ID (draw)" value={terms.parent} onChange={(v) => onChange('parent', v.toUpperCase())} />
+        <Text label="Parent deal ID (initial row may match its own ID)" value={terms.parent} onChange={(v) => onChange('parent', v.toUpperCase())} />
         <Numeric label="Factor / APR" value={terms.factor} onChange={(v) => onChange('factor', v)} step="0.0001" />
         <Numeric label="Term (business days)" value={terms.termDays} onChange={(v) => onChange('termDays', v)} step="1" />
         <Options label="Payment frequency" value={terms.frequency} options={frequencies} onChange={(v) => onChange('frequency', v)} />

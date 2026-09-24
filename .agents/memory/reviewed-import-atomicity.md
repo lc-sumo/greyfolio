@@ -21,6 +21,12 @@ The authoritative import preview must see payroll committed while it waited for 
 
 **How to apply:** Any change to import lock order or isolation must be checked against a concurrent payroll payment on the same rep; re-read live ledger facts after acquiring the shared lock, before planning or posting.
 
+A new draw reference does not prove a tracker row represents new funding. For older portal draws without a stored tracker child ID, block overlapping dates or amounts and require reconciliation rather than appending another draw and its associated cash.
+
+**Why:** Generating the next draw reference can silently duplicate a draw already entered through another workflow; a separate reference also permits a second receipt and rep payout.
+
+**How to apply:** When changing reviewed draw imports, check the existing parent’s draw history under the same commit locks. Keep an exact/near-overlap case in the tests alongside legitimate multiple draws with distinct dates and amounts.
+
 Reviewed historical economics are an as-of-funding record; current referral settings are not evidence of the rate or cap used when the deal funded.
 
 **Why:** Repricing an old referral using today's partner configuration can silently change the historical house net even when the reviewed gross and rep split match.

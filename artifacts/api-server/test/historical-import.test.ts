@@ -5,7 +5,7 @@ import { configFromEnv } from '../src/config.js';
 import { memoryMailer } from '../src/services/mail.js';
 import { memoryRepo } from './memory-repo.js';
 import type { ImportReviewDecision } from '../src/repo.js';
-import { payableLines, planPayout, applyPayout, planVoid, applyVoid, isDealFullyPaid } from '@greystone/commission';
+import { payableLines, planPayout, applyPayout, planVoid, applyVoid, isDealFullyPaid, newDraw } from '@greystone/commission';
 import { repDealView } from '../src/scope.js';
 
 const header = 'Deal ID,Date,Business Name,Lender,Product,Funded / Draw Amount ($),Factor Rate,Term (bus. days),Comm %,Gross Commission ($),Opener,Opener $,Total Rep Payout ($),Commission Status,Rep Paid Date';
@@ -37,6 +37,102 @@ async function setup(source = row) {
 }
 
 describe('reviewed historical import', () => {
+  it('imports a Revenued self-parent initial LOC and a distinct-ID child draw into one Master Deal', async () => {
+    const repo = memoryRepo();
+    const app = createApp(configFromEnv({ AUTH_MODE: 'dev', SESSION_SECRET: 'x'.repeat(32), APP_ORIGIN: 'https://portal.test' }), repo, { mailer: memoryMailer() });
+    const admin = request.agent(app);
+    await admin.get('/auth/dev-login').query({ email: 'leor@greystoneus.com' });
+    const drawHeader = header.replace('Deal ID,Date', 'Deal ID,Parent Deal,Date');
+    const initial = 'F998,F998,01/10/2025,Revenued Facility,Revenued,LOC - INITIAL,10000,,90,8%,800,Leor,160,160,Waiting for payment,';
+    const child = 'F999,F998,02/10/2025,Revenued Facility,Revenued,LOC DRAW,2000,,,4%,80,Leor,16,16,Waiting for payment,';
+    const csv = `${drawHeader}\n${initial}\n${child}`;
+    expect((await admin.post('/api/admin/import-review/stage').send({ csv })).body.total).toBe(2);
+    const unpaid: ImportReviewDecision = {
+      ...decision, lender: 'unpaid', lenderAmount: null, lenderDate: null,
+      reps: 'unpaid', repAmount: null, repDate: null, repPayments: [],
+    };
+    const paidChild: ImportReviewDecision = {
+      ...decision, lenderAmount: 80, lenderDate: '2025-02-15',
+      repAmount: 16, repDate: '2025-02-20',
+      repPayments: [{ repId: 'rep-leor', role: 'Opener', amount: 16, paidAt: '2025-02-20' }],
+    };
+    const rows = (await admin.get('/api/admin/import-review')).body.rows;
+    expect(rows.map((r: { sourceId: string; source: { parent: string } }) => [r.sourceId, r.source.parent]))
+      .toEqual([['F998', 'F998'], ['F999', 'F998']]);
+    const childSaved = await admin.patch('/api/admin/import-review/F999').send({
+      revision: rows[1].revision, status: 'reviewed', review: paidChild,
+    });
+    expect(childSaved.status).toBe(200);
+    const waiting = await admin.post('/api/admin/import-review/F999/preview').send({});
+    expect(waiting.body.problems).toContain('Import parent F998 before its draw.');
+    expect((await admin.post('/api/admin/import-review/F999/commit').send({
+      revision: childSaved.body.revision, previewToken: waiting.body.previewToken,
+    })).status).toBe(409);
+    const parentSaved = await admin.patch('/api/admin/import-review/F998').send({
+      revision: rows[0].revision, status: 'reviewed', review: unpaid,
+    });
+    expect(parentSaved.status).toBe(200);
+    const parentPreview = await admin.post('/api/admin/import-review/F998/preview').send({});
+    expect(parentPreview.body).toMatchObject({ action: 'new', problems: [] });
+    expect((await admin.post('/api/admin/import-review/F998/commit').send({
+      revision: parentSaved.body.revision, previewToken: parentPreview.body.previewToken,
+    })).status).toBe(201);
+    const childPreview = await admin.post('/api/admin/import-review/F999/preview').send({});
+    expect(childPreview.body).toMatchObject({ action: 'draw', problems: [] });
+    expect((await admin.post('/api/admin/import-review/F999/commit').send({
+      revision: childSaved.body.revision, previewToken: childPreview.body.previewToken,
+    })).status).toBe(201);
+    const context = await repo.loadContext();
+    expect(context.deals.filter((d) => d.id === 'F998')).toHaveLength(1);
+    expect(context.deals.some((d) => d.id === 'F999')).toBe(false);
+    expect(context.deals.find((d) => d.id === 'F998')?.draws).toMatchObject([{ amount: 2000, gross: 80, collected: 80 }]);
+    expect(context.lines.filter((l) => l.dealId === 'F998')).toMatchObject([{ segmentKey: 'D1', repId: 'rep-leor', amount: 16, paidAt: '2025-02-20' }]);
+    expect((await admin.post('/api/admin/import-review/F999/commit').send({
+      revision: childSaved.body.revision, previewToken: childPreview.body.previewToken,
+    })).status).toBe(409);
+    expect((await admin.post('/api/admin/import-review/stage').send({ csv })).body.unchanged).toBe(2);
+    expect((await admin.get('/api/admin/import-review')).body.rows.map((r: { status: string }) => r.status))
+      .toEqual(['imported', 'imported']);
+  });
+
+  it('blocks an already-entered or near-matching LOC draw without posting its receipt or rep payout', async () => {
+    const h = await setup('F997,01/10/2025,Facility,Revenued,LOC - INITIAL,10000,,90,8%,800,Leor,160,160,Waiting for payment,');
+    const unpaid: ImportReviewDecision = {
+      ...decision, lender: 'unpaid', lenderAmount: null, lenderDate: null,
+      reps: 'unpaid', repAmount: null, repDate: null, repPayments: [],
+    };
+    const parent = await h.reviewed(unpaid);
+    const parentPreview = await h.preview();
+    expect(parentPreview.body.problems).toEqual([]);
+    expect((await h.commit(parent.revision, parentPreview.body.previewToken)).status).toBe(201);
+    const facility = (await h.repo.loadContext()).deals.find((d) => d.id === 'F997')!;
+    await h.repo.insertDraw('F997', newDraw(facility, {
+      amount: 2000, date: '2025-02-10', commRate: .04, partner: null, termDays: null, factor: null, frequency: 'Weekly',
+    }));
+    const before = await h.repo.loadContext();
+    const drawHeader = header.replace('Deal ID,Date', 'Deal ID,Parent Deal,Date');
+    const exact = 'F996,F997,02/10/2025,Facility,Revenued,LOC DRAW,2000,,,4%,80,Leor,16,16,Partially Paid,02/20/2025';
+    const near = exact.replace('F996,F997,02/10/2025', 'F995,F997,02/15/2025');
+    expect((await h.admin.post('/api/admin/import-review/stage').send({ csv: `${drawHeader}\n${exact}\n${near}` })).status).toBe(200);
+    const paid: ImportReviewDecision = {
+      ...decision, lenderAmount: 80, lenderDate: '2025-02-15', repAmount: 16, repDate: '2025-02-20',
+      repPayments: [{ repId: 'rep-leor', role: 'Opener', amount: 16, paidAt: '2025-02-20' }],
+    };
+    for (const id of ['F995', 'F996']) {
+      const row = (await h.admin.get('/api/admin/import-review')).body.rows.find((r: { sourceId: string }) => r.sourceId === id);
+      const saved = await h.admin.patch(`/api/admin/import-review/${id}`).send({ revision: row.revision, status: 'reviewed', review: paid });
+      expect(saved.status).toBe(200);
+      const preview = await h.admin.post(`/api/admin/import-review/${id}/preview`).send({});
+      expect(preview.body.problems).toEqual(expect.arrayContaining([expect.stringContaining('Possible existing draw D1')]));
+      expect(preview.body.draw).toBeNull();
+      expect(preview.body.payouts).toEqual([]);
+      expect((await h.admin.post(`/api/admin/import-review/${id}/commit`).send({
+        revision: saved.body.revision, previewToken: preview.body.previewToken,
+      })).status).toBe(409);
+    }
+    expect(await h.repo.loadContext()).toEqual(before);
+  });
+
   it('previews and commits an unpaid deal without posting cash, then locks its imported review', async () => {
     const source = row.replace('Partially Paid,01/20/2025', 'Waiting for payment,');
     const h = await setup(source);
@@ -279,11 +375,12 @@ describe('reviewed historical import', () => {
     const context = await h.repo.loadContext();
     expect(context.deals.some((x) => x.id === 'F994')).toBe(false);
     expect(context.deals.find((x) => x.id === 'F993')?.draws).toMatchObject([{ amount: 2000, collected: 40 }]);
-    const wrongSourceParent = drawRow.replace('F994,,', 'F995,F999,');
+    const wrongSourceParent = drawRow.replace('F994,,02/10/2025', 'F995,F999,03/10/2025')
+      .replace('LOC DRAW,2000,,120,4%,80,Leor,16,16', 'LOC DRAW,3000,,120,4%,120,Leor,24,24');
     await h.admin.post('/api/admin/import-review/stage').send({ csv: `${drawHeader}\n${wrongSourceParent}` });
     const second = (await h.admin.get('/api/admin/import-review')).body.rows[0];
     const corrected = await h.admin.patch('/api/admin/import-review/F995').send({ revision: second.revision, status: 'reviewed',
-      review: { ...decision, lenderAmount: 40, reps: 'unpaid', repAmount: null, repDate: null, repPayments: [], terms: { parent: 'F993' } } });
+      review: { ...decision, lenderAmount: 60, reps: 'unpaid', repAmount: null, repDate: null, repPayments: [], terms: { parent: 'F993' } } });
     expect(corrected.status).toBe(200);
     const secondPreview = await h.admin.post('/api/admin/import-review/F995/preview').send({});
     expect(secondPreview.body.problems).toEqual([]);

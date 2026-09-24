@@ -124,7 +124,7 @@ export async function saveTrackerReview(repo: Repo, id: string, revision: number
     || !['unknown', 'unpaid', 'paid'].includes(input.reps) || typeof input.notes !== 'string' || input.notes.length > 2000) throw new HttpError(400, 'Invalid review answers');
   validateTerms(input.terms);
   const corrected = verifiedTerms(current.source, input.terms);
-  if (corrected.parent && (!/^F\d+$/.test(corrected.parent) || corrected.parent === corrected.id)) throw new HttpError(400, 'Parent deal ID must name a different valid deal');
+  if (corrected.parent && !/^F\d+$/.test(corrected.parent)) throw new HttpError(400, 'Parent deal ID must name a valid deal');
   if (corrected.amount <= 0 || !validDate(corrected.date)) throw new HttpError(400, 'Enter a positive funding amount and a valid funded date');
   if (corrected.commRate !== null && corrected.commRate > 100) throw new HttpError(400, 'Commission rate must not exceed 100%');
   if (corrected.termDays !== null && !Number.isInteger(corrected.termDays)) throw new HttpError(400, 'Term must be a whole number of days');
@@ -146,6 +146,8 @@ export async function saveTrackerReview(repo: Repo, id: string, revision: number
     if (!input.termsConfirmed || input.lender === 'unknown' || input.reps === 'unknown') throw new HttpError(400, 'Confirm terms and both payment answers before marking reviewed');
     if (input.reps === 'paid' && !input.repPayments.length) throw new HttpError(400, 'Identify the amount, role and date for each rep paid before marking reviewed');
     const [settings, reps] = await Promise.all([repo.getSettings(), repo.listReps()]);
+    if (corrected.parent === corrected.id && settings.products.find((p) => p.name.toLowerCase() === corrected.product.toLowerCase())?.parent)
+      throw new HttpError(400, 'A draw needs the original facility’s different Deal ID in Parent Deal');
     const issues = [...(current.sourceId.includes(':duplicate:') ? ['Duplicate Deal ID'] : []), ...trackerIssues(corrected, settings, reps)];
     if (corrected.parent && !(await repo.listImportReviews()).some((r) => r.source.id === corrected.parent)
       && !(await repo.loadContext()).deals.some((d) => d.id === corrected.parent))
@@ -182,6 +184,8 @@ export async function previewTrackerReview(repo: Repo, id: string): Promise<Impo
   if (isDraw && !existing) problems.push(`Import parent ${r.parent} before its draw.`);
   const lender = settings.lenders.find((x) => x.name.toLowerCase() === r.lender.toLowerCase());
   const product = settings.products.find((x) => x.name.toLowerCase() === r.product.toLowerCase());
+  if (r.parent === r.id && product?.parent)
+    problems.push('A draw needs the original facility’s different Deal ID in Parent Deal.');
   const partner = settings.partners.find((x) => x.name.toLowerCase() === r.referralPartner.toLowerCase());
   if (r.dealStatus && !settings.lists.dealStatuses.includes(r.dealStatus)) problems.push(`Unknown confirmed deal status "${r.dealStatus}".`);
   if (r.referralPartner && !partner) problems.push(`Unknown confirmed referral partner "${r.referralPartner}".`);
@@ -224,8 +228,23 @@ export async function previewTrackerReview(repo: Repo, id: string): Promise<Impo
     if (r.psf || r.psfDollars) problems.push('Draw PSF cannot be stored separately; reconcile its fee with the parent facility.');
     if (existing!.lender.toLowerCase() !== r.lender.toLowerCase() || !product?.parent) problems.push('Draw lender or product is not compatible with the parent facility.');
     if (!settings.products.find((p) => p.name.toLowerCase() === existing!.product.toLowerCase())?.multiDraw) problems.push('Parent facility does not support draws.');
+    // Older live draws have no tracker child ID. A matching date or amount
+    // might already represent this row; never append a second funding segment
+    // and its receipt/payroll just because newDraw can allocate a fresh D<n>.
+    const overlappingDraw = existing!.draws.find((d) => d.date === r.date || Math.abs(d.amount - r.amount) < .005);
+    if (overlappingDraw)
+      problems.push(`Possible existing draw ${overlappingDraw.ref} on ${r.parent} (${overlappingDraw.date}, ${money(overlappingDraw.amount)}). Reconcile the live draw with the tracker before importing; no second draw will be created.`);
+    for (const [label, name, assignedId, sourceRate, parentRate] of [
+      ['Opener', r.opener, deal.openerId, r.openerRate, deal.openerRate],
+      ['Closer', r.closer, deal.closerId, r.closerRate, deal.closerRate],
+      ['Override', r.override, deal.overrideId, r.overrideRate, deal.overrideRate],
+    ] as const) {
+      if (name && rep(name) !== assignedId) problems.push(`${label} on draw differs from the original facility; reconcile the rep before importing.`);
+      if (sourceRate !== null && Math.abs((sourceRate > 1 ? sourceRate / 100 : sourceRate) - parentRate) > .00001)
+        problems.push(`${label} rate on draw differs from the original facility; reconcile the split before importing.`);
+    }
     if (r.commRate === null) problems.push('A draw requires a verified commission rate.');
-    else {
+    else if (!overlappingDraw) {
       try {
         draw = newDraw(deal, { amount: r.amount, date: r.date, commRate: r.commRate > 1 ? r.commRate / 100 : r.commRate,
           partner: settings.partners.find((p) => p.name.toLowerCase() === deal!.referralPartner?.toLowerCase()) ?? null,
@@ -281,7 +300,7 @@ export async function previewTrackerReview(repo: Repo, id: string): Promise<Impo
     }
   }
   const payouts: ImportReviewPreview['payouts'] = [];
-  if (deal) {
+  if (deal && (!isDraw || draw)) {
     const candidates = dealLines(deal).filter((l) => l.segmentKey === (draw?.ref ?? 'base'));
     const assigned = new Map<string, number>();
     const grouped = new Map<string, ImportReviewPreview['payouts']>();
@@ -316,7 +335,7 @@ export async function previewTrackerReview(repo: Repo, id: string): Promise<Impo
   }
   if (row.review.reps === 'paid' && !row.review.repPayments.length) problems.push('Identify each previously paid rep and amount.');
   if (r.clawbackAmount && !r.clawbackDate) problems.push('Confirm the actual clawback date; the funding date is not a substitute.');
-  const clawback: Clawback | null = deal && r.clawbackAmount && r.clawbackDate ? { id: `cb-${deal.id.toLowerCase()}-${isDraw ? draw?.ref.toLowerCase() : 'base'}-historical`, dealId: deal.id, date: r.clawbackDate, amount: r.clawbackAmount, recovered: 0, reason: 'Historical import', status: 'open' } : null;
+  const clawback: Clawback | null = deal && (!isDraw || draw) && r.clawbackAmount && r.clawbackDate ? { id: `cb-${deal.id.toLowerCase()}-${isDraw ? draw?.ref.toLowerCase() : 'base'}-historical`, dealId: deal.id, date: r.clawbackDate, amount: r.clawbackAmount, recovered: 0, reason: 'Historical import', status: 'open' } : null;
   if (clawback && context.clawbacks.some((x) => x.id === clawback.id || x.dealId === clawback.dealId && x.date === clawback.date && x.amount === clawback.amount)) problems.push('This clawback already exists.');
   if (clawback && deal) clawback.status = clawbackStatus(clawback, deal, context.lines);
   const action = problems.length ? 'blocked' : isDraw ? 'draw' : existing ? 'existing' : 'new';

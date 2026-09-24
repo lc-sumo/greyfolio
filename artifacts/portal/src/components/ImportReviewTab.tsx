@@ -167,6 +167,7 @@ export function ImportReviewTab() {
         {current && draft && terms && <section className="review-detail">
           <div className="review-detail-head"><div><div className="review-kicker">SOURCE ROW {current.source.line} · {current.sourceId}</div><h3>{terms.business}</h3><span className="review-muted">{terms.date} · {terms.lender} · {terms.product}</span></div><span className={`review-state ${current.status}`}>{statusLabel[current.status]}</span></div>
           {current.status === 'imported' ? <div className="review-imported"><b>Added to Master Deals.</b> This row is locked against importing again. Open Master Deals to view the deal.</div> : <>
+          {terms.parent && <div className="review-caution"><b>{terms.parent === terms.id ? `Initial deal ${terms.id}` : `Draw on original deal ${terms.parent}`}</b> {terms.parent === terms.id ? 'The tracker points this initial row to itself; this creates the original deal.' : 'Import the original deal first. This row will add a draw to it, not a new Master Deal.'}</div>}
           {current.alreadyInPortal && <div className="review-caution"><b>Already in portal.</b> The preview checks the live deal and its ledger; it will not overwrite its terms.</div>}
           {current.issues.length > 0 && <div className="review-caution"><b>{dirty ? 'Saved-row issues — save or confirm to check your corrections' : 'Resolve before marking reviewed'}</b><ul>{current.issues.map((x) => <li key={x}>{x}</li>)}</ul></div>}
           <div className="review-source">

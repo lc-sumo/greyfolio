@@ -59,16 +59,36 @@ export function totpCode(secret: string, at = Date.now(), step = 30): string {
   return hotp(secret, Math.floor(at / 1000 / step));
 }
 
-/** Accepts the current code and one step either side, so clock drift of ±30s still works. */
-export function verifyTotp(secret: string, code: unknown, at = Date.now(), step = 30, window = 1): boolean {
+/** Which step the code matches: the current one or one either side (clock drift of ±30s), else null. */
+export function totpMatch(secret: string, code: unknown, at = Date.now(), step = 30, window = 1): number | null {
   const given = String(code ?? '').replace(/\s+/g, '');
-  if (!/^\d{6}$/.test(given)) return false;
+  if (!/^\d{6}$/.test(given)) return null;
   const counter = Math.floor(at / 1000 / step);
   for (let i = -window; i <= window; i++) {
     const want = hotp(secret, counter + i);
-    if (want.length === given.length && timingSafeEqual(Buffer.from(want), Buffer.from(given))) return true;
+    if (want.length === given.length && timingSafeEqual(Buffer.from(want), Buffer.from(given))) return counter + i;
   }
-  return false;
+  return null;
+}
+
+/** Accepts the current code and one step either side, so clock drift of ±30s still works. */
+export function verifyTotp(secret: string, code: unknown, at = Date.now(), step = 30, window = 1): boolean {
+  return totpMatch(secret, code, at, step, window) !== null;
+}
+
+/** A sign-in code that was already used for this account is refused: within its 90-second window it cannot be replayed. */
+const usedSteps = new Map<string, number[]>();
+export function verifyTotpOnce(accountId: string, secret: string, code: unknown, at = Date.now()): boolean {
+  const step = totpMatch(secret, code, at);
+  if (step === null) return false;
+  // Keyed by account and secret: a fresh enrolment starts with a clean slate.
+  const key = `${accountId}:${secret}`;
+  const now = Math.floor(at / 1000 / 30);
+  const used = (usedSteps.get(key) ?? []).filter((s) => now - s <= 2);
+  if (used.includes(step)) return false;
+  if (usedSteps.size > 10_000) usedSteps.clear();
+  usedSteps.set(key, [...used, step]);
+  return true;
 }
 
 /** The URI authenticator apps import (also what a QR code would carry). */

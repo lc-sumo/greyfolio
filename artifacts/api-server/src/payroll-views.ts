@@ -183,7 +183,7 @@ export function preview(ctx: LedgerContext, repId: string, keys: string[]) {
 export function runCsv(ctx: LedgerContext, reps: Rep[], runId: string, repId?: string): string {
   const name = new Map(reps.map((r) => [r.id, r.name]));
   const byId = new Map(ctx.deals.map((d) => [d.id, d]));
-  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const esc = (v: unknown) => { const s = String(v ?? ''); return `"${(/^[=+@\t\r]/.test(s) || /^-(?![\d.])/.test(s) ? `'${s}` : s).replace(/"/g, '""')}"`; };
   const rows = ctx.lines.filter((l) => l.runId === runId && (!repId || l.repId === repId)).sort((a, b) => a.repId.localeCompare(b.repId) || a.key.localeCompare(b.key));
   const head = ['Run', 'Rep', 'Deal', 'Business', 'Segment', 'Role', 'Amount', 'Paid at', 'Clawback'].map(esc).join(',');
   const body = rows.map((l) => [runId, name.get(l.repId) ?? l.repId, l.dealId, byId.get(l.dealId)?.business ?? '', l.segmentKey ?? '', l.role, l.amount.toFixed(2), l.paidAt, l.clawbackId ?? ''].map(esc).join(','));
@@ -231,7 +231,7 @@ export function annualReport(ctx: LedgerContext, reps: Rep[], year: number): { y
 }
 
 export function annualCsv(ctx: LedgerContext, reps: Rep[], year: number): string {
-  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const esc = (v: unknown) => { const s = String(v ?? ''); return `"${(/^[=+@\t\r]/.test(s) || /^-(?![\d.])/.test(s) ? `'${s}` : s).replace(/"/g, '""')}"`; };
   const { rows, total } = annualReport(ctx, reps, year);
   const head = ['Year', 'Rep', 'Email', 'Active', 'Gross paid', 'Clawback recovered', 'Cash paid', 'Payouts', 'Deals'].map(esc).join(',');
   const body = rows.map((r) => [year, r.name, r.email, r.active ? 'yes' : 'no', r.grossPaid.toFixed(2), r.recovered.toFixed(2), r.cash.toFixed(2), r.payouts, r.deals].map(esc).join(','));

@@ -104,7 +104,7 @@ export function adminRouter(repo: Repo, geo?: Geo): Router {
     const [reps, all] = await Promise.all([repo.listReps(), repo.listAudit(5000, 0)]);
     const name = new Map(reps.map((x) => [x.id, x.name]));
     const where = geo ? await geo.labels(all.map((e) => e.ip)) : new Map<string, string>();
-    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const esc = (v: unknown) => { const s = String(v ?? ''); return `"${(/^[=+@\t\r]/.test(s) || /^-(?![\d.])/.test(s) ? `'${s}` : s).replace(/"/g, '""')}"`; };
     const head = ['At', 'Actor', 'Action', 'Target', 'IP', 'Location', 'Path', 'Detail'].map(esc).join(',');
     const body = all.map((e) => [e.at ?? '', name.get(e.actorRepId) ?? e.actorRepId, e.action, e.targetRepId ? name.get(e.targetRepId) ?? e.targetRepId : '', e.ip ?? '', e.ip ? where.get(e.ip) ?? '' : '', e.path ?? '', e.detail ? JSON.stringify(e.detail) : ''].map(esc).join(','));
     res.type('text/csv').attachment('audit-log.csv').send([head, ...body].join('\r\n') + '\r\n');

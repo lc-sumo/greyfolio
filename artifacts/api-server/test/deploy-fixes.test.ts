@@ -76,7 +76,7 @@ describe('health', () => {
     const app2 = createApp(configFromEnv({ AUTH_MODE: 'dev', SESSION_SECRET: 'x'.repeat(32) }), broken);
     const r = await request(app2).get('/health');
     expect(r.status).toBe(503);
-    expect(r.body.db).toMatch(/connection refused/);
+    expect(r.body.db).toBe('unreachable');
   });
 });
 

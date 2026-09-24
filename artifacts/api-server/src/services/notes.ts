@@ -82,11 +82,17 @@ export async function removeFile(repo: Repo, dealId: string, fileId: string, act
 
 /* ---- Rep files: W-9s, agreements. Admins see all; a rep sees their own. ---- */
 
+export const MAX_FILES_PER_REP = 25;
+export const MAX_BYTES_PER_REP = 50 * 1024 * 1024;
+
 export async function addRepFile(repo: Repo, repId: string, upload: FileUpload, actorRepId: string): Promise<RepFileMeta> {
   const rep = await repo.findRep(repId);
   if (!rep) throw new HttpError(404, 'Rep not found');
   const { name, mime, data, size } = validateUpload(upload);
   const file: RepFile = { id: id('rfile'), repId, name, mime, size, data, uploadedBy: actorRepId, createdAt: new Date().toISOString() };
+  const existing = await repo.listRepFiles(repId);
+  if (existing.length >= MAX_FILES_PER_REP) throw new HttpError(400, `A rep can keep at most ${MAX_FILES_PER_REP} files — remove one first`);
+  if (existing.reduce((n, f) => n + f.size, 0) + size > MAX_BYTES_PER_REP) throw new HttpError(400, 'File storage for this rep is full (50 MB) — remove something first');
   await repo.insertRepFile(file);
   await repo.writeAudit({ actorRepId, action: 'rep.file', targetRepId: repId, path: `/api/admin/reps/${repId}/files`, detail: { fileId: file.id, name, size } });
   const { data: _d, ...meta } = file;

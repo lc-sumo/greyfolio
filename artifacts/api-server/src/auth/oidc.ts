@@ -4,9 +4,9 @@ import * as oidc from 'openid-client';
 import type { AppConfig } from '../config.js';
 import type { Repo } from '../repo.js';
 import { HttpError, currentUser } from './middleware.js';
-import { clearLoginFailures, loginLocked, noteLoginFailure, verifyPassword } from './password.js';
+import { clearLoginFailures, dummyPasswordHash, loginKeys, loginLocked, noteLoginFailure, verifyPassword } from './password.js';
 import { sessionUserFrom } from './session.js';
-import { verifyTotp } from './totp.js';
+import { verifyTotpOnce } from './totp.js';
 import type { Mailer } from '../services/mail.js';
 import { beginPasswordReset, completePasswordReset, resetThrottled } from '../services/passwords.js';
 import { rememberDevice, trustedDeviceFor } from './devices.js';
@@ -95,16 +95,18 @@ export function authRouter(config: AppConfig, repo: Repo, mailer: Mailer): Route
       const email = String(req.body?.email ?? '').trim().toLowerCase();
       const password = String(req.body?.password ?? '');
       if (!email || !password) throw new HttpError(400, 'Email and password are required');
-      const wait = loginLocked(email);
+      const keys = loginKeys(email, requestMeta()?.ip);
+      const wait = Math.max(...keys.map((k) => loginLocked(k)));
       if (wait) throw new HttpError(429, `Too many attempts — try again in ${wait} minute${wait === 1 ? '' : 's'}`);
       const rep = await repo.findRepByEmail(email);
-      const ok = rep ? await verifyPassword(password, await repo.getPasswordHash(rep.id)) : false;
+      // An unknown email still runs scrypt, so response time does not say which emails exist.
+      const ok = rep ? await verifyPassword(password, await repo.getPasswordHash(rep.id)) : (await verifyPassword(password, await dummyPasswordHash()), false);
       if (!rep || !ok) {
-        noteLoginFailure(email);
+        for (const k of keys) noteLoginFailure(k);
         await repo.writeAudit({ actorRepId: rep?.id ?? 'unknown', action: 'login.failed', targetRepId: null, path: `${req.baseUrl}${req.path}`, detail: { email } });
         throw new HttpError(401, 'That email and password do not match');
       }
-      clearLoginFailures(email);
+      for (const k of keys) clearLoginFailures(k);
       const totp = await repo.getTotp(rep.id);
       if (totp.enabled) {
         // A browser remembered after an earlier code skips the second step until the device expires.
@@ -132,7 +134,7 @@ export function authRouter(config: AppConfig, repo: Repo, mailer: Mailer): Route
       const wait = loginLocked(key);
       if (wait) throw new HttpError(429, `Too many attempts — try again in ${wait} minute${wait === 1 ? '' : 's'}`);
       const t = await repo.getTotp(pending.repId);
-      if (!t.enabled || !t.secret || !verifyTotp(t.secret, req.body?.code)) {
+      if (!t.enabled || !t.secret || !verifyTotpOnce(pending.repId, t.secret, req.body?.code)) {
         noteLoginFailure(key);
         await repo.writeAudit({ actorRepId: pending.repId, action: 'login.failed', targetRepId: null, path: `${req.baseUrl}${req.path}`, detail: { email: pending.email, totp: true } });
         throw new HttpError(401, 'That code is not right');

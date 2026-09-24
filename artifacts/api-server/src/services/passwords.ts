@@ -53,6 +53,7 @@ const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 /** Per-email cap on reset emails: 3 an hour, so the form cannot be used to flood an inbox. */
 const resetAsks = new Map<string, number[]>();
 export function resetThrottled(email: string, now = Date.now()): boolean {
+  if (resetAsks.size > 5_000) for (const [k, ts] of resetAsks) if (!ts.some((t) => now - t < RESET_TTL_MS)) resetAsks.delete(k);
   const recent = (resetAsks.get(email) ?? []).filter((t) => now - t < RESET_TTL_MS);
   resetAsks.set(email, recent);
   if (recent.length >= 3) return true;

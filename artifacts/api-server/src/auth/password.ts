@@ -36,21 +36,46 @@ export async function verifyPassword(pw: string, stored: string | null | undefin
   return got.length === expected.length && timingSafeEqual(got, expected);
 }
 
-/** Small in-memory throttle: after 5 failures an email waits 15 minutes. Resets on success. */
-const failures = new Map<string, { n: number; until: number }>();
-export function loginLocked(email: string, now = Date.now()): number {
-  const f = failures.get(email);
+/**
+ * Small in-memory throttle: after 5 failures a key (email, or email+IP) waits
+ * 15 minutes. Resets on success. Entries expire, and the map is capped, so a
+ * flood of made-up emails cannot grow it without bound.
+ */
+const LOCK_MS = 15 * 60_000;
+const MAX_TRACKED = 5_000;
+const failures = new Map<string, { n: number; until: number; at: number }>();
+function prune(now: number): void {
+  if (failures.size < MAX_TRACKED) return;
+  for (const [k, f] of failures) if (now - f.at > LOCK_MS) failures.delete(k);
+  if (failures.size >= MAX_TRACKED) failures.delete(failures.keys().next().value!);
+}
+export function loginLocked(key: string, now = Date.now()): number {
+  const f = failures.get(key);
   if (!f || f.n < 5) return 0;
   return f.until > now ? Math.ceil((f.until - now) / 60_000) : 0;
 }
-export function noteLoginFailure(email: string, now = Date.now()): void {
-  const f = failures.get(email) ?? { n: 0, until: 0 };
+export function noteLoginFailure(key: string, now = Date.now()): void {
+  prune(now);
+  const f = failures.get(key) ?? { n: 0, until: 0, at: now };
+  if (now - f.at > LOCK_MS) { f.n = 0; f.until = 0; }
   f.n += 1;
-  if (f.n >= 5) f.until = now + 15 * 60_000;
-  failures.set(email, f);
+  f.at = now;
+  if (f.n >= 5) f.until = now + LOCK_MS;
+  failures.set(key, f);
 }
-export function clearLoginFailures(email: string): void {
-  failures.delete(email);
+export function clearLoginFailures(key: string): void {
+  failures.delete(key);
+}
+/** Failures are counted per email and per email+IP, so one address cannot lock a colleague out from elsewhere. */
+export function loginKeys(email: string, ip: string | null | undefined): string[] {
+  return ip ? [email, `${email}|${ip}`] : [email];
+}
+
+/** A hash to verify against when the email is unknown, so a miss costs the same time as a wrong password. */
+let dummyHash: Promise<string> | null = null;
+export function dummyPasswordHash(): Promise<string> {
+  dummyHash ??= hashPassword('not-a-real-password-just-for-timing');
+  return dummyHash;
 }
 
 /** A readable temporary password an admin can hand to a rep: `Word-Word-1234`. */

@@ -60,8 +60,8 @@ export function parseFrom(from: string): { email: string; name?: string } {
 
 /** Plain-text bodies become minimal HTML so links stay clickable everywhere. */
 export function textToHtml(text: string): string {
-  const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const linked = esc.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1">$1</a>');
+  const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const linked = esc.replace(/(https?:\/\/[^\s]+?)(?=&quot;|&#39;|\s|$)/g, '<a href="$1">$1</a>');
   return `<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.5;color:#1d2a24;white-space:pre-wrap">${linked}</div>`;
 }
 

@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import cookieSession from 'cookie-session';
 import express, { type ErrorRequestHandler } from 'express';
@@ -33,7 +34,8 @@ export function createApp(config: AppConfig, repo: Repo, deps: AppDeps = {}): ex
   const geo = deps.geo ?? createGeo(repo, { lookup: config.geo === 'off' ? null : undefined });
   const notify = { mailer, origin: config.appOrigin, appName: config.appName };
   app.locals.mailer = mailer;
-  app.set('trust proxy', 1);
+  // Behind Replit, Render or any reverse proxy the client IP is the first X-Forwarded-For hop. TRUST_PROXY=off when the app faces clients directly.
+  app.set('trust proxy', config.trustProxy ? 1 : false);
   app.disable('x-powered-by');
   app.use(requestContext());
   app.use(securityHeaders());
@@ -84,10 +86,10 @@ export function createApp(config: AppConfig, repo: Repo, deps: AppDeps = {}): ex
   const onError: ErrorRequestHandler = (err, _req, res, _next) => {
     if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
     const message = err instanceof Error ? err.message : String(err);
-    console.error(JSON.stringify({ t: new Date().toISOString(), level: 'error', path: _req.originalUrl, message, stack: err instanceof Error ? err.stack : undefined }));
-    // Admins see what actually failed (usually a database/schema problem); everyone else gets the generic line.
-    const admin = _req.session?.user?.role === 'admin';
-    res.status(500).json({ error: admin ? `Internal error: ${message}` : 'Internal error' });
+    const ref = randomBytes(4).toString('hex');
+    console.error(JSON.stringify({ t: new Date().toISOString(), level: 'error', ref, path: _req.originalUrl, message, stack: err instanceof Error ? err.stack : undefined }));
+    // The detail (usually a database/schema problem) stays in the server log; the reply carries only a reference to find it by.
+    res.status(500).json({ error: `Internal error (ref ${ref})` });
   };
   app.use(onError);
   return app;

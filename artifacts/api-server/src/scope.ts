@@ -515,7 +515,7 @@ export function repPayHistory(ctx: LedgerContext, runs: PayrollRun[], repId: str
 
 /** The rep's own pay history as a CSV (what they see on Pay history). */
 export function repPayHistoryCsv(ctx: LedgerContext, runs: PayrollRun[], repId: string): string {
-  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const esc = (v: unknown) => { const s = String(v ?? ''); return `"${(/^[=+@\t\r]/.test(s) || /^-(?![\d.])/.test(s) ? `'${s}` : s).replace(/"/g, '""')}"`; };
   const h = repPayHistory(ctx, runs, repId);
   const head = ['Paid on', 'Deal', 'Business', 'Role', 'Segment', 'Run', 'Amount', 'Voided'].map(esc).join(',');
   const body = h.rows.map((r) => [r.paidAt, r.dealId, r.business, r.role, r.segmentLabel, r.runLabel ?? '', r.amount.toFixed(2), r.voided ? 'yes' : ''].map(esc).join(','));

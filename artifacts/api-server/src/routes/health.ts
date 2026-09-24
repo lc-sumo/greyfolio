@@ -13,7 +13,8 @@ export function healthRouter(check?: () => Promise<unknown>): Router {
       await check();
       res.json({ ok: true, at, db: 'ok' });
     } catch (e) {
-      res.status(503).json({ ok: false, at, db: e instanceof Error ? e.message : String(e) });
+      console.error(JSON.stringify({ t: at, level: 'error', health: e instanceof Error ? e.message : String(e) }));
+      res.status(503).json({ ok: false, at, db: 'unreachable' });
     }
   });
   return r;

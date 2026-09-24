@@ -63,21 +63,23 @@ export function sheetsSyncRouter(repo: Repo, config: AppConfig): Router {
   router.get('/master-deals', async (_req, res, next) => {
     try {
       const [{ deals }, reps] = await Promise.all([repo.loadContext(), repo.listReps()]);
-      const name = (id: string | null) => reps.find((r) => r.id === id)?.name ?? '';
+      // A leading ' makes Sheets keep the cell as text, so a business name like "=HYPERLINK(...)" cannot become a formula.
+      const plain = (v: string | null | undefined) => { const s = v ?? ''; return /^[=+@]/.test(s) ? `'${s}` : s; };
+      const name = (id: string | null) => plain(reps.find((r) => r.id === id)?.name);
       const headers = FUNDED_DEALS_COLUMNS.map((c: FundedDealsColumn) => c.header || `Column ${c.col}`);
       const rows = deals.flatMap((d) => {
         const collected = segments(d).reduce((n, s) => n + collectedOf(s), 0);
         const status = collected >= d.gross + d.draws.reduce((n, x) => n + x.gross, 0) - 0.005 ? 'YES - Paid In Full' : collected > 0 ? 'Partially Paid' : 'NO';
         const values: Record<string, unknown> = {
-          'Deal ID': d.id, 'Parent Deal': d.parentId ?? d.opportunityId, Date: d.date, 'Business Name': d.business,
-          Lender: d.lender, Product: d.product, 'Funded / Draw Amount ($)': d.funded, 'Factor Rate': d.factor ?? '',
+          'Deal ID': d.id, 'Parent Deal': d.parentId ?? d.opportunityId, Date: d.date, 'Business Name': plain(d.business),
+          Lender: plain(d.lender), Product: plain(d.product), 'Funded / Draw Amount ($)': d.funded, 'Factor Rate': d.factor ?? '',
           'Term (bus. days)': d.termDays ?? '', 'Payback ($)': d.payback ?? '', Frequency: d.frequency, 'Comm %': d.commRate,
           'PSF (% or $)': d.psfPct, 'PSF $ (auto)': '', 'Gross Commission ($)': d.gross,
-          'Referral Partner': d.referralPartner ?? '', 'Referral %': d.referralRate, 'Referral Fee ($)': d.referralFee,
+          'Referral Partner': plain(d.referralPartner), 'Referral %': d.referralRate, 'Referral Fee ($)': d.referralFee,
           'Net Comm After Referral ($)': d.net, Opener: name(d.openerId), 'Opener %': d.openerRate,
           Closer: name(d.closerId), 'Closer %': d.closerRate, 'Override Rep': name(d.overrideId), 'Override %': d.overrideRate,
           'Clawback $': '', 'Clawback Date': '', 'Commission Status': status, 'Lender Paid Date': d.lenderPaid ?? '',
-          'Rep Paid Date': d.repPaid ?? '', 'Deal Status': d.dealStatus, Notes: d.notes ?? '', 'Lead Source': d.leadSource ?? '',
+          'Rep Paid Date': d.repPaid ?? '', 'Deal Status': d.dealStatus, Notes: plain(d.notes), 'Lead Source': plain(d.leadSource),
         };
         const row = headers.map((h: string) => values[h] ?? '');
         const drawRows = d.draws.map((draw) => {

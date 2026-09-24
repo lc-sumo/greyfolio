@@ -202,7 +202,7 @@ export function cashView(ctx: LedgerContext, year: number): CashView {
   return { year, months, total };
 }
 
-const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+const esc = (v: unknown) => { const s = String(v ?? ''); return `"${(/^[=+@\t\r]/.test(s) || /^-(?![\d.])/.test(s) ? `'${s}` : s).replace(/"/g, '""')}"`; };
 
 /**
  * A journal-style CSV QuickBooks (and any bookkeeper) can import: one line

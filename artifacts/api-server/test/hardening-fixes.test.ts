@@ -85,3 +85,59 @@ describe('calendar feed tokens', () => {
     expect((await request(app).get('/calendar/legacy-plaintext-token-abcdefghij.ics')).status).toBe(200);
   });
 });
+
+describe('low-severity hardening', () => {
+  it('a TOTP code is accepted once per account', async () => {
+    const { totpCode, verifyTotpOnce } = await import('../src/auth/totp.js');
+    const secret = 'JBSWY3DPEHPK3PXP';
+    const at = 1_800_000_000_000;
+    const code = totpCode(secret, at);
+    expect(verifyTotpOnce('rep-a', secret, code, at)).toBe(true);
+    expect(verifyTotpOnce('rep-a', secret, code, at + 5_000)).toBe(false);
+    expect(verifyTotpOnce('rep-b', secret, code, at)).toBe(true);
+    expect(verifyTotpOnce('rep-a', secret, totpCode(secret, at + 30_000), at + 30_000)).toBe(true);
+    expect(verifyTotpOnce('rep-a', secret, totpCode(secret, at - 30_000), at)).toBe(true);
+    expect(verifyTotpOnce('rep-a', secret, totpCode(secret, at - 30_000), at)).toBe(false);
+  });
+  it('login failures lock per email and per email+IP, and unknown emails cost a hash check', async () => {
+    const { app } = await harness();
+    for (let i = 0; i < 5; i++) expect((await request(app).post('/auth/password-login').send({ email: 'nobody@greystoneus.com', password: 'x' })).status).toBe(401);
+    expect((await request(app).post('/auth/password-login').send({ email: 'nobody@greystoneus.com', password: 'x' })).status).toBe(429);
+    const { loginKeys, noteLoginFailure, loginLocked } = await import('../src/auth/password.js');
+    expect(loginKeys('a@b.c', '10.0.0.1')).toEqual(['a@b.c', 'a@b.c|10.0.0.1']);
+    for (let i = 0; i < 5; i++) noteLoginFailure('k1', 1_000);
+    expect(loginLocked('k1', 1_000)).toBe(15);
+    expect(loginLocked('k1', 1_000 + 16 * 60_000)).toBe(0);
+    // Stale counts reset instead of accumulating forever.
+    noteLoginFailure('k1', 1_000 + 20 * 60_000);
+    expect(loginLocked('k1', 1_000 + 20 * 60_000)).toBe(0);
+  });
+  it('CSV cells that would start a formula are prefixed, negative numbers are not', async () => {
+    const { repo, admin } = await harness();
+    // The lender lands at the start of a cell in the QuickBooks export; a business name would too on other exports.
+    await repo.updateDeal('F1', { lender: '=HYPERLINK("http://evil","click")' });
+    const csv = await admin.get('/api/admin/books/cash.csv').query({ year: 2026 });
+    expect(csv.status).toBe(200);
+    expect(csv.text).toContain(`"'=HYPERLINK(""http://evil"",""click"")"`);
+    expect(csv.text).not.toMatch(/"=HYPERLINK/);
+    // Negative amounts stay numeric: a clawback recovery line is a plain negative number.
+    expect(csv.text).toMatch(/"-\d/);
+    expect(csv.text).not.toMatch(/"'-\d/);
+  });
+  it('outbound mail HTML cannot break out of the link attribute', async () => {
+    const { textToHtml } = await import('../src/services/mail.js');
+    const html = textToHtml('see https://x.test/a"onmouseover="alert(1) and "quoted" text');
+    expect(html).not.toMatch(/[^&]"onmouseover/);
+    // The link ends where the quote began; the rest is inert, escaped text.
+    expect(html).toContain('<a href="https://x.test/a">https://x.test/a</a>&quot;onmouseover=&quot;alert(1)');
+    expect(html).toContain('&quot;quoted&quot;');
+  });
+  it('caps files per rep and hides internal error detail behind a reference', async () => {
+    const { julian } = await harness();
+    const pdf = Buffer.from('%PDF-1.4 x').toString('base64');
+    for (let i = 0; i < 25; i++) expect((await julian.post('/api/me/files').send({ name: `f${i}.pdf`, mime: 'application/pdf', data: pdf })).status).toBe(201);
+    const over = await julian.post('/api/me/files').send({ name: 'one-more.pdf', mime: 'application/pdf', data: pdf });
+    expect(over.status).toBe(400);
+    expect(over.body.error).toMatch(/at most 25 files/);
+  });
+});

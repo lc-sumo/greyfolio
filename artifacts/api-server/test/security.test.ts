@@ -65,7 +65,7 @@ describe('remembered devices', () => {
     const laptop = request.agent(app);
     const first = await laptop.post('/auth/password-login').set('user-agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_0) AppleWebKit/537.36 Chrome/120.0 Safari/537.36').send({ email: 'julian.ribak@greystoneus.com', password: 'Harbor-Cedar-1234' });
     expect(first.body).toEqual({ ok: false, totp: true, rememberDays: 7 });
-    const second = await laptop.post('/auth/totp').set('user-agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_0) AppleWebKit/537.36 Chrome/120.0 Safari/537.36').send({ code: totpCode(setup.body.secret), remember: true });
+    const second = await laptop.post('/auth/totp').set('user-agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_0) AppleWebKit/537.36 Chrome/120.0 Safari/537.36').send({ code: totpCode(setup.body.secret, Date.now() + 30_000), remember: true });
     expect(second.body.ok).toBe(true);
     expect(String(second.headers['set-cookie'])).toMatch(/gs\.device=dev-[a-z0-9-]+\.[A-Za-z0-9_-]+;.*HttpOnly/);
     const devices = (await laptop.get('/api/me/devices')).body.devices;
@@ -80,7 +80,7 @@ describe('remembered devices', () => {
     // A different browser still gets asked; declining "remember" leaves no device.
     const other = request.agent(app);
     expect((await other.post('/auth/password-login').send({ email: 'julian.ribak@greystoneus.com', password: 'Harbor-Cedar-1234' })).body.totp).toBe(true);
-    const noRemember = await other.post('/auth/totp').send({ code: totpCode(setup.body.secret), remember: false });
+    const noRemember = await other.post('/auth/totp').send({ code: totpCode(setup.body.secret, Date.now() - 30_000), remember: false });
     expect(noRemember.body.ok).toBe(true);
     expect(String(noRemember.headers['set-cookie'] ?? '')).not.toMatch(/gs\.device=dev-/);
     expect((await other.get('/api/me/devices')).body.devices).toHaveLength(1);
@@ -110,7 +110,7 @@ describe('remembered devices', () => {
     await b.post('/api/me/totp/enable').send({ code: totpCode(setup.body.secret) });
     await b.post('/auth/logout');
     await b.post('/auth/password-login').send({ email: 'julian.ribak@greystoneus.com', password: 'Harbor-Cedar-1234' });
-    await b.post('/auth/totp').send({ code: totpCode(setup.body.secret) });
+    await b.post('/auth/totp').send({ code: totpCode(setup.body.secret, Date.now() + 30_000) });
     const [d] = await repo.listTrustedDevices('rep-julian-ribak');
     await repo.deleteTrustedDevice(d!.id);
     await repo.insertTrustedDevice({ ...d!, expiresAt: new Date(Date.now() - 1000).toISOString() });

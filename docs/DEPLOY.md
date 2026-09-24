@@ -54,7 +54,8 @@ Set `SEED=workbook` for the very first boot only, then `none`.
 | `SENDGRID_API_KEY` | no | Accepted in place of `MAIL_API_KEY` when the provider is SendGrid |
 | `SETUP_TOKEN` | no | First-run only: the code the setup screen asks for before the first admin password can be set. Unset, a random one is printed to the server log at boot while setup is open |
 | `SUPER_ADMIN_EMAIL` | no | Guaranteed on every boot as an active super admin (default `lc@greystoneus.com`) |
-| `GEO_PROVIDER` | no | `ipapi` (default: IP → city on the audit log and device list, one lookup per address, cached) or `off` |
+| `GEO_PROVIDER` | no | `ipapi` (default: IP → city on the audit log and device list, one lookup per address, cached; each new address is sent to ipapi.co) or `off` |
+| `TRUST_PROXY` | no | `off` when the app faces clients directly with no reverse proxy, so `X-Forwarded-For` cannot spoof the audit IP or the rate limit |
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | no | SSO (Google Workspace, Okta, Entra) |
 | `MAIL_API_KEY`, `MAIL_FROM` | with mail | Provider key and verified sender |
 | `RENEWAL_DIGEST_HOUR_UTC` | no | Hour the renewal digest goes to admins (default 13); `off` disables |

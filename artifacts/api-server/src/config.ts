@@ -36,6 +36,8 @@ export interface AppConfig {
   superAdminEmail: string;
   /** Shared secret for the Google Sheets integration; unset disables sync. */
   sheetsSyncSecret: string | null;
+  /** Trust the first X-Forwarded-For hop for req.ip (rate limits, audit IPs). Off when the app faces clients directly. */
+  trustProxy: boolean;
   /** One-time code the first-run setup screen must present (SETUP_TOKEN, else generated at boot and printed to the log). */
   setupToken: string;
 }
@@ -78,5 +80,6 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
     superAdminEmail: (env.SUPER_ADMIN_EMAIL || 'lc@greystoneus.com').trim().toLowerCase(),
     sheetsSyncSecret: env.SHEETS_SYNC_SECRET || null,
     setupToken: env.SETUP_TOKEN || randomBytes(18).toString('base64url'),
+    trustProxy: env.TRUST_PROXY !== 'off',
   };
 }

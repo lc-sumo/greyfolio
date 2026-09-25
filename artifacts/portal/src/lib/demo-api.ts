@@ -15,7 +15,7 @@ import { memoryRepo } from '../../../api-server/src/repo.memory';
 import { leaderboard, repClawbackViews, repDashboard, repDealView, repMonthly, repPayHistory, repRenewals, repStatements, repWallet } from '../../../api-server/src/scope';
 import { addDraw, createDeal, deleteClawback, deleteDeal, deleteDraw, linkRenewal, recordClawback, setCollection, setCrmId, setDealStatus, updateClawback, updateContact, updateDealMetadata, updateDrawTerms, updateSplits, updateTerms } from '../../../api-server/src/services/deals';
 import { addFile, addNote, addRepFile, removeFile, removeNote, removeRepFile } from '../../../api-server/src/services/notes';
-import { cashView, exceptions, markPartnerPaid, partnerPayables, receivables } from '../../../api-server/src/services/books';
+import { cashView, exceptions, markPartnerPaid, partnerPayables, receivables, receiveLenderPayment, repPayablesAging } from '../../../api-server/src/services/books';
 import { advanceRun, archiveRun, createRun, deleteRun, paySelected, reopenRun, voidPayout } from '../../../api-server/src/services/payroll';
 import { commitImport, previewImport } from '../../../api-server/src/services/import';
 import { commitRemittance, previewRemittance } from '../../../api-server/src/services/remittance';
@@ -335,6 +335,8 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
     if (adtm && method === 'POST') return json(await createTask(repo, { dealId: decodeURIComponent(adtm[1]!), ...(body as object) }, me.repId, today));
     if (p === '/api/admin/settings/templates' && method === 'PUT') return json({ templates: await saveTemplates(repo, body as never, me.repId) });
     if (p === '/api/admin/books/receivables') return json(receivables(ctx, settings, today));
+    if (p === '/api/admin/books/receivables/receive' && method === 'POST') { const r = await receiveLenderPayment(repo, body as never, me.repId, today); return json({ ...r, receivables: receivables(await repo.loadContext(), settings, today) }); }
+    if (p === '/api/admin/books/rep-aging') return json(repPayablesAging(ctx, d.reps, today));
     if (p === '/api/admin/books/partners') return json(partnerPayables(ctx, settings));
     if (p === '/api/admin/books/partners/pay' && method === 'POST') return json(await markPartnerPaid(repo, body as never, me.repId));
     if (p === '/api/admin/books/cash') return json(cashView(ctx, Number(q.get('year') ?? today.slice(0, 4))));

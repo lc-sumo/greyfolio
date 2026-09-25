@@ -186,8 +186,10 @@ export interface AnnualReport { year: number; rows: AnnualRow[]; total: { grossP
 
 /* ---- Books (bookkeeping). Admin only. ---- */
 export type AgeBucket = 'current' | '1-30' | '31-60' | '61-90' | '90+';
-export interface ReceivableRow { dealId: string; business: string; lender: string; product: string; fundedDate: string; segment: string; item: string; amount: number; expected: string | null; daysOverdue: number; bucket: AgeBucket }
+export interface ReceivableRow { dealId: string; segmentKey: string; event: { kind: 'upfront' | 'increment' | 'remainder'; n: number } | null; business: string; lender: string; product: string; fundedDate: string; segment: string; item: string; amount: number; expected: string | null; daysOverdue: number; bucket: AgeBucket }
 export interface Receivables { asOf: string; rows: ReceivableRow[]; total: number; byBucket: Record<AgeBucket, number>; byLender: Array<{ lender: string; outstanding: number; overdue: number; termsDays: number; rows: number }> }
+export interface RepPayableAgingRow { repId: string; repName: string; dealId: string; business: string; lender: string; role: string; segmentKey: string; segmentLabel: string; amount: number; ready: number; waiting: number; since: string; days: number; bucket: AgeBucket }
+export interface RepPayablesAging { asOf: string; rows: RepPayableAgingRow[]; total: number; ready: number; waiting: number; byBucket: Record<AgeBucket, number>; byRep: Array<{ repId: string; name: string; active: boolean; owed: number; ready: number; oldestDays: number; rows: number }> }
 export interface PartnerPayableRow { dealId: string; business: string; lender: string; fundedDate: string; partner: string; fee: number; collected: boolean; commissionStatus: string; paidAt: string | null }
 export interface PartnerPayables { rows: PartnerPayableRow[]; partners: Array<{ partner: string; pct: number; owed: number; owedCollected: number; paid: number; deals: number; active: boolean }>; totals: { owed: number; owedCollected: number; paid: number } }
 export interface CashMonth { month: string; deals: number; funded: number; grossEarned: number; referralFees: number; repShares: number; houseNet: number; collected: number; outstanding: number; repPayouts: number; recovered: number; repCash: number }

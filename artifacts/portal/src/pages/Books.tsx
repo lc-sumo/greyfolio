@@ -3,12 +3,12 @@ import { useState } from 'react';
 import { AdminDealDrawer } from '../components/AdminDealDrawer';
 import { Shell } from '../components/Shell';
 import { Card, Loading, Metric, Pill } from '../components/ui';
-import { DEMO, EXCEPTION_LABEL, EXCEPTION_SHORT, api, post, type AgeBucket, type CashView, type ExceptionKind, type Exceptions, type PartnerPayables, type Receivables, type Settings } from '../lib/api';
+import { DEMO, EXCEPTION_LABEL, EXCEPTION_SHORT, api, post, type AgeBucket, type CashView, type ExceptionKind, type Exceptions, type PartnerPayables, type Receivables, type RepPayablesAging, type Settings } from '../lib/api';
 import { compact, day, money, monthLabel } from '../lib/format';
 import { useSession } from '../lib/session';
 import { AccountingOverview, Journal, Periods, Reconciliations, Reports } from '../components/books/Accounting';
 
-type Tab = 'overview' | 'journal' | 'periods' | 'reconciliation' | 'reports' | 'exceptions' | 'receivables' | 'partners' | 'cash';
+type Tab = 'overview' | 'journal' | 'periods' | 'reconciliation' | 'reports' | 'exceptions' | 'receivables' | 'repaging' | 'partners' | 'cash';
 const TABS: Array<{ key: Tab; label: string; hint: string }> = [
   { key: 'overview', label: 'Control room', hint: 'Sync status, posting integrity, assumed-date warnings, and the periods still open for posting.' },
   { key: 'journal', label: 'Journal', hint: 'Immutable, line-level postings with source keys and drilldowns into operational records.' },
@@ -17,6 +17,7 @@ const TABS: Array<{ key: Tab; label: string; hint: string }> = [
   { key: 'reports', label: 'Reports', hint: 'Trial balance, P&L, balance sheet, direct cash flow, and rep payable drilldown.' },
   { key: 'exceptions', label: 'Exceptions', hint: 'What a bookkeeper would find by reading every row: funded with nothing received, reps paid ahead of the lender, matured deals still marked Performing, clawback windows closing, overdue receipts, partner fees due.' },
   { key: 'receivables', label: 'Receivables', hint: 'What each lender still owes the house, aged from the date it was expected — the schedule for incremental lenders, funded date plus the lender’s payment terms for everyone else.' },
+  { key: 'repaging', label: 'Rep payables', hint: 'What the house owes each rep, line by line, aged from the day the deal funded. "Ready" is backed by commission the lender has paid, so payroll can run it today; the rest is waiting on the lender.' },
   { key: 'partners', label: 'Partner payables', hint: 'Referral fees owed per partner. Tick the deals you paid and mark them paid; the audit log keeps the date.' },
   { key: 'cash', label: 'Cash & export', hint: 'Month by month: what was earned on deals funded that month (accrual) beside what reps were actually paid (cash). Export a journal CSV for QuickBooks or your accountant.' },
 ];
@@ -38,6 +39,7 @@ export function Books() {
       {tab === 'reports' && <Reports onJournal={(source) => { setJournalSource(source); setTab('journal'); }} />}
       {tab === 'exceptions' && <ExceptionsTab onOpen={setOpen} />}
       {tab === 'receivables' && <ReceivablesTab onOpen={setOpen} />}
+      {tab === 'repaging' && <RepAgingTab onOpen={setOpen} />}
       {tab === 'partners' && <PartnersTab onOpen={setOpen} />}
       {tab === 'cash' && <CashTab />}
       {open && settings.data && <AdminDealDrawer id={open} settings={settings.data} editOptions={[]} onClose={() => setOpen(null)} />}
@@ -86,11 +88,35 @@ function ExceptionsTab({ onOpen }: { onOpen: (id: string) => void }) {
 }
 
 function ReceivablesTab({ onOpen }: { onOpen: (id: string) => void }) {
+  const { notify } = useSession();
+  const qc = useQueryClient();
   const q = useQuery({ queryKey: ['books-receivables'], queryFn: () => api<Receivables>('/api/admin/books/receivables') });
   const [lender, setLender] = useState<string>('');
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [busy, setBusy] = useState<string | null>(null);
   const r = q.data;
   if (!r) return <Loading error={q.error} />;
   const rows = r.rows.filter((x) => !lender || x.lender === lender);
+  /** Land the lender's money on this row: a scheduled receipt as-is, a plain commission in full or in part. */
+  async function receive(x: Receivables['rows'][number], key: string) {
+    let amount: number | undefined;
+    if (!x.event) {
+      const typed = window.prompt(`Amount received from ${x.lender} on ${x.dealId} (outstanding ${money(x.amount)})`, String(Math.round(x.amount * 100) / 100));
+      if (typed === null) return;
+      amount = Number(typed.replace(/[$,\s]/g, ''));
+      if (!Number.isFinite(amount) || amount <= 0) { notify('Enter a positive amount'); return; }
+    }
+    setBusy(key);
+    try {
+      const res = await post<{ applied: number }>('/api/admin/books/receivables/receive', { dealId: x.dealId, segmentKey: x.segmentKey, event: x.event, amount, date });
+      notify(`Recorded ${money(res.applied)} from ${x.lender} on ${x.dealId} · ${day(date)}`);
+      await qc.invalidateQueries();
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Could not record the receipt');
+    } finally {
+      setBusy(null);
+    }
+  }
   return (
     <>
       <div className="grid-auto-180">
@@ -98,20 +124,24 @@ function ReceivablesTab({ onOpen }: { onOpen: (id: string) => void }) {
         {BUCKETS.map((b) => <Metric key={b} label={b === 'current' ? 'Not yet due' : `${b} days late`} value={money(r.byBucket[b])} tone={b !== 'current' && r.byBucket[b] ? (b === '1-30' ? 'warn' : 'neg') : undefined} />)}
       </div>
       <div className="two">
-        <Card title="What to chase" extra={lender ? `${lender} only` : 'oldest first'}>
+        <Card title="What to chase" extra={<span style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>{lender ? `${lender} only` : 'oldest first'}<label style={{ display: 'flex', gap: 6, alignItems: 'center', fontWeight: 500 }}>received on <input type="date" value={date} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setDate(e.target.value)} style={{ height: 28, border: '1px solid var(--border)', borderRadius: 7, padding: '0 6px', background: 'var(--input-bg)', color: 'inherit', font: 'inherit', fontSize: 12.5 }} /></label></span>}>
           <div className="scroller">
-            <div className="table" style={{ ['--cols' as string]: 'minmax(200px,1.3fr) 120px 130px 100px 100px 80px', minWidth: 760 }}>
-              <div className="tr th"><div className="td">Deal</div><div className="td">Item</div><div className="td">Segment</div><div className="td r">Expected</div><div className="td r">Amount</div><div className="td r">Late</div></div>
-              {rows.map((x, i) => (
-                <div className="tr click" key={`${x.dealId}-${x.segment}-${x.item}-${i}`} onClick={() => onOpen(x.dealId)}>
-                  <div className="td ellipsis"><b>{x.business}</b> <span className="subtle num">{x.dealId} · {x.lender}</span></div>
-                  <div className="td">{x.item}</div>
-                  <div className="td subtle ellipsis">{x.segment}</div>
-                  <div className="td r num subtle">{day(x.expected)}</div>
-                  <div className="td r num">{money(x.amount)}</div>
-                  <div className={`td r num ${x.daysOverdue > 30 ? 'neg' : x.daysOverdue ? 'warn' : 'subtle'}`}>{x.daysOverdue ? `${x.daysOverdue}d` : '—'}</div>
-                </div>
-              ))}
+            <div className="table" style={{ ['--cols' as string]: 'minmax(200px,1.3fr) 120px 130px 100px 100px 70px 96px', minWidth: 840 }}>
+              <div className="tr th"><div className="td">Deal</div><div className="td">Item</div><div className="td">Segment</div><div className="td r">Expected</div><div className="td r">Amount</div><div className="td r">Late</div><div className="td" /></div>
+              {rows.map((x, i) => {
+                const key = `${x.dealId}-${x.segmentKey}-${x.event ? `${x.event.kind}${x.event.n}` : 'all'}`;
+                return (
+                  <div className="tr click" key={`${key}-${i}`} onClick={() => onOpen(x.dealId)}>
+                    <div className="td ellipsis"><b>{x.business}</b> <span className="subtle num">{x.dealId} · {x.lender}</span></div>
+                    <div className="td">{x.item}</div>
+                    <div className="td subtle ellipsis">{x.segment}</div>
+                    <div className="td r num subtle">{day(x.expected)}</div>
+                    <div className="td r num">{money(x.amount)}</div>
+                    <div className={`td r num ${x.daysOverdue > 30 ? 'neg' : x.daysOverdue ? 'warn' : 'subtle'}`}>{x.daysOverdue ? `${x.daysOverdue}d` : '—'}</div>
+                    <div className="td r"><button className="btn" style={{ height: 28, padding: '0 10px' }} disabled={busy === key || DEMO} title={DEMO ? 'Available on the live portal' : x.event ? `Mark ${x.item.toLowerCase()} received on ${day(date)}` : `Record what ${x.lender} paid on ${day(date)}`} onClick={(e) => { e.stopPropagation(); void receive(x, key); }}>{busy === key ? '…' : 'Received'}</button></div>
+                  </div>
+                );
+              })}
               {rows.length === 0 && <div className="empty">Nothing outstanding.</div>}
             </div>
           </div>
@@ -126,6 +156,57 @@ function ReceivablesTab({ onOpen }: { onOpen: (id: string) => void }) {
               </div>
             ))}
             {r.byLender.length === 0 && <div className="muted">Every lender is paid up.</div>}
+          </div>
+        </Card>
+      </div>
+    </>
+  );
+}
+
+function RepAgingTab({ onOpen }: { onOpen: (id: string) => void }) {
+  const q = useQuery({ queryKey: ['books-rep-aging'], queryFn: () => api<RepPayablesAging>('/api/admin/books/rep-aging') });
+  const [rep, setRep] = useState('');
+  const a = q.data;
+  if (!a) return <Loading error={q.error} />;
+  const rows = a.rows.filter((x) => !rep || x.repId === rep);
+  return (
+    <>
+      <div className="grid-auto-180">
+        <Metric label="Owed to reps" value={money(a.total)} tone={a.total ? 'warn' : undefined} sub={`as of ${day(a.asOf)}`} />
+        <Metric label="Ready to pay" value={money(a.ready)} tone={a.ready ? 'neg' : undefined} sub="lender has paid · run payroll" />
+        <Metric label="Waiting on lender" value={money(a.waiting)} sub="earned, not yet collected" />
+        {BUCKETS.map((b) => <Metric key={b} label={b === 'current' ? 'Funded today' : `${b} days since funding`} value={money(a.byBucket[b])} tone={b === '61-90' || b === '90+' ? (a.byBucket[b] ? 'neg' : undefined) : b === '31-60' && a.byBucket[b] ? 'warn' : undefined} />)}
+      </div>
+      <div className="two">
+        <Card title="Unpaid lines" extra={rep ? `${a.byRep.find((r) => r.repId === rep)?.name ?? rep} only` : 'oldest first'}>
+          <div className="scroller">
+            <div className="table" style={{ ['--cols' as string]: 'minmax(190px,1.2fr) 130px 110px 100px 100px 100px 70px', minWidth: 800 }}>
+              <div className="tr th"><div className="td">Deal</div><div className="td">Rep</div><div className="td">Role</div><div className="td r">Owed</div><div className="td r">Ready</div><div className="td r">Since</div><div className="td r">Age</div></div>
+              {rows.map((x) => (
+                <div className="tr click" key={`${x.repId}-${x.dealId}-${x.role}-${x.segmentKey}`} onClick={() => onOpen(x.dealId)}>
+                  <div className="td ellipsis"><b>{x.business}</b> <span className="subtle num">{x.dealId} · {x.lender}</span>{x.segmentKey !== 'base' && <span className="subtle"> · {x.segmentLabel}</span>}</div>
+                  <div className="td ellipsis">{x.repName}</div>
+                  <div className="td"><Pill tone={x.role === 'Override' ? 'amber' : 'teal'}>{x.role}</Pill></div>
+                  <div className="td r num">{money(x.amount)}</div>
+                  <div className={`td r num ${x.ready ? 'pos' : 'subtle'}`}>{x.ready ? money(x.ready) : '—'}</div>
+                  <div className="td r num subtle">{day(x.since)}</div>
+                  <div className={`td r num ${x.days > 60 ? 'neg' : x.days > 30 ? 'warn' : 'subtle'}`}>{x.days}d</div>
+                </div>
+              ))}
+              {rows.length === 0 && <div className="empty">Nothing owed to reps.</div>}
+            </div>
+          </div>
+        </Card>
+        <Card title="By rep" extra="click a rep to filter · pay from Run payroll">
+          <div className="pl">
+            {a.byRep.map((r) => (
+              <div className="row click" key={r.repId} style={{ cursor: 'pointer', background: rep === r.repId ? 'var(--row-selected)' : undefined }} onClick={() => setRep(rep === r.repId ? '' : r.repId)}>
+                <span><b>{r.name}</b>{!r.active && <span className="subtle"> (inactive)</span>}<span className="subtle"> · {r.rows} line{r.rows === 1 ? '' : 's'} · oldest {r.oldestDays}d</span></span>
+                <span className={`num ${r.ready ? 'pos' : 'subtle'}`}>{r.ready ? `${money(r.ready)} ready` : ''}</span>
+                <span className="num">{money(r.owed)}</span>
+              </div>
+            ))}
+            {a.byRep.length === 0 && <div className="muted">Every rep is paid up.</div>}
           </div>
         </Card>
       </div>

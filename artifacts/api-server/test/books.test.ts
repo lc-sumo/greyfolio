@@ -136,3 +136,51 @@ describe('rep-side exports and files', () => {
     expect((await admin.post('/api/admin/reps/rep-zach-sanders/files').send({ name: 'x.exe', mime: 'application/octet-stream', data: pdf })).status).toBe(400);
   });
 });
+
+describe('receive a lender payment from the aging list', () => {
+  it('lands the money on the deal, clears the receivable, and refuses more than is outstanding', async () => {
+    const { admin, repo } = await harness();
+    const before = (await admin.get('/api/admin/books/receivables')).body;
+    expect(before.total).toBe(2500);
+    const f3 = before.rows.find((x: { dealId: string }) => x.dealId === 'F3');
+    expect(f3).toMatchObject({ segmentKey: 'base', event: null, amount: 500 });
+    // Full receipt on F3, dated.
+    const r = await admin.post('/api/admin/books/receivables/receive').send({ dealId: 'F3', segmentKey: 'base', event: null, date: '2026-09-01' });
+    expect(r.status).toBe(200);
+    expect(r.body.applied).toBe(500);
+    expect(r.body.receivables.total).toBe(2000);
+    expect((await repo.loadContext()).deals.find((d) => d.id === 'F3')!.lenderPaid).toBeTruthy();
+    // Partial receipt on F2, then too much.
+    expect((await admin.post('/api/admin/books/receivables/receive').send({ dealId: 'F2', amount: 500 })).body.applied).toBe(500);
+    expect((await admin.get('/api/admin/books/receivables')).body.total).toBe(1500);
+    expect((await admin.post('/api/admin/books/receivables/receive').send({ dealId: 'F2', amount: 5000 })).status).toBe(409);
+    expect((await admin.post('/api/admin/books/receivables/receive').send({ dealId: 'F2', amount: 100, date: '2999-01-01' })).status).toBe(400);
+    expect((await admin.post('/api/admin/books/receivables/receive').send({ dealId: 'nope' })).status).toBe(404);
+    const audit = (await admin.get('/api/admin/audit').query({ action: 'deal.collection' })).body.entries;
+    expect(audit.some((e: { path: string }) => e.path === '/api/admin/books/receivables/receive')).toBe(true);
+  });
+});
+
+describe('rep payables, aged', () => {
+  it('lists every unpaid line per rep with its age since funding and what is ready to pay', async () => {
+    const { admin } = await harness();
+    const a = (await admin.get('/api/admin/books/rep-aging')).body;
+    expect(a.rows.length).toBeGreaterThan(0);
+    expect(a.total).toBeCloseTo(a.rows.reduce((s: number, r: { amount: number }) => s + r.amount, 0), 2);
+    expect(a.total).toBeCloseTo(a.ready + a.waiting, 2);
+    for (const r of a.rows) {
+      expect(r.days).toBeGreaterThanOrEqual(0);
+      expect(['current', '1-30', '31-60', '61-90', '90+']).toContain(r.bucket);
+      expect(r.amount).toBeCloseTo(r.ready + r.waiting, 2);
+    }
+    // Oldest first; per-rep totals add up; the payroll screen's outstanding figure agrees.
+    expect(a.rows[0].days).toBeGreaterThanOrEqual(a.rows.at(-1).days);
+    for (const rep of a.byRep) expect(rep.owed).toBeCloseTo(a.rows.filter((r: { repId: string }) => r.repId === rep.repId).reduce((s: number, r: { amount: number }) => s + r.amount, 0), 2);
+    // F3 is Zach's alone and the lender has not paid: it is owed, but waiting.
+    const f3 = a.rows.find((r: { dealId: string; repId: string }) => r.dealId === 'F3' && r.repId === 'rep-zach-sanders');
+    expect(f3).toBeTruthy();
+    expect(f3.waiting).toBeGreaterThan(0);
+    expect(f3.ready).toBe(0);
+    expect(a.byRep.find((r: { repId: string }) => r.repId === 'rep-zach-sanders').rows).toBeGreaterThan(0);
+  });
+});

@@ -12,9 +12,11 @@ import {
   collectedGross,
   dealCommissionStatus,
   outstandingGross,
+  collectedOf,
   outstandingOf,
   renewalOf,
   scheduleEvents,
+  segmentOf,
   segments,
   standingLines,
   sum,
@@ -24,9 +26,12 @@ import {
   type Deal,
   type LedgerContext,
   type Rep,
+  type SegmentKey,
 } from '@greystone/commission';
 import { HttpError } from '../http-error.js';
+import { payableFor } from '../payroll-views.js';
 import type { Repo, Settings } from '../repo.js';
+import { setCollection } from './deals.js';
 import { daysBetween } from './playbook-rules.js';
 
 export type AgeBucket = 'current' | '1-30' | '31-60' | '61-90' | '90+';
@@ -34,6 +39,9 @@ export const AGE_BUCKETS: AgeBucket[] = ['current', '1-30', '31-60', '61-90', '9
 
 export interface ReceivableRow {
   dealId: string;
+  /** Which segment and, on a schedule, which receipt — what "Received" posts back. */
+  segmentKey: SegmentKey;
+  event: { kind: 'upfront' | 'increment' | 'remainder'; n: number } | null;
   business: string;
   lender: string;
   product: string;
@@ -77,12 +85,12 @@ export function receivables(ctx: LedgerContext, settings: Settings, today: strin
         for (const e of events) {
           const expected = e.expected;
           const days = expected ? daysBetween(expected, today) : 0;
-          rows.push({ dealId: d.id, business: d.business, lender: d.lender, product: d.product, fundedDate: d.date, segment: seg.label, item: e.label, amount: e.amount, expected, daysOverdue: Math.max(0, days), bucket: bucketOf(days) });
+          rows.push({ dealId: d.id, segmentKey: seg.sk, event: { kind: e.kind, n: e.n }, business: d.business, lender: d.lender, product: d.product, fundedDate: d.date, segment: seg.label, item: e.label, amount: e.amount, expected, daysOverdue: Math.max(0, days), bucket: bucketOf(days) });
         }
       } else {
         const expected = addDays(seg.date, terms);
         const days = daysBetween(expected, today);
-        rows.push({ dealId: d.id, business: d.business, lender: d.lender, product: d.product, fundedDate: d.date, segment: seg.label, item: 'Commission', amount: outstandingOf(seg), expected, daysOverdue: Math.max(0, days), bucket: bucketOf(days) });
+        rows.push({ dealId: d.id, segmentKey: seg.sk, event: null, business: d.business, lender: d.lender, product: d.product, fundedDate: d.date, segment: seg.label, item: 'Commission', amount: outstandingOf(seg), expected, daysOverdue: Math.max(0, days), bucket: bucketOf(days) });
       }
     }
   }
@@ -293,3 +301,118 @@ export function overdueDealIds(ctx: LedgerContext, settings: Settings, today: st
 }
 
 export type { Deal };
+
+/* ---------- Receive a lender payment straight from the aging list ---------- */
+
+export interface ReceiveInput {
+  dealId?: unknown;
+  segmentKey?: unknown;
+  /** For incremental lenders: which scheduled receipt landed (upfront, increment n, or the final remainder). */
+  event?: { kind?: unknown; n?: unknown } | null;
+  /** Dollars received on a plain (non-scheduled) commission; defaults to everything outstanding. */
+  amount?: unknown;
+  /** The day the money landed; defaults to today. */
+  date?: unknown;
+}
+
+/**
+ * Books › Receivables: "Received" on a row. Lands the lender's payment on the
+ * deal through the single collection writer, so the receivable clears, the
+ * status re-derives, and the rep's lines become payable — exactly as if it
+ * had been recorded from the deal drawer.
+ */
+export async function receiveLenderPayment(repo: Repo, input: ReceiveInput, actorRepId: string, today: string): Promise<{ dealId: string; segmentKey: SegmentKey; applied: number }> {
+  const dealId = String(input.dealId ?? '').trim();
+  if (!dealId) throw new HttpError(400, 'dealId is required');
+  const segmentKey = String(input.segmentKey ?? 'base') as SegmentKey;
+  const date = input.date === undefined || input.date === null || input.date === '' ? today : String(input.date);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) throw new HttpError(400, 'date must be YYYY-MM-DD');
+  if (date > today) throw new HttpError(400, 'A receipt cannot be dated in the future');
+  const deal = (await repo.loadContext()).deals.find((d) => d.id === dealId);
+  if (!deal) throw new HttpError(404, `Deal ${dealId} not found`);
+  const seg = segmentOf(deal, segmentKey);
+  if (!seg) throw new HttpError(404, `Segment ${segmentKey} not found on ${dealId}`);
+  const before = collectedOf(seg);
+  const ev = input.event && typeof input.event === 'object' ? input.event : null;
+  if (ev) {
+    const kind = String(ev.kind ?? '');
+    if (kind === 'upfront') await setCollection(repo, dealId, { segmentKey, markUpfront: true, confirmedDate: date, confirmedSource: 'books' }, actorRepId);
+    else if (kind === 'remainder') await setCollection(repo, dealId, { segmentKey, markRemainder: true, confirmedDate: date, confirmedSource: 'books' }, actorRepId);
+    else if (kind === 'increment') {
+      const n = Number(ev.n);
+      const received = seg.schedule?.received ?? 0;
+      if (!Number.isInteger(n) || n < 1) throw new HttpError(400, 'Increment number is required');
+      if (n <= received) throw new HttpError(409, `Increment ${n} is already recorded as received`);
+      await setCollection(repo, dealId, { segmentKey, recordWeeks: n - received, confirmedDate: date, confirmedSource: 'books' }, actorRepId);
+    } else throw new HttpError(400, 'Unknown receipt kind');
+  } else {
+    const outstanding = outstandingOf(seg);
+    const amount = input.amount === undefined || input.amount === null || input.amount === '' ? outstanding : Number(input.amount);
+    if (!Number.isFinite(amount) || amount <= 0) throw new HttpError(400, 'Amount received must be a positive number');
+    if (amount > outstanding + 0.005) throw new HttpError(409, `${amount.toFixed(2)} is more than the ${outstanding.toFixed(2)} still outstanding on ${dealId}`);
+    await setCollection(repo, dealId, { segmentKey, dollars: cents(before + amount), confirmedDate: date, confirmedSource: 'books' }, actorRepId);
+  }
+  const after = segmentOf((await repo.loadContext()).deals.find((d) => d.id === dealId)!, segmentKey)!;
+  const applied = cents(collectedOf(after) - before);
+  await repo.writeAudit({ actorRepId, action: 'deal.collection', targetRepId: null, path: '/api/admin/books/receivables/receive', detail: { dealId, segmentKey, date, applied, event: ev ? { kind: String(ev.kind ?? ''), n: ev.n ?? null } : null } });
+  return { dealId, segmentKey, applied };
+}
+
+/* ---------- Rep payables, aged ---------- */
+
+export interface RepPayableAgingRow {
+  repId: string;
+  repName: string;
+  dealId: string;
+  business: string;
+  lender: string;
+  role: string;
+  segmentKey: string;
+  segmentLabel: string;
+  /** Unpaid to this rep on this row. */
+  amount: number;
+  /** The part backed by commission the lender has already paid: payable now. */
+  ready: number;
+  /** The part still waiting on the lender. */
+  waiting: number;
+  /** When the obligation began: the day the segment funded. */
+  since: string;
+  days: number;
+  bucket: AgeBucket;
+}
+
+export interface RepPayablesAging {
+  asOf: string;
+  rows: RepPayableAgingRow[];
+  total: number;
+  ready: number;
+  waiting: number;
+  byBucket: Record<AgeBucket, number>;
+  byRep: Array<{ repId: string; name: string; active: boolean; owed: number; ready: number; oldestDays: number; rows: number }>;
+}
+
+/** What the house owes each rep, line by line, aged from the day the deal funded. Ready = the lender has paid, so payroll can run it today. */
+export function repPayablesAging(ctx: LedgerContext, reps: Rep[], today: string): RepPayablesAging {
+  const byId = new Map(ctx.deals.map((d) => [d.id, d]));
+  const rows: RepPayableAgingRow[] = [];
+  for (const rep of reps) {
+    for (const l of payableFor(ctx, rep.id, today)) {
+      const d = byId.get(l.dealId);
+      if (!d || l.amount <= 0) continue;
+      const seg = segmentOf(d, l.segmentKey as SegmentKey);
+      const since = seg?.date ?? d.date;
+      const days = Math.max(0, daysBetween(since, today));
+      rows.push({ repId: rep.id, repName: rep.name, dealId: l.dealId, business: d.business, lender: d.lender, role: l.role, segmentKey: l.segmentKey, segmentLabel: l.segmentLabel, amount: cents(l.amount), ready: cents(l.collectedAmount), waiting: cents(l.uncollectedAmount), since, days, bucket: bucketOf(days) });
+    }
+  }
+  rows.sort((a, b) => b.days - a.days || b.amount - a.amount);
+  const byBucket = Object.fromEntries(AGE_BUCKETS.map((b) => [b, cents(sum(rows.filter((r) => r.bucket === b).map((r) => r.amount)))])) as Record<AgeBucket, number>;
+  const byRep = reps
+    .map((rep) => {
+      const rs = rows.filter((r) => r.repId === rep.id);
+      return { repId: rep.id, name: rep.name, active: rep.active, owed: cents(sum(rs.map((r) => r.amount))), ready: cents(sum(rs.map((r) => r.ready))), oldestDays: rs.length ? Math.max(...rs.map((r) => r.days)) : 0, rows: rs.length };
+    })
+    .filter((x) => x.rows > 0)
+    .sort((a, b) => b.owed - a.owed || a.name.localeCompare(b.name));
+  return { asOf: today, rows, total: cents(sum(rows.map((r) => r.amount))), ready: cents(sum(rows.map((r) => r.ready))), waiting: cents(sum(rows.map((r) => r.waiting))), byBucket, byRep };
+}

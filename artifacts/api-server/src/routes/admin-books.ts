@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { currentUser, requireRole } from '../auth/middleware.js';
 import { HttpError } from '../http-error.js';
 import type { Repo } from '../repo.js';
-import { booksCsv, cashView, exceptions, markPartnerPaid, partnerPayables, receivables } from '../services/books.js';
+import { booksCsv, cashView, exceptions, markPartnerPaid, partnerPayables, receivables, receiveLenderPayment, repPayablesAging } from '../services/books.js';
 import { addRepFile, fetchRepFile, removeRepFile } from '../services/notes.js';
 import { scorecards } from '../services/scorecards.js';
 import { cents, SYSTEM_CHART } from '@greystone/commission';
@@ -29,6 +29,17 @@ export function adminBooksRouter(repo: Repo): Router {
   r.get('/books/receivables', async (_req, res) => {
     const [ctx, settings] = await Promise.all([repo.loadContext(), repo.getSettings()]);
     res.json(receivables(ctx, settings, today()));
+  });
+  /** "Received" on a receivable row: the lender's money landed, dated. */
+  r.post('/books/receivables/receive', async (req, res) => {
+    const result = await receiveLenderPayment(repo, req.body ?? {}, actor(req), today());
+    const [ctx, settings] = await Promise.all([repo.loadContext(), repo.getSettings()]);
+    res.json({ ...result, receivables: receivables(ctx, settings, today()) });
+  });
+  /** What the house owes each rep, aged from the funded date. */
+  r.get('/books/rep-aging', async (_req, res) => {
+    const [ctx, reps] = await Promise.all([repo.loadContext(), repo.listReps()]);
+    res.json(repPayablesAging(ctx, reps, today()));
   });
   r.get('/books/partners', async (_req, res) => {
     const [ctx, settings] = await Promise.all([repo.loadContext(), repo.getSettings()]);

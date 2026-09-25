@@ -88,6 +88,6 @@ export function memoryRepo() {
     deals: deals.map((d) => ({ ...d, draws: [...d.draws] })),
     lines: [...lines],
     clawbacks: clawbacks.map((c) => ({ ...c })),
-    settings: { lenders: [...LENDERS], partners: [...PARTNERS], products: [...PRODUCTS], thresholds: THRESHOLDS, lists: LISTS, crm: { urlTemplate: 'https://crm.test/o/{id}' }, payroll: { cycle: 'Twice monthly' } },
+    settings: { lenders: [...LENDERS], partners: [...PARTNERS], products: [...PRODUCTS], thresholds: THRESHOLDS, lists: LISTS, crm: { urlTemplate: 'https://crm.test/o/{id}' }, payroll: { cycle: 'Twice monthly' }, security: { requireTotp: false, idleMinutes: 120, totpRememberDays: 7 } },
   });
 }

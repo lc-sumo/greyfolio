@@ -188,6 +188,6 @@ export function seedSettings(): Array<{ key: string; value: unknown }> {
     { key: 'payroll', value: { cycle: 'Twice monthly' } },
     { key: 'portal', value: { company: 'Greystone Merchant Partners', portal: 'Commission portal', supportEmail: '' } },
     { key: 'notifications', value: { statements: true, clawbacks: true, renewalDigest: true, digestHourUtc: 13, repQuestions: true } },
-    { key: 'security', value: { requireTotpForAdmins: false } },
+    { key: 'security', value: { requireTotp: true } },
   ];
 }

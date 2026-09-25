@@ -4,13 +4,15 @@ import { Shell } from '../components/Shell';
 import { Card, Drawer, Loading, Pill } from '../components/ui';
 import { FilesPanel } from '../components/FilesPanel';
 import { PlaybooksTab } from '../components/PlaybooksTab';
+import { AccountPanel } from '../components/Account';
 import { ImportReviewTab } from '../components/ImportReviewTab';
 import { DEMO, api, post, type ClawbackBasis, type Lender, type ProductRule, type ReferralPartner, type RemittancePreview, type RosterRep, type Settings as SettingsData, type Team, type Usage } from '../lib/api';
 import { compact, money, pct } from '../lib/format';
 import { useSession } from '../lib/session';
 
-type TabKey = 'portal' | 'lenders' | 'partners' | 'products' | 'teams' | 'reps' | 'crm' | 'playbooks' | 'review' | 'import' | 'remittance';
+type TabKey = 'account' | 'portal' | 'lenders' | 'partners' | 'products' | 'teams' | 'reps' | 'crm' | 'playbooks' | 'review' | 'import' | 'remittance';
 const TABS: Array<{ key: TabKey; label: string; hint: string }> = [
+  { key: 'account', label: 'My account', hint: 'Your own password and two-factor sign-in. Two-factor is required for every account; you reset a colleague\'s from Users.' },
   { key: 'portal', label: 'Portal', hint: 'Names, automatic emails, security and the dropdown lists — everything about how the portal itself behaves.' },
   { key: 'lenders', label: 'Lenders', hint: 'Each lender funds certain products and has its own clawback policy. Lenders that fund consolidations pay commission in increments; everyone else pays straight commission.' },
   { key: 'partners', label: 'Referral partners', hint: 'Fee % of gross commission and an optional monthly cap. Blank cap = uncapped.' },
@@ -83,6 +85,7 @@ export function Settings() {
           <div className="settings-content">
             {!ready ? <Loading error={settings.error ?? usage.error ?? teams.error ?? roster.error} /> : (
               <>
+                {tab === 'account' && <AccountPanel />}
                 {tab === 'portal' && <PortalTab settings={settings.data!} run={run} />}
                 {tab === 'lenders' && <LendersTab lenders={settings.data!.lenders} products={settings.data!.products} thresholds={settings.data!.thresholds} usage={usage.data!.lenders} run={run} />}
                 {tab === 'partners' && <PartnersTab partners={settings.data!.partners} usage={usage.data!.partners} run={run} />}
@@ -767,7 +770,7 @@ function PortalTab({ settings, run }: { settings: SettingsData; run: Run }) {
       </Card>
       <Card title="Security" extra={isSuper ? 'passwords and two-factor' : 'super admin only'}>
         {!isSuper && <div className="note" style={{ marginBottom: 10 }}>Only a super admin can change these. Yours is read-only.</div>}
-        <Toggle on={sec.requireTotpForAdmins} onChange={(v) => isSuper && setSec({ ...sec, requireTotpForAdmins: v })} label="Require two-factor for admins" hint="Admins who have not set up an authenticator are held at a setup screen until they do. Turn on your own first." />
+        <Toggle on={sec.requireTotp} onChange={(v) => isSuper && setSec({ ...sec, requireTotp: v })} label="Require two-factor for everyone" hint="On by default. Anyone who has not set up an authenticator is held at a setup screen until they do. Turn on your own first." />
         <label className="field" style={{ marginTop: 8 }}><span className="label">Sign out after inactivity</span>
           <select value={sec.idleMinutes} disabled={!isSuper} onChange={(e) => setSec({ ...sec, idleMinutes: Number(e.target.value) })}>
             {[[30, '30 minutes'], [60, '1 hour'], [120, '2 hours'], [240, '4 hours'], [480, '8 hours'], [0, 'Never']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -778,7 +781,7 @@ function PortalTab({ settings, run }: { settings: SettingsData; run: Run }) {
           <select value={sec.totpRememberDays} disabled={!isSuper} onChange={(e) => setSec({ ...sec, totpRememberDays: Number(e.target.value) })}>
             {[[0, 'Ask every sign-in'], [1, '1 day'], [7, '7 days'], [14, '14 days'], [30, '30 days']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
-          <span className="subtle" style={{ fontSize: 13 }}>The rep still types their password; the code is skipped on a remembered browser. Reps forget devices from the sidebar; resetting two-factor forgets them all.</span>
+          <span className="subtle" style={{ fontSize: 13 }}>The rep still types their password; the code is skipped on a remembered browser. Reps forget devices from My account; resetting two-factor forgets them all.</span>
         </label>
         <button className="btn primary" style={{ marginTop: 12 }} disabled={!isSuper} onClick={() => void run('Security saved', () => post('/api/admin/settings/security', sec, 'PUT'))}>Save security</button>
         <div className="subtle" style={{ fontSize: 13, marginTop: 10 }}>Passwords: 10+ characters with a letter and a number; five wrong tries lock an email for 15 minutes. Changing a password signs that account out everywhere else. Reps set and reset their own from the sign-in screen; you can also set one or send an invite under Reps.</div>

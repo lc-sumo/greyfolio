@@ -217,9 +217,9 @@ export function authRouter(config: AppConfig, repo: Repo, mailer: Mailer): Route
     const u = currentUser(req);
     if (!u) throw new HttpError(401, 'Sign in required');
     const settings = await repo.getSettings();
-    const mustEnrollTotp = u.role === 'admin' && settings.security.requireTotpForAdmins && !(await repo.getTotp(u.repId)).enabled;
+    const mustEnrollTotp = settings.security.requireTotp && !(await repo.getTotp(u.repId)).enabled;
     const me = await repo.findRep(u.repId);
-    res.json({ user: u, canViewAs: u.role === 'admin' || u.role === 'manager', oidc: !!config.oidc, devAuth: config.devAuth, password: config.passwordAuth, branding: settings.portal, mustEnrollTotp, idleMinutes: settings.security.idleMinutes, superAdmin: !!me?.superAdmin, canEmailMerchants: settings.permissions.merchantEmail && me?.perms?.merchantEmail !== false, canEditContacts: settings.permissions.contactEdit });
+    res.json({ user: u, canViewAs: u.role === 'admin' || u.role === 'manager', oidc: !!config.oidc, devAuth: config.devAuth, password: config.passwordAuth, branding: settings.portal, mustEnrollTotp, totpRequired: settings.security.requireTotp, idleMinutes: settings.security.idleMinutes, superAdmin: !!me?.superAdmin, canEmailMerchants: settings.permissions.merchantEmail && me?.perms?.merchantEmail !== false, canEditContacts: settings.permissions.contactEdit });
   });
 
   return r;

@@ -92,36 +92,37 @@ describe('Settings › Portal', () => {
   });
 });
 
-describe('required two-factor for admins', () => {
-  it('cannot be switched on by an admin who is not enrolled, then gates every admin route except enrolment', async () => {
+describe('required two-factor for everyone', () => {
+  it('cannot be switched on by an admin who is not enrolled, then gates every account except enrolment, and only admins can reset it', async () => {
     const { app, admin } = await harness();
-    expect((await admin.put('/api/admin/settings/security').send({ requireTotpForAdmins: true })).status).toBe(400);
+    expect((await admin.put('/api/admin/settings/security').send({ requireTotp: true })).status).toBe(400);
     // Enrol the switching admin first.
     const setup = await admin.post('/api/me/totp/setup');
     await admin.post('/api/me/totp/enable').send({ code: totpCode(setup.body.secret) });
-    const on = await admin.put('/api/admin/settings/security').send({ requireTotpForAdmins: true });
-    expect(on.body.security).toEqual({ requireTotpForAdmins: true, idleMinutes: 120, totpRememberDays: 7 });
-    expect((await admin.get('/auth/me')).body.mustEnrollTotp).toBe(false);
-    // A second admin without two-factor is held at the enrolment screen.
-    expect((await admin.patch('/api/admin/reps/rep-raymond-amato').send({ role: 'admin' })).status).toBe(200);
-    const ray = request.agent(app);
-    await ray.get('/auth/dev-login').query({ email: 'raymond.amato@greystoneus.com' });
-    expect((await ray.get('/auth/me')).body.mustEnrollTotp).toBe(true);
-    const blocked = await ray.get('/api/admin/settings');
-    expect(blocked.status).toBe(403);
-    expect(blocked.body.error).toMatch(/Two-factor sign-in is required/);
-    expect((await ray.get('/api/me/totp')).status).toBe(200);
-    const raySetup = await ray.post('/api/me/totp/setup');
-    expect(raySetup.status).toBe(200);
-    await ray.post('/api/me/totp/enable').send({ code: totpCode(raySetup.body.secret) });
-    expect((await ray.get('/api/admin/settings')).status).toBe(200);
-    expect((await ray.get('/auth/me')).body.mustEnrollTotp).toBe(false);
-    // Reps are never gated by the admin rule.
+    const on = await admin.put('/api/admin/settings/security').send({ requireTotp: true });
+    expect(on.body.security).toEqual({ requireTotp: true, idleMinutes: 120, totpRememberDays: 7 });
+    expect((await admin.get('/auth/me')).body).toMatchObject({ mustEnrollTotp: false, totpRequired: true });
+    // A rep without two-factor is held at the enrolment screen until they enrol.
     const rep = request.agent(app);
     await rep.get('/auth/dev-login').query({ email: 'julian.ribak@greystoneus.com' });
+    expect((await rep.get('/auth/me')).body.mustEnrollTotp).toBe(true);
+    const blocked = await rep.get('/api/me/deals');
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.error).toMatch(/Two-factor sign-in is required/);
+    expect((await rep.get('/api/me/totp')).status).toBe(200);
+    const repSetup = await rep.post('/api/me/totp/setup');
+    expect(repSetup.status).toBe(200);
+    await rep.post('/api/me/totp/enable').send({ code: totpCode(repSetup.body.secret) });
     expect((await rep.get('/api/me/deals')).status).toBe(200);
+    expect((await rep.get('/auth/me')).body.mustEnrollTotp).toBe(false);
+    // Nobody turns their own off while it is required; the admin resets it from Settings › Users and the rep must enrol again.
+    expect((await rep.post('/api/me/totp/disable').send({ code: totpCode(repSetup.body.secret) })).status).toBe(403);
+    expect((await admin.post('/api/me/totp/disable').send({ code: totpCode(setup.body.secret) })).status).toBe(403);
+    expect((await admin.delete('/api/admin/reps/rep-julian-ribak/totp')).status).toBe(200);
+    expect((await rep.get('/auth/me')).body.mustEnrollTotp).toBe(true);
     // Switching it off again lifts the gate.
-    await admin.put('/api/admin/settings/security').send({ requireTotpForAdmins: false });
-    expect((await admin.get('/api/admin/settings')).body.security).toEqual({ requireTotpForAdmins: false, idleMinutes: 120, totpRememberDays: 7 });
+    await admin.put('/api/admin/settings/security').send({ requireTotp: false });
+    expect((await admin.get('/api/admin/settings')).body.security).toEqual({ requireTotp: false, idleMinutes: 120, totpRememberDays: 7 });
+    expect((await rep.get('/api/me/deals')).status).toBe(200);
   });
 });

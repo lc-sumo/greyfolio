@@ -86,6 +86,8 @@ export function meRouter(repo: Repo, appName = 'Greystone Commission Portal', no
     res.json({ ok: true });
   });
   r.post('/totp/disable', async (req, res) => {
+    // While two-factor is required, nobody switches their own off; an admin resets a lost authenticator from Settings › Users.
+    if ((await repo.getSettings()).security.requireTotp) throw new HttpError(403, 'Two-factor is required on this portal — ask an admin to reset it if you lost your phone');
     await disableTotp(repo, self(req), req.body?.code);
     res.json({ ok: true, enabled: false });
   });

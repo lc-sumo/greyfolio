@@ -107,7 +107,8 @@ export interface Settings {
     playbookHourUtc: number;
   };
   security: {
-    requireTotpForAdmins: boolean;
+    /** Everyone must enrol an authenticator; only an admin can reset it (Settings › Users). */
+    requireTotp: boolean;
     /** Minutes of inactivity before a session is signed out; 0 = never. */
     idleMinutes: number;
     /** Days a device stays trusted after a two-factor sign-in; 0 = ask for a code every time. */
@@ -126,7 +127,7 @@ export const NOTIFICATION_DEFAULTS: Settings['notifications'] = {
   digestHourUtc: 13, repQuestions: true, playbookRepEmail: true,
   playbookAdminEmail: true, playbookHourUtc: 12,
 };
-export const SECURITY_DEFAULTS: Settings['security'] = { requireTotpForAdmins: false, idleMinutes: 120, totpRememberDays: 7 };
+export const SECURITY_DEFAULTS: Settings['security'] = { requireTotp: true, idleMinutes: 120, totpRememberDays: 7 };
 export { TEMPLATE_DEFAULTS } from './services/playbooks.js';
 
 /** A "forgot password" token on file (only its hash). */

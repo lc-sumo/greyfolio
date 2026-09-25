@@ -6,7 +6,7 @@ export type PayoutStatus = 'Paid' | 'Partially paid' | 'Owed' | 'Awaiting lender
 
 export interface SessionUser { repId: string; email: string; name: string; role: 'rep' | 'manager' | 'admin' }
 export interface Branding { company: string; portal: string; supportEmail: string }
-export interface AuthMe { user: SessionUser; canViewAs: boolean; oidc: boolean; devAuth: boolean; branding?: Branding; mustEnrollTotp?: boolean; idleMinutes?: number; superAdmin?: boolean; canEmailMerchants?: boolean; canEditContacts?: boolean }
+export interface AuthMe { user: SessionUser; canViewAs: boolean; oidc: boolean; devAuth: boolean; branding?: Branding; mustEnrollTotp?: boolean; totpRequired?: boolean; idleMinutes?: number; superAdmin?: boolean; canEmailMerchants?: boolean; canEditContacts?: boolean }
 export interface TrustedDeviceView { id: string; label: string; ip: string | null; location: string | null; createdAt: string; lastUsedAt: string; expiresAt: string; current: boolean }
 export interface RepRoleLine { role: Role; rate: number; amount: number; segment: string; segmentKey: string; paid: boolean; paidAmount: number; units: { paid: number; total: number; collected: number } | null }
 export interface SettlementSummary { finalized: boolean; reason: 'completed' | 'merchant_opted_out' | null; actualFunded: number; earnedGross: number; upfrontCredit: number; backendDue: number; recoverableOverpayment: number }
@@ -84,7 +84,7 @@ export interface Settings {
   crm: { urlTemplate: string }; payroll: { cycle: string };
   portal: Branding;
   notifications: { statements: boolean; payoutRecorded: boolean; clawbacks: boolean; renewalDigest: boolean; digestHourUtc: number; repQuestions: boolean; playbookRepEmail: boolean; playbookAdminEmail: boolean; playbookHourUtc: number };
-  security: { requireTotpForAdmins: boolean; idleMinutes: number; totpRememberDays: number };
+  security: { requireTotp: boolean; idleMinutes: number; totpRememberDays: number };
   templates: { merchant: MerchantTemplate[] };
   permissions: { merchantEmail: boolean; contactEdit: boolean };
 }

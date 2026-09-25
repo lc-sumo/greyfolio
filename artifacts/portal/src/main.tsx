@@ -9,7 +9,8 @@ import { Clawbacks } from './pages/Clawbacks';
 import { Dashboard } from './pages/Dashboard';
 import { Deals } from './pages/Deals';
 import { Login, ResetPassword } from './pages/Login';
-import { EnrollGate } from './components/Shell';
+import { EnrollGate } from './components/Account';
+import { Account } from './pages/Account';
 import { MasterDeals } from './pages/MasterDeals';
 import { Merchants } from './pages/Merchants';
 import { Overview } from './pages/Overview';
@@ -53,6 +54,7 @@ function App() {
       <Route path="/settings" element={!repMode && auth.user.role === 'admin' ? <Settings /> : <Navigate to="/" replace />} />
       <Route path="/audit" element={!repMode && auth.user.role === 'admin' ? <Audit /> : <Navigate to="/" replace />} />
       <Route path="/books" element={!repMode && auth.user.role === 'admin' ? <Books /> : <Navigate to="/" replace />} />
+      <Route path="/account" element={(!viewAs || viewAs === auth.user.repId) && auth.user.role !== 'admin' ? <Account /> : <Navigate to={auth.user.role === 'admin' && !viewAs ? '/settings' : '/'} replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

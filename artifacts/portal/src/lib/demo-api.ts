@@ -124,7 +124,7 @@ export async function demoFetch<T>(path: string, init: RequestInit, viewAs: stri
   if (p === '/auth/me') {
     if (!u) throw new ApiError(401, 'Sign in required');
     const meRep = d.reps.find((r) => r.id === u.repId);
-    return json({ user: u, canViewAs: u.role !== 'rep', oidc: false, devAuth: true, password: true, branding: settings.portal, mustEnrollTotp: false, idleMinutes: 0, superAdmin: !!meRep?.superAdmin, canEmailMerchants: settings.permissions.merchantEmail && meRep?.perms?.merchantEmail !== false, canEditContacts: settings.permissions.contactEdit });
+    return json({ user: u, canViewAs: u.role !== 'rep', oidc: false, devAuth: true, password: true, branding: settings.portal, mustEnrollTotp: false, totpRequired: false, idleMinutes: 0, superAdmin: !!meRep?.superAdmin, canEmailMerchants: settings.permissions.merchantEmail && meRep?.perms?.merchantEmail !== false, canEditContacts: settings.permissions.contactEdit });
   }
   if (p === '/auth/dev-login') {
     const email = (q.get('email') ?? '').trim().toLowerCase();
